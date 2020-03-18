@@ -373,7 +373,7 @@ HdEmbree3Renderer::Render(HdRenderThread *renderThread)
     _completedSamples.store(0);
 
     // Commit any pending changes to the scene.
-    rtcCommit(_scene);
+    rtcCommitScene(_scene);
 
     if (!_ValidateAovBindings()) {
         // We aren't going to render anything. Just mark all AOVs as converged
@@ -542,23 +542,23 @@ HdEmbree3Renderer::_RenderTiles(HdRenderThread *renderThread,
     }
 }
 
-/// Fill in an RTCRay structure from the given parameters.
+/// Fill in an RTCRayHit structure from the given parameters.
 static void
-_PopulateRay(RTCRay *ray, GfVec3f const& origin, 
+_PopulateRay(RTCRayHit *ray, GfVec3f const& origin, 
              GfVec3f const& dir, float nearest)
 {
-    ray->org[0] = origin[0];
-    ray->org[1] = origin[1];
-    ray->org[2] = origin[2];
-    ray->dir[0] = dir[0];
-    ray->dir[1] = dir[1];
-    ray->dir[2] = dir[2];
-    ray->tnear = nearest; 
-    ray->tfar = std::numeric_limits<float>::infinity();
-    ray->geomID = RTC_INVALID_GEOMETRY_ID;
-    ray->primID = RTC_INVALID_GEOMETRY_ID;
-    ray->mask = -1;
-    ray->time = 0.0f;
+    ray->ray.org_x = origin[0];
+    ray->ray.org_y = origin[1];
+    ray->ray.org_z = origin[2];
+    ray->ray.dir_x = dir[0];
+    ray->ray.dir_y = dir[1];
+    ray->ray.dir_z = dir[2];
+    ray->ray.tnear = nearest; 
+    ray->ray.tfar = std::numeric_limits<float>::infinity();
+    ray->hit.geomID = RTC_INVALID_GEOMETRY_ID;
+    ray->hit.primID = RTC_INVALID_GEOMETRY_ID;
+    ray->ray.mask = -1;
+    ray->ray.time = 0.0f;
 }
 
 /// Generate a random cosine-weighted direction ray (in the hemisphere
@@ -586,9 +586,12 @@ HdEmbree3Renderer::_TraceRay(unsigned int x, unsigned int y,
                             std::default_random_engine &random)
 {
     // Intersect the camera ray.
-    RTCRay ray;
+    RTCRayHit ray;
+    RTCIntersectContext context;
+    rtcInitIntersectContext(&context);
+
     _PopulateRay(&ray, origin, dir, 0.0f);
-    rtcIntersect(_scene, ray);
+    rtcIntersect1(_scene, &context, &ray);
 
     // Write AOVs to attachments that aren't converged.
     for (size_t i = 0; i < _aovBindings.size(); ++i) {
@@ -638,30 +641,31 @@ HdEmbree3Renderer::_TraceRay(unsigned int x, unsigned int y,
 }
 
 bool
-HdEmbree3Renderer::_ComputeId(RTCRay const& rayHit, TfToken const& idType,
+HdEmbree3Renderer::_ComputeId(RTCRayHit const& rayHit, TfToken const& idType,
                              int32_t *id)
 {
-    if (rayHit.geomID == RTC_INVALID_GEOMETRY_ID) {
+    if (rayHit.hit.geomID == RTC_INVALID_GEOMETRY_ID) {
         return false;
     }
 
+/*
     // Get the instance and prototype context structures for the hit prim.
     HdEmbree3InstanceContext *instanceContext =
         static_cast<HdEmbree3InstanceContext*>(
-            rtcGetUserData(_scene, rayHit.instID));
+            rtcGetUserData(_scene, rayHit.hit.instID));
 
     HdEmbree3PrototypeContext *prototypeContext =
         static_cast<HdEmbree3PrototypeContext*>(
-            rtcGetUserData(instanceContext->rootScene, rayHit.geomID));
+            rtcGetUserData(instanceContext->rootScene, rayHit.hit.geomID));
 
     if (idType == HdAovTokens->primId) {
         *id = prototypeContext->rprim->GetPrimId();
     } else if (idType == HdAovTokens->elementId) {
         if (prototypeContext->primitiveParams.empty()) {
-            *id = rayHit.primID;
+            *id = rayHit.hit.primID;
         } else {
             *id = HdMeshUtil::DecodeFaceIndexFromCoarseFaceParam(
-                prototypeContext->primitiveParams[rayHit.primID]);
+                prototypeContext->primitiveParams[rayHit.hit.primID]);
         }
     } else if (idType == HdAovTokens->instanceId) {
         *id = instanceContext->instanceId;
@@ -670,21 +674,23 @@ HdEmbree3Renderer::_ComputeId(RTCRay const& rayHit, TfToken const& idType,
     }
 
     return true;
+*/
+return false;
 }
 
 bool
-HdEmbree3Renderer::_ComputeDepth(RTCRay const& rayHit,
+HdEmbree3Renderer::_ComputeDepth(RTCRayHit const& rayHit,
                                 float *depth,
                                 bool clip)
 {
-    if (rayHit.geomID == RTC_INVALID_GEOMETRY_ID) {
+    if (rayHit.hit.geomID == RTC_INVALID_GEOMETRY_ID) {
         return false;
     }
 
     if (clip) {
-        GfVec3f hitPos = GfVec3f(rayHit.org[0] + rayHit.tfar * rayHit.dir[0],
-            rayHit.org[1] + rayHit.tfar * rayHit.dir[1],
-            rayHit.org[2] + rayHit.tfar * rayHit.dir[2]);
+        GfVec3f hitPos = GfVec3f(rayHit.ray.org_x + rayHit.ray.tfar * rayHit.ray.dir_x,
+            rayHit.ray.org_y + rayHit.ray.tfar * rayHit.ray.dir_y,
+            rayHit.ray.org_z + rayHit.ray.tfar * rayHit.ray.dir_z);
 
         hitPos = _viewMatrix.Transform(hitPos);
         hitPos = _projMatrix.Transform(hitPos);
@@ -692,32 +698,32 @@ HdEmbree3Renderer::_ComputeDepth(RTCRay const& rayHit,
         // For the depth range transform, we assume [0,1].
         *depth = (hitPos[2] + 1.0f) / 2.0f;
     } else {
-        *depth = rayHit.tfar;
+        *depth = rayHit.ray.tfar;
     }
     return true;
 }
 
 bool
-HdEmbree3Renderer::_ComputeNormal(RTCRay const& rayHit,
-                                 GfVec3f *normal,
+HdEmbree3Renderer::_ComputeNormal(RTCRayHit const& rayHit,
+                                 pxr::GfVec3f *normal,
                                  bool eye)
 {
-    if (rayHit.geomID == RTC_INVALID_GEOMETRY_ID) {
+    if (rayHit.hit.geomID == RTC_INVALID_GEOMETRY_ID) {
         return false;
     }
 
     HdEmbree3InstanceContext *instanceContext =
         static_cast<HdEmbree3InstanceContext*>(
-                rtcGetUserData(_scene, rayHit.instID));
+                rtcGetUserData(_scene, rayHit.hit.instID));
 
     HdEmbree3PrototypeContext *prototypeContext =
         static_cast<HdEmbree3PrototypeContext*>(
-                rtcGetUserData(instanceContext->rootScene, rayHit.geomID));
+                rtcGetUserData(instanceContext->rootScene, rayHit.hit.geomID));
 
-    GfVec3f n = -GfVec3f(rayHit.Ng[0], rayHit.Ng[1], rayHit.Ng[2]);
+    GfVec3f n = -GfVec3f(rayHit.hit.Ng[0], rayHit.hit.Ng[1], rayHit.hit.Ng[2]);
     if (prototypeContext->primvarMap.count(HdTokens->normals) > 0) {
         prototypeContext->primvarMap[HdTokens->normals]->Sample(
-                rayHit.primID, rayHit.u, rayHit.v, &n);
+                rayHit.hit.primID, rayHit.hit.u, rayHit.hit.v, &n);
     }
 
     n = instanceContext->objectToWorldMatrix.TransformDir(n);
@@ -731,37 +737,37 @@ HdEmbree3Renderer::_ComputeNormal(RTCRay const& rayHit,
 }
 
 bool
-HdEmbree3Renderer::_ComputePrimvar(RTCRay const& rayHit,
+HdEmbree3Renderer::_ComputePrimvar(RTCRayHit const& rayHit,
                                   TfToken const& primvar,
                                   GfVec3f *value)
 {
-    if (rayHit.geomID == RTC_INVALID_GEOMETRY_ID) {
+    if (rayHit.hit.geomID == RTC_INVALID_GEOMETRY_ID) {
         return false;
     }
 
     HdEmbree3InstanceContext *instanceContext =
         static_cast<HdEmbree3InstanceContext*>(
-                rtcGetUserData(_scene, rayHit.instID));
+                rtcGetUserData(_scene, rayHit.hit.instID));
 
     HdEmbree3PrototypeContext *prototypeContext =
         static_cast<HdEmbree3PrototypeContext*>(
-                rtcGetUserData(instanceContext->rootScene, rayHit.geomID));
+                rtcGetUserData(instanceContext->rootScene, rayHit.hit.geomID));
 
     // XXX: This is a little clunky, although sample will early out if the
     // types don't match.
     if (prototypeContext->primvarMap.count(primvar) > 0) {
         HdEmbree3PrimvarSampler *sampler = 
             prototypeContext->primvarMap[primvar];
-        if (sampler->Sample(rayHit.primID, rayHit.u, rayHit.v, value)) {
+        if (sampler->Sample(rayHit.hit.primID, rayHit.hit.u, rayHit.hit.v, value)) {
             return true;
         }
         GfVec2f v2;
-        if (sampler->Sample(rayHit.primID, rayHit.u, rayHit.v, &v2)) {
+        if (sampler->Sample(rayHit.hit.primID, rayHit.hit.u, rayHit.hit.v, &v2)) {
             value->Set(v2[0], v2[1], 0.0f);
             return true;
         }
         float v1;
-        if (sampler->Sample(rayHit.primID, rayHit.u, rayHit.v, &v1)) {
+        if (sampler->Sample(rayHit.hit.primID, rayHit.hit.u, rayHit.hit.v, &v1)) {
             value->Set(v1, 0.0f, 0.0f);
             return true;
         }
@@ -770,34 +776,34 @@ HdEmbree3Renderer::_ComputePrimvar(RTCRay const& rayHit,
 }
 
 GfVec4f
-HdEmbree3Renderer::_ComputeColor(RTCRay const& rayHit,
+HdEmbree3Renderer::_ComputeColor(RTCRayHit const& rayHit,
                                 std::default_random_engine &random,
                                 GfVec4f const& clearColor)
 {
-    if (rayHit.geomID == RTC_INVALID_GEOMETRY_ID) {
+    if (rayHit.hit.geomID == RTC_INVALID_GEOMETRY_ID) {
         return clearColor;
     }
 
     // Get the instance and prototype context structures for the hit prim.
     HdEmbree3InstanceContext *instanceContext =
         static_cast<HdEmbree3InstanceContext*>(
-                rtcGetUserData(_scene, rayHit.instID));
+                rtcGetUserData(_scene, rayHit.hit.instID));
 
     HdEmbree3PrototypeContext *prototypeContext =
         static_cast<HdEmbree3PrototypeContext*>(
-                rtcGetUserData(instanceContext->rootScene, rayHit.geomID));
+                rtcGetUserData(instanceContext->rootScene, rayHit.hit.geomID));
 
     // Compute the worldspace location of the rayHit hit.
-    GfVec3f hitPos = GfVec3f(rayHit.org[0] + rayHit.tfar * rayHit.dir[0],
-            rayHit.org[1] + rayHit.tfar * rayHit.dir[1],
-            rayHit.org[2] + rayHit.tfar * rayHit.dir[2]);
+    GfVec3f hitPos = GfVec3f(rayHit.ray.org_x + rayHit.ray.tfar * rayHit.ray.dir_x,
+            rayHit.ray.org_y + rayHit.ray.tfar * rayHit.ray.dir_y,
+            rayHit.ray.org_x + rayHit.ray.tfar * rayHit.ray.dir_z);
 
     // If a normal primvar is present (e.g. from smooth shading), use that
     // for shading; otherwise use the flat face normal.
-    GfVec3f normal = -GfVec3f(rayHit.Ng[0], rayHit.Ng[1], rayHit.Ng[2]);
+    GfVec3f normal = -GfVec3f(rayHit.hit.Ng_x, rayHit.hit.Ng_y, rayHit.hit.Ng_z);
     if (prototypeContext->primvarMap.count(HdTokens->normals) > 0) {
         prototypeContext->primvarMap[HdTokens->normals]->Sample(
-                rayHit.primID, rayHit.u, rayHit.v, &normal);
+                rayHit.hit.primID, rayHit.hit.u, rayHit.hit.v, &normal);
     }
 
     // If a color primvar is present, use that as diffuse color; otherwise,
@@ -806,7 +812,7 @@ HdEmbree3Renderer::_ComputeColor(RTCRay const& rayHit,
     if (_enableSceneColors &&
             prototypeContext->primvarMap.count(HdTokens->displayColor) > 0) {
         prototypeContext->primvarMap[HdTokens->displayColor]->Sample(
-                rayHit.primID, rayHit.u, rayHit.v, &color);
+                rayHit.hit.primID, rayHit.hit.u, rayHit.hit.v, &color);
     }
 
     // Transform the normal from object space to world space.
@@ -817,7 +823,7 @@ HdEmbree3Renderer::_ComputeColor(RTCRay const& rayHit,
 
     // Lighting model: (camera dot normal), i.e. diffuse-only point light
     // centered on the camera.
-    GfVec3f dir = GfVec3f(rayHit.dir[0], rayHit.dir[1], rayHit.dir[2]);
+    GfVec3f dir = GfVec3f(rayHit.ray.dir_x, rayHit.ray.dir_y, rayHit.ray.dir_z);
     float diffuseLight = fabs(GfDot(-dir, normal)) *
         HdEmbree3Config::GetInstance().cameraLightIntensity;
 
@@ -898,7 +904,7 @@ HdEmbree3Renderer::_ComputeAmbientOcclusion(GfVec3f const& position,
 
         // Trace shadow ray, using the fast interface (rtcOccluded) since
         // we only care about intersection status, not intersection id.
-        RTCRay shadow;
+        RTCRayHit shadow;
         _PopulateRay(&shadow, position, shadowDir, 0.001f);
         rtcOccluded(_scene, shadow);
 

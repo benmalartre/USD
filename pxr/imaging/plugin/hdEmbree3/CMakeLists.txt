@@ -1,7 +1,10 @@
 set(PXR_PREFIX pxr/imaging)
 set(PXR_PACKAGE hdEmbree3)
 
-if(NOT Embree3_FOUND)
+message("EMBREE3 INCLUDE DIR : ${EMBREE3_INCLUDE_DIR}")
+message("EMBREE3 LIBRARY : ${EMBREE3_LIBRARY}")
+
+if(NOT EMBREE3_FOUND)
     message(WARNING "Not building ${PXR_PACKAGE} because of missing dependency: Embree3")
     return()
 endif()
@@ -22,17 +25,17 @@ pxr_plugin(hdEmbree3
         hd
         hdx
         ${TBB_tbb_LIBRARY}
-        ${Embree3_LIBRARY}
+        ${EMBREE3_LIBRARY}
 
     INCLUDE_DIRS
         ${TBB_INCLUDE_DIRS}
-        ${Embree3_INCLUDE_DIR}
+        ${EMBREE3_INCLUDE_DIR}
 
     PUBLIC_CLASSES
         config
+        geometry
         instancer
         mesh
-        meshSamplers
         renderBuffer
         renderer
         rendererPlugin

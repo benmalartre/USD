@@ -586,9 +586,12 @@ HdEmbreeRenderer::_TraceRay(unsigned int x, unsigned int y,
                             std::default_random_engine &random)
 {
     // Intersect the camera ray.
-    RTCRay ray;
+    RTCRayHit ray;
+    RTCIntersectContext context;
+    rtcInitIntersectContext(&context);
+
     _PopulateRay(&ray, origin, dir, 0.0f);
-    rtcIntersect(_scene, ray);
+    rtcIntersect1(_scene, &context, ray);
 
     // Write AOVs to attachments that aren't converged.
     for (size_t i = 0; i < _aovBindings.size(); ++i) {
@@ -638,7 +641,7 @@ HdEmbreeRenderer::_TraceRay(unsigned int x, unsigned int y,
 }
 
 bool
-HdEmbreeRenderer::_ComputeId(RTCRay const& rayHit, TfToken const& idType,
+HdEmbreeRenderer::_ComputeId(RTCRayHit const& rayHit, TfToken const& idType,
                              int32_t *id)
 {
     if (rayHit.geomID == RTC_INVALID_GEOMETRY_ID) {
@@ -648,7 +651,7 @@ HdEmbreeRenderer::_ComputeId(RTCRay const& rayHit, TfToken const& idType,
     // Get the instance and prototype context structures for the hit prim.
     HdEmbreeInstanceContext *instanceContext =
         static_cast<HdEmbreeInstanceContext*>(
-            rtcGetUserData(_scene, rayHit.instID));
+            rtcGetUserData(_scene, rayHit.hit.instID));
 
     HdEmbreePrototypeContext *prototypeContext =
         static_cast<HdEmbreePrototypeContext*>(

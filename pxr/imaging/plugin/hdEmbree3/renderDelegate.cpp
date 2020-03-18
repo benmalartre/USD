@@ -70,22 +70,22 @@ HdEmbree3RenderDelegate::HandleRtcError(const RTCError code, const char* msg)
 {
     // Forward RTC error messages through to hydra logging.
     switch (code) {
-        case RTC_UNKNOWN_ERROR:
+        case RTC_ERROR_UNKNOWN:
             TF_CODING_ERROR("Embree3 unknown error: %s", msg);
             break;
-        case RTC_INVALID_ARGUMENT:
+        case RTC_ERROR_INVALID_ARGUMENT:
             TF_CODING_ERROR("Embree3 invalid argument: %s", msg);
             break;
-        case RTC_INVALID_OPERATION:
+        case RTC_ERROR_INVALID_OPERATION:
             TF_CODING_ERROR("Embree3 invalid operation: %s", msg);
             break;
-        case RTC_OUT_OF_MEMORY:
+        case RTC_ERROR_OUT_OF_MEMORY:
             TF_CODING_ERROR("Embree3 out of memory: %s", msg);
             break;
-        case RTC_UNSUPPORTED_CPU:
+        case RTC_ERROR_UNSUPPORTED_CPU:
             TF_CODING_ERROR("Embree3 unsupported CPU: %s", msg);
             break;
-        case RTC_CANCELLED:
+        case RTC_ERROR_CANCELLED:
             TF_CODING_ERROR("Embree3 cancelled: %s", msg);
             break;
         default:
@@ -194,8 +194,8 @@ HdEmbree3RenderDelegate::~HdEmbree3RenderDelegate()
 
     // Destroy embree library and scene state.
     _renderParam.reset();
-    rtcDeleteScene(_rtcScene);
-    rtcDeleteDevice(_rtcDevice);
+    rtcReleaseScene(_rtcScene);
+    rtcReleaseDevice(_rtcDevice);
 }
 
 HdRenderSettingDescriptorList

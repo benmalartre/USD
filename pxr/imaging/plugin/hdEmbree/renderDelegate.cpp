@@ -137,7 +137,7 @@ HdEmbreeRenderDelegate::_Initialize()
     _rtcDevice = rtcNewDevice(nullptr);
 
     // Register our error message callback.
-    rtcDeviceSetErrorFunction(_rtcDevice, HandleRtcError);
+    rtcSetDeviceErrorFunction(_rtcDevice, HandleRtcError, NULL);
 
     // Embree has an internal cache for subdivision surface computations.
     // HdEmbree exposes the size as an environment variable.

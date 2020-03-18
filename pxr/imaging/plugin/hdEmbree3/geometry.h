@@ -21,8 +21,8 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-#ifndef PXR_IMAGING_PLUGIN_HD_EMBREE3_MESH_SAMPLERS_H
-#define PXR_IMAGING_PLUGIN_HD_EMBREE3_MESH_SAMPLERS_H
+#ifndef PXR_IMAGING_PLUGIN_HD_EMBREE3_GEOMETRY_H
+#define PXR_IMAGING_PLUGIN_HD_EMBREE3_GEOMETRY_H
 
 #include "pxr/pxr.h"
 #include "pxr/imaging/plugin/hdEmbree3/sampler.h"
@@ -45,23 +45,43 @@ PXR_NAMESPACE_OPEN_SCOPE
 ///
 /// Utility class to track which embree user vertex buffers are currently
 /// in use.
-class HdEmbree3RTCBufferAllocator
+class HdEmbree3RTCGeometry
 {
 public:
-    /// Constructor. By default, set everything to unallocated. 
-    HdEmbree3RTCBufferAllocator()
-        : _bitset(0) {}
+    /// Constructor
+    HdEmbree3RTCGeometry(RTCDevice device, RTCGeometryType type)
+        : _bitset(0) 
+        , _type(type)
+        , _geom(rtcNewGeometry(device, type)){};
 
-    /// Allocate a buffer by finding the first clear bit, using that as
+    /// Destructor
+    ~HdEmbree3RTCGeometry();
+
+    /// Get underlying RTCGeometry
+    RTCGeometry Get(){return _geom;};
+
+    /// Get geometry ID in RTCScene
+    int GetId(){return _geomId;};
+
+    /// Get next free slot by finding the first clear bit, using that as
     /// the buffer number, and setting the bit to mark it as used.
     /// \return An unused RTC user vertex buffer id, or -1 on failure.
-    RTCBufferType Allocate();
+    int GetSlot();
+
+    /// Get format for this slot
+    /// \return An RTC_FLOAT_FORMAT specific for this slot
+    RTCFormat GetFormat(const HdVtBufferSource& buffer);
+
+    void Commit(RTCScene scene);
 
     /// Free a buffer by clearing its bit.
     /// \param buffer The buffer to mark as unused.
-    void Free(RTCBufferType buffer);
+    void Free(int buffer);
 private:
-    std::bitset<RTC_MAX_USER_VERTEX_BUFFERS> _bitset;
+    std::bitset<RTC_MAX_USER_VERTEX_BUFFERS>  _bitset;
+    RTCGeometryType                           _type;
+    RTCGeometry                               _geom;
+    int                                       _geomId;
 };
 
 // ----------------------------------------------------------------------
@@ -271,13 +291,11 @@ public:
     /// \param name The name of the primvar.
     /// \param value The buffer data for the primvar.
     /// \param meshScene The owning mesh's embree prototype scene.
-    /// \param meshId The owning mesh's geometry id in the prototype scene.
-    /// \param allocator A mesh-global object that tracks buffer usage.
+    /// \param geometry The RTCGeometry 
     HdEmbree3SubdivVertexSampler(TfToken const& name,
                                 VtValue const& value,
                                 RTCScene meshScene,
-                                unsigned meshId,
-                                HdEmbree3RTCBufferAllocator *allocator);
+                                HdEmbree3RTCGeometry *geometry);
 
     /// Destructor. Frees the embree user vertex buffer.
     virtual ~HdEmbree3SubdivVertexSampler();
@@ -296,11 +314,11 @@ public:
                         HdTupleType dataType) const;
 
 private:
-    RTCBufferType _embreeBufferId;
+    int _slotId;
+    int _slotFormat;
     HdVtBufferSource const _buffer;
     RTCScene _meshScene;
-    unsigned _meshId;
-    HdEmbree3RTCBufferAllocator *_allocator;
+    HdEmbree3RTCGeometry *_geometry;
 };
 
 PXR_NAMESPACE_CLOSE_SCOPE

@@ -30,7 +30,7 @@
 #include "pxr/imaging/hd/vertexAdjacency.h"
 #include "pxr/base/gf/matrix4f.h"
 
-#include "pxr/imaging/plugin/hdEmbree3/meshSamplers.h"
+#include "pxr/imaging/plugin/hdEmbree3/geometry.h"
 
 #include <embree3/rtcore.h>
 #include <embree3/rtcore_ray.h>
@@ -247,7 +247,7 @@ private:
 
     // An object used to manage allocation of embree user vertex buffers to
     // primvars.
-    HdEmbree3RTCBufferAllocator _embreeBufferAllocator;
+    HdEmbree3RTCGeometry* _geometry;
 
     // This class does not support copying.
     HdEmbree3Mesh(const HdEmbree3Mesh&)             = delete;

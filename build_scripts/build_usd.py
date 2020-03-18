@@ -1264,9 +1264,17 @@ def InstallUSD(context, force, buildArgs):
                 if context.embreeLocation:
                     extraArgs.append('-DEMBREE_LOCATION="{location}"'
                                      .format(location=context.embreeLocation))
-                extraArgs.append('-DPXR_BUILD_EMBREE_PLUGIN=ON')
+                extraArgs.append('-DPXR_BUILD_EMBREE_PLUGIN=TRUE')
             else:
-                extraArgs.append('-DPXR_BUILD_EMBREE_PLUGIN=OFF')
+                extraArgs.append('-DPXR_BUILD_EMBREE_PLUGIN=FALSE')
+            
+            if context.buildEmbree3:
+                if context.embree3Location:
+                    extraArgs.append('-DEMBREE3_LOCATION="{location}"'
+                                     .format(location=context.embree3Location))
+                extraArgs.append('-DPXR_BUILD_EMBREE3_PLUGIN=TRUE')
+            else:
+                extraArgs.append('-DPXR_BUILD_EMBREE3_PLUGIN=FALSE')
 
             if context.buildPrman:
                 if context.prmanLocation:
@@ -1518,6 +1526,14 @@ subgroup.add_argument("--no-embree", dest="build_embree", action="store_false",
 group.add_argument("--embree-location", type=str,
                    help="Directory where Embree is installed.")
 subgroup = group.add_mutually_exclusive_group()
+subgroup.add_argument("--embree3", dest="build_embree3", action="store_true",
+                      default=False,
+                      help="Build Embree3 sample imaging plugin")
+subgroup.add_argument("--no-embree3", dest="build_embree3", action="store_false",
+                      help="Do not build Embree3 sample imaging plugin (default)")
+group.add_argument("--embree3-location", type=str,
+                   help="Directory where Embree3 is installed.")
+subgroup = group.add_mutually_exclusive_group()
 subgroup.add_argument("--prman", dest="build_prman", action="store_true",
                       default=False,
                       help="Build Pixar's RenderMan imaging plugin")
@@ -1670,6 +1686,9 @@ class InstallContext:
         self.buildEmbree = self.buildImaging and args.build_embree
         self.embreeLocation = (os.path.abspath(args.embree_location)
                                if args.embree_location else None)
+        self.buildEmbree3 = self.buildImaging and args.build_embree3
+        self.embree3Location = (os.path.abspath(args.embree3_location)
+                               if args.embree3_location else None)
         self.buildPrman = self.buildImaging and args.build_prman
         self.prmanLocation = (os.path.abspath(args.prman_location)
                                if args.prman_location else None)                               

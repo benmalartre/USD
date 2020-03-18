@@ -34,7 +34,6 @@
 #include "pxr/imaging/pxOsd/tokens.h"
 #include "pxr/base/gf/matrix4f.h"
 #include "pxr/base/gf/matrix4d.h"
-
 #include <algorithm> // sort
 
 PXR_NAMESPACE_OPEN_SCOPE
@@ -63,7 +62,7 @@ HdEmbree3Mesh::Finalize(HdRenderParam *renderParam)
         // Delete the instance context first...
         delete _GetInstanceContext(scene, i);
         // ...then the instance object in the top-level scene.
-        rtcDeleteGeometry(scene, _rtcInstanceIds[i]);
+        rtcReleaseGeometry(_geometry->Get());
     }
     _rtcInstanceIds.clear();
 
@@ -76,10 +75,10 @@ HdEmbree3Mesh::Finalize(HdRenderParam *renderParam)
             }
             delete _GetPrototypeContext();
             // ... then the geometry object in the prototype scene...
-            rtcDeleteGeometry(_rtcMeshScene, _rtcMeshId);
+            rtcReleaseGeometry(_geometry->Get());
         }
         // ... then the prototype scene.
-        rtcDeleteScene(_rtcMeshScene);
+        rtcReleaseScene(_rtcMeshScene);
     }
     _rtcMeshId = RTC_INVALID_GEOMETRY_ID;
     _rtcMeshScene = nullptr;
@@ -159,7 +158,7 @@ HdEmbree3Mesh::Sync(HdSceneDelegate *sceneDelegate,
 
 /* static */
 void
-HdEmbree3Mesh::_Embree3CullFaces(void *userData, RTCRay &ray)
+HdEmbree3Mesh::_Embree3CullFaces(void *userData, RTCRayHit &ray)
 {
     // Note: this is called to filter every candidate ray hit
     // with the bound object, so this function should be fast.
@@ -172,9 +171,9 @@ HdEmbree3Mesh::_Embree3CullFaces(void *userData, RTCRay &ray)
     HdEmbree3Mesh *mesh = static_cast<HdEmbree3Mesh*>(ctx->rprim);
 
     // Calculate whether the provided hit is a front-face or back-face.
-    bool isFrontFace = (ray.Ng[0] * ray.dir[0] + 
-                        ray.Ng[1] * ray.dir[1] +
-                        ray.Ng[2] * ray.dir[2]) > 0;
+    bool isFrontFace = (ray.hit.Ng_x * ray.dir.dir_x + 
+                        ray.hit.Ng_y * ray.dir.dir_y +
+                        ray.hit.Ng_z * ray.dir.dir_z) > 0;
 
     // Determine if we should ignore this hit. HdCullStyleBack means
     // cull back faces.
@@ -234,6 +233,7 @@ HdEmbree3Mesh::_CreateEmbree3SubdivMesh(RTCScene scene)
         numVertexCreases = 0;
     }
 
+    RTCGeometry subdivMesh = rtcNewGeometry(device, RTC_GEOMETRY_TYPE_SUBDIVISION);
     // Populate an embree subdiv object.
     _rtcMeshId = rtcNewSubdivisionMesh(scene, RTC_GEOMETRY_DEFORMABLE,
         // numFaces is the size of RTC_FACE_BUFFER, which contains
@@ -451,7 +451,7 @@ HdEmbree3Mesh::_CreatePrimvarSampler(TfToken const& name, VtValue const& data,
         case HdInterpolationVertex:
             if (refined) {
                 sampler = new HdEmbree3SubdivVertexSampler(name, data,
-                    _rtcMeshScene, _rtcMeshId, &_embreeBufferAllocator);
+                    _rtcMeshScene, _rtcMeshId, _geometry);
             } else {
                 sampler = new HdEmbree3TriangleVertexSampler(name, data,
                     _triangulatedIndices);
@@ -463,7 +463,7 @@ HdEmbree3Mesh::_CreatePrimvarSampler(TfToken const& name, VtValue const& data,
                 // the context of subdiv meshes means bilinear interpolation,
                 // not reconstruction from the subdivision basis.
                 sampler = new HdEmbree3SubdivVertexSampler(name, data,
-                    _rtcMeshScene, _rtcMeshId, &_embreeBufferAllocator);
+                    _rtcMeshScene, _rtcMeshId, _geometry);
             } else {
                 sampler = new HdEmbree3TriangleVertexSampler(name, data,
                     _triangulatedIndices);
@@ -615,14 +615,13 @@ HdEmbree3Mesh::_PopulateRtMesh(HdSceneDelegate* sceneDelegate,
             }
             delete _GetPrototypeContext();
             // then the prototype geometry.
-            rtcDeleteGeometry(_rtcMeshScene, _rtcMeshId);
+            rtcReleaseGeometry(_geometry->Get());
             _rtcMeshId = RTC_INVALID_GEOMETRY_ID;
         }
 
         // Create the prototype mesh scene, if it doesn't exist yet.
         if (_rtcMeshScene == nullptr) {
-            _rtcMeshScene = rtcDeviceNewScene(device, RTC_SCENE_DYNAMIC,
-                RTC_INTERSECT1 | RTC_INTERPOLATE);
+            _rtcMeshScene = rtcNewScene(device);
         }
 
         // Populate either a subdiv or a triangle mesh object. The helper
@@ -637,16 +636,15 @@ HdEmbree3Mesh::_PopulateRtMesh(HdSceneDelegate* sceneDelegate,
 
         // Prototype geometry gets tagged with a prototype context, that the
         // ray-hit algorithm can use to look up data.
-        rtcSetUserData(_rtcMeshScene, _rtcMeshId,
-            new HdEmbree3PrototypeContext);
+        rtcSetGeometryUserData(_geometry->Get(), new HdEmbree3PrototypeContext);
         _GetPrototypeContext()->rprim = this;
         _GetPrototypeContext()->primitiveParams = (_refined ?
             _trianglePrimitiveParams : VtIntArray());
 
         // Add _Embree3CullFaces as a filter function for backface culling.
-        rtcSetIntersectionFilterFunction(_rtcMeshScene, _rtcMeshId,
+        rtcSetGeometryIntersectedFilterFunction(_geometry->Get(),
             _Embree3CullFaces);
-        rtcSetOcclusionFilterFunction(_rtcMeshScene, _rtcMeshId,
+        rtcSetGeometryOccludedFilterFunction(_geometry->Get(),
             _Embree3CullFaces);
 
         // Force the smooth normals code to rebuild the "normals" primvar the
@@ -670,8 +668,8 @@ HdEmbree3Mesh::_PopulateRtMesh(HdSceneDelegate* sceneDelegate,
             if (tessellationRate == 1) {
                 tessellationRate++;
             }
-            rtcSetTessellationRate(_rtcMeshScene, _rtcMeshId,
-                static_cast<float>(tessellationRate));
+            rtcSetGeometryTessellationRate(_geometry->Get(),
+              static_cast<float>(tessellationRate));
         }
     }
 

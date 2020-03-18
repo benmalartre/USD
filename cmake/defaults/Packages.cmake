@@ -134,6 +134,10 @@ if (PXR_BUILD_IMAGING)
     if (PXR_BUILD_EMBREE_PLUGIN)
         find_package(Embree REQUIRED)
     endif()
+    # --Embree3
+    if (PXR_BUILD_EMBREE3_PLUGIN)
+        find_package(EMBREE3 REQUIRED)
+    endif()
 endif()
 
 if (PXR_BUILD_USDVIEW)
