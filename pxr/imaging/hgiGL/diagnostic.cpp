@@ -151,7 +151,7 @@ HgiGLMeetsMinimumRequirements()
         glVersion = major * 100 + minor * 10;
     }
 
-    return (glVersion >= 330);
+    return (glVersion >= 450);
 }
 
 PXR_NAMESPACE_CLOSE_SCOPE
