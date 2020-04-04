@@ -106,7 +106,7 @@ HdStExtCompGpuComputation::Execute(
     glUseProgram(kernel);
 
     HdStBufferArrayRangeGLSharedPtr outputBar =
-        boost::static_pointer_cast<HdStBufferArrayRangeGL>(outputRange);
+        std::static_pointer_cast<HdStBufferArrayRangeGL>(outputRange);
     TF_VERIFY(outputBar);
 
     // Prepare uniform buffer for GPU computation
@@ -134,7 +134,7 @@ HdStExtCompGpuComputation::Execute(
 
     for (HdBufferArrayRangeSharedPtr const & input: _resource->GetInputs()) {
         HdStBufferArrayRangeGLSharedPtr const & inputBar =
-            boost::static_pointer_cast<HdStBufferArrayRangeGL>(input);
+            std::static_pointer_cast<HdStBufferArrayRangeGL>(input);
 
         for (HdStBufferResourceGLNamedPair const & it:
                         inputBar->GetResources()) {
@@ -197,7 +197,7 @@ HdStExtCompGpuComputation::Execute(
     }
     for (HdBufferArrayRangeSharedPtr const & input: _resource->GetInputs()) {
         HdStBufferArrayRangeGLSharedPtr const & inputBar =
-            boost::static_pointer_cast<HdStBufferArrayRangeGL>(input);
+            std::static_pointer_cast<HdStBufferArrayRangeGL>(input);
 
         for (HdStBufferResourceGLNamedPair const & it:
                         inputBar->GetResources()) {
@@ -254,7 +254,7 @@ HdStExtCompGpuComputation::CreateGpuComputation(
     // Downcast the resource registry
     HdRenderIndex &renderIndex = sceneDelegate->GetRenderIndex();
     HdStResourceRegistrySharedPtr const& resourceRegistry = 
-        boost::dynamic_pointer_cast<HdStResourceRegistry>(
+        std::dynamic_pointer_cast<HdStResourceRegistry>(
                               renderIndex.GetResourceRegistry());
 
     HdStComputeShaderSharedPtr shader(new HdStComputeShader());
@@ -318,10 +318,10 @@ HdSt_GetExtComputationPrimvarsComputations(
     HdSceneDelegate *sceneDelegate,
     HdExtComputationPrimvarDescriptorVector const& allCompPrimvars,
     HdDirtyBits dirtyBits,
-    HdBufferSourceVector *sources,
-    HdBufferSourceVector *reserveOnlySources,
-    HdBufferSourceVector *separateComputationSources,
-    HdComputationVector *computations)
+    HdBufferSourceSharedPtrVector *sources,
+    HdBufferSourceSharedPtrVector *reserveOnlySources,
+    HdBufferSourceSharedPtrVector *separateComputationSources,
+    HdComputationSharedPtrVector *computations)
 {
     TF_VERIFY(sources);
     TF_VERIFY(reserveOnlySources);
@@ -373,7 +373,7 @@ HdSt_GetExtComputationPrimvarsComputations(
 
                         HdBufferSourceSharedPtr gpuComputationSource(
                                 new HdStExtCompGpuComputationBufferSource(
-                                    HdBufferSourceVector(),
+                                    HdBufferSourceSharedPtrVector(),
                                     gpuComputation->GetResource()));
 
                         separateComputationSources->push_back(

@@ -42,6 +42,8 @@ PXR_NAMESPACE_OPEN_SCOPE
 /// Describes the properties needed to create a GPU shader program.
 ///
 /// <ul>
+/// <li>debugName:
+///   This label can be applied as debug label for gpu debugging.</li>
 /// <li>shaderFunctions:
 ///   Holds handles to shader functions for each shader stage.</li>
 /// </ul>
@@ -112,8 +114,8 @@ private:
 
 /// Explicitly instantiate and define ShaderProgram handle
 template class HgiHandle<class HgiShaderProgram>;
-typedef HgiHandle<class HgiShaderProgram> HgiShaderProgramHandle;
-typedef std::vector<HgiShaderProgramHandle> HgiShaderProgramHandleVector;
+using HgiShaderProgramHandle = HgiHandle<class HgiShaderProgram>;
+using HgiShaderProgramHandleVector = std::vector<HgiShaderProgramHandle>;
 
 
 PXR_NAMESPACE_CLOSE_SCOPE

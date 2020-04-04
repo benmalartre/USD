@@ -66,14 +66,16 @@ class VtValue;
 class HdInstancer;
 class HdDriver;
 
-typedef boost::shared_ptr<class HdDirtyList> HdDirtyListSharedPtr;
-typedef boost::shared_ptr<class HdTask> HdTaskSharedPtr;
-typedef boost::shared_ptr<class HdResourceRegistry> HdResourceRegistrySharedPtr;
-typedef std::vector<HdTaskSharedPtr> HdTaskSharedPtrVector;
-typedef std::unordered_map<TfToken,
+using HdDirtyListSharedPtr = std::shared_ptr<class HdDirtyList>;
+
+using HdTaskSharedPtr = std::shared_ptr<class HdTask>;
+
+using HdResourceRegistrySharedPtr = std::shared_ptr<class HdResourceRegistry>;
+using HdTaskSharedPtrVector = std::vector<HdTaskSharedPtr>;
+using HdTaskContext = std::unordered_map<TfToken,
                            VtValue,
-                           TfToken::HashFunctor> HdTaskContext;
-typedef std::vector<HdDriver*> HdDriverVector;
+                           TfToken::HashFunctor>;
+using HdDriverVector = std::vector<HdDriver*>;
 
 /// \class HdRenderIndex
 ///
@@ -510,7 +512,7 @@ HdRenderIndex::InsertTask(HdSceneDelegate* delegate, SdfPath const& id)
     HD_TRACE_FUNCTION();
     HF_MALLOC_TAG_FUNCTION();
 
-    HdTaskSharedPtr task = boost::make_shared<T>(delegate, id);
+    HdTaskSharedPtr task = std::make_shared<T>(delegate, id);
     _TrackDelegateTask(delegate, id, task);
 }
 

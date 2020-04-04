@@ -1314,12 +1314,12 @@ SdfLayer::_PrimSetTimeSample(const SdfPath& path, double time,
                              const T& value,
                              bool useDelegate)
 {
-    SdfChangeBlock block;
-
     if (useDelegate && TF_VERIFY(_stateDelegate)) {
         _stateDelegate->SetTimeSample(path, time, value);
         return;
     }
+
+    SdfChangeBlock block;
 
     // TODO(USD):optimization: Analyze the affected time interval.
     Sdf_ChangeManager::Get().DidChangeAttributeTimeSamples(_self, path);
@@ -1571,7 +1571,22 @@ SdfLayer::SetTimeCodesPerSecond( double newVal )
 double
 SdfLayer::GetTimeCodesPerSecond() const
 {
-    return _GetValue<double>(SdfFieldKeys->TimeCodesPerSecond);
+    // If there is an authored value for timeCodesPerSecond, return that.
+    VtValue value;
+    if (HasField(
+            SdfPath::AbsoluteRootPath(),
+            SdfFieldKeys->TimeCodesPerSecond,
+            &value)) {
+        return value.Get<double>();
+    }
+
+    // Otherwise return framesPerSecond as a dynamic fallback.  This allows
+    // layers to lock framesPerSecond and timeCodesPerSecond together by
+    // specifying only framesPerSecond.
+    //
+    // If neither field has an authored value, this will return 24, which is the
+    // final fallback value for both fields.
+    return GetFramesPerSecond();
 }
 
 bool
@@ -3636,9 +3651,6 @@ SdfLayer::_PrimSetField(const SdfPath& path,
                         const VtValue *oldValuePtr,
                         bool useDelegate)
 {
-    // Send notification when leaving the change block.
-    SdfChangeBlock block;
-
     if (useDelegate && TF_VERIFY(_stateDelegate)) {
         _stateDelegate->SetField(path, fieldName, value, oldValuePtr);
         return;
@@ -3647,6 +3659,9 @@ SdfLayer::_PrimSetField(const SdfPath& path,
     const VtValue& oldValue =
         oldValuePtr ? *oldValuePtr : GetField(path, fieldName);
     const VtValue& newValue = _GetVtValue(value);
+
+    // Send notification when leaving the change block.
+    SdfChangeBlock block;
 
     Sdf_ChangeManager::Get().DidChangeField(
         _self, path, fieldName, oldValue, newValue);
@@ -3766,14 +3781,14 @@ SdfLayer::_PrimSetFieldDictValueByKey(const SdfPath& path,
                                       const VtValue *oldValuePtr,
                                       bool useDelegate)
 {
-    // Send notification when leaving the change block.
-    SdfChangeBlock block;
-
     if (useDelegate && TF_VERIFY(_stateDelegate)) {
         _stateDelegate->SetFieldDictValueByKey(
             path, fieldName, keyPath, value, oldValuePtr);
         return;
     }
+
+    // Send notification when leaving the change block.
+    SdfChangeBlock block;
 
     // This can't only use oldValuePtr currently, since we need the entire
     // dictionary, not just they key being set.  If we augment change
@@ -3853,13 +3868,12 @@ void
 SdfLayer::_PrimMoveSpec(const SdfPath& oldPath, const SdfPath& newPath,
                         bool useDelegate)
 {
-    SdfChangeBlock block;
-
     if (useDelegate && TF_VERIFY(_stateDelegate)) {
         _stateDelegate->MoveSpec(oldPath, newPath);
         return;
     }
 
+    SdfChangeBlock block;
 
     Sdf_ChangeManager::Get().DidMoveSpec(_self, oldPath, newPath);
 
@@ -4016,12 +4030,12 @@ _EraseSpecAtPath(SdfAbstractData* data, const SdfPath& path)
 void
 SdfLayer::_PrimDeleteSpec(const SdfPath &path, bool inert, bool useDelegate)
 {
-    SdfChangeBlock block;
-
     if (useDelegate && TF_VERIFY(_stateDelegate)) {
         _stateDelegate->DeleteSpec(path, inert);
         return;
     }
+
+    SdfChangeBlock block;
 
     Sdf_ChangeManager::Get().DidRemoveSpec(_self, path, inert);
 
@@ -4035,13 +4049,13 @@ SdfLayer::_PrimCreateSpec(const SdfPath &path,
                           SdfSpecType specType, bool inert,
                           bool useDelegate)
 {
-    SdfChangeBlock block;
-    
     if (useDelegate && TF_VERIFY(_stateDelegate)) {
         _stateDelegate->CreateSpec(path, specType, inert);
         return;
     }
 
+    SdfChangeBlock block;
+    
     Sdf_ChangeManager::Get().DidAddSpec(_self, path, inert);
 
     _data->CreateSpec(path, specType);

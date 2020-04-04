@@ -26,18 +26,22 @@
 
 #include "pxr/pxr.h"
 #include "pxr/imaging/hgi/api.h"
+#include <memory>
 
 PXR_NAMESPACE_OPEN_SCOPE
 
 struct HgiTextureGpuToCpuOp;
+struct HgiBufferCpuToGpuOp;
 struct HgiResolveImageOp;
+
+using HgiBlitEncoderUniquePtr = std::unique_ptr<class HgiBlitEncoder>;
 
 
 /// \class HgiBlitEncoder
 ///
 /// A graphics API independent abstraction of resource copy commands.
 /// HgiBlitEncoder is a lightweight object that cannot be re-used after
-/// EndEncoding. A new encoder should be acquired from CommandBuffer each frame.
+/// Commit. A new encoder should be acquired from CommandBuffer each frame.
 ///
 /// The API provided by this encoder should be agnostic to whether the
 /// encoder operates via immediate or deferred command buffers.
@@ -50,7 +54,7 @@ public:
 
     /// Finish recording of commands. No further commands can be recorded.
     HGI_API
-    virtual void EndEncoding() = 0;
+    virtual void Commit() = 0;
 
     /// Push a debug marker onto the encoder.
     HGI_API
@@ -65,9 +69,14 @@ public:
     HGI_API
     virtual void CopyTextureGpuToCpu(HgiTextureGpuToCpuOp const& copyOp) = 0;
 
+    /// Copy new data from cpu into gpu buffer.
+    /// For example copy new data into a uniform block or storage buffer.
+    HGI_API
+    virtual void CopyBufferCpuToGpu(HgiBufferCpuToGpuOp const& copyOp) = 0;
+
     /// Resolve a multi-sample texture (MSAA) so it can be read from.
     HGI_API
-    virtual void ResolveImage(HgiResolveImageOp const& resolveOp)= 0;
+    virtual void ResolveImage(HgiResolveImageOp const& resolveOp) = 0;
 
 protected:
     HGI_API

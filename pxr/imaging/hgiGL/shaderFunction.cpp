@@ -22,6 +22,7 @@
 // language governing permissions and limitations under the Apache License.
 //
 #include "pxr/base/tf/diagnostic.h"
+#include <pxr/base/tf/stringUtils.h>
 
 #include "pxr/imaging/hgiGL/conversions.h"
 #include "pxr/imaging/hgiGL/diagnostic.h"
@@ -43,7 +44,18 @@ HgiGLShaderFunction::HgiGLShaderFunction(
     _shaderId = glCreateShader(stages[0]);
     glObjectLabel(GL_SHADER, _shaderId, -1, _descriptor.debugName.c_str());
 
-    const char* src = desc.shaderCode.c_str();
+    const char* src = nullptr;
+    std::string modifiedSource;
+
+    // Ensure #version is at top of shader code
+    if (TfStringStartsWith(desc.shaderCode, "#version")) {
+        src = desc.shaderCode.c_str();
+    } else {       
+        modifiedSource = "#version 450 \n";
+        modifiedSource += desc.shaderCode;
+        src = modifiedSource.c_str();
+    }
+
     glShaderSource(_shaderId, 1, &src, nullptr);
     glCompileShader(_shaderId);
 

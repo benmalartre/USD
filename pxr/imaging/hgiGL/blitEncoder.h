@@ -25,12 +25,11 @@
 #define PXR_IMAGING_HGI_GL_BLIT_ENCODER_H
 
 #include "pxr/pxr.h"
-#include "pxr/imaging/hgiGL/api.h"
 #include "pxr/imaging/hgi/blitEncoder.h"
+#include "pxr/imaging/hgiGL/api.h"
+#include "pxr/imaging/hgiGL/device.h"
 
 PXR_NAMESPACE_OPEN_SCOPE
-
-class HgiGLImmediateCommandBuffer;
 
 
 /// \class HgiGLBlitEncoder
@@ -41,10 +40,10 @@ class HgiGLBlitEncoder final : public HgiBlitEncoder
 {
 public:
     HGIGL_API
-    virtual ~HgiGLBlitEncoder();
+    ~HgiGLBlitEncoder()  override;
 
     HGIGL_API
-    void EndEncoding() override;
+    void Commit() override;
 
     HGIGL_API
     void PushDebugGroup(const char* label) override;
@@ -56,24 +55,26 @@ public:
     void CopyTextureGpuToCpu(HgiTextureGpuToCpuOp const& copyOp) override;
 
     HGIGL_API
+    void CopyBufferCpuToGpu(HgiBufferCpuToGpuOp const& copyOp) override;
+
+    HGIGL_API
     void ResolveImage(HgiResolveImageOp const& resolveOp) override;
 
 protected:
     friend class HgiGL;
-    friend class HgiGLImmediateCommandBuffer;
 
     HGIGL_API
-    HgiGLBlitEncoder(HgiGLImmediateCommandBuffer* cmdBuf);
+    HgiGLBlitEncoder();
 
 private:
-    HgiGLBlitEncoder() = delete;
     HgiGLBlitEncoder & operator=(const HgiGLBlitEncoder&) = delete;
     HgiGLBlitEncoder(const HgiGLBlitEncoder&) = delete;
 
-    HgiGLImmediateCommandBuffer* _commandBuffer;
+    bool _committed;
+    HgiGLOpsVector _ops;
 
     // Encoder is used only one frame so storing multi-frame state on encoder
-    // will not survive. Store onto HgiGLImmediateCommandBuffer instead.
+    // will not survive.
 };
 
 PXR_NAMESPACE_CLOSE_SCOPE

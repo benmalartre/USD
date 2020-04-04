@@ -30,6 +30,7 @@
 
 #include <boost/shared_ptr.hpp>
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -43,14 +44,17 @@ struct HdRprimSharedData;
 class HdStDrawItem;
 class HdStInstancer;
 
-typedef boost::shared_ptr<class HdBufferArrayRange> HdBufferArrayRangeSharedPtr;
-typedef std::vector<HdBufferSourceSharedPtr> HdBufferSourceVector;
+using HdBufferArrayRangeSharedPtr = std::shared_ptr<class HdBufferArrayRange>;
+
+typedef std::vector<HdBufferSourceSharedPtr> HdBufferSourceSharedPtrVector;
 typedef std::vector<struct HdBufferSpec> HdBufferSpecVector;
-typedef boost::shared_ptr<class HdComputation> HdComputationSharedPtr;
-typedef std::vector<HdComputationSharedPtr> HdComputationVector;
-typedef boost::shared_ptr<class HdStResourceRegistry>
-    HdStResourceRegistrySharedPtr;
 typedef boost::shared_ptr<class HdStShaderCode> HdStShaderCodeSharedPtr;
+
+using HdComputationSharedPtr = std::shared_ptr<class HdComputation>;
+using HdComputationSharedPtrVector = std::vector<HdComputationSharedPtr>;
+
+using HdStResourceRegistrySharedPtr = 
+    std::shared_ptr<class HdStResourceRegistry>;
 
 // -----------------------------------------------------------------------------
 // Primvar descriptor filtering utilities
@@ -96,14 +100,14 @@ bool HdStIsValidBAR(HdBufferArrayRangeSharedPtr const& range);
 // primvar processing.
 HDST_API
 bool HdStCanSkipBARAllocationOrUpdate(
-    HdBufferSourceVector const& sources,
-    HdComputationVector const& computations,
+    HdBufferSourceSharedPtrVector const& sources,
+    HdComputationSharedPtrVector const& computations,
     HdBufferArrayRangeSharedPtr const& curRange,
     HdDirtyBits dirtyBits);
 
 HDST_API
 bool HdStCanSkipBARAllocationOrUpdate(
-    HdBufferSourceVector const& sources,
+    HdBufferSourceSharedPtrVector const& sources,
     HdBufferArrayRangeSharedPtr const& curRange,
     HdDirtyBits dirtyBits);
 

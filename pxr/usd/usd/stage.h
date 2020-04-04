@@ -1368,9 +1368,16 @@ public:
     /// The timeCodesPerSecond value scales the time ordinate for the samples
     /// contained in the stage to seconds. If timeCodesPerSecond is 24, then a 
     /// sample at time ordinate 24 should be viewed exactly one second after the 
-    /// sample at time ordinate 0. 
+    /// sample at time ordinate 0.
     ///
-    /// The default value of timeCodesPerSecond is 24.
+    /// Like SdfLayer::GetTimeCodesPerSecond, this accessor uses a dynamic
+    /// fallback to framesPerSecond.  The order of precedence is:
+    ///
+    /// \li timeCodesPerSecond from session layer
+    /// \li timeCodesPerSecond from root layer
+    /// \li framesPerSecond from session layer
+    /// \li framesPerSecond from root layer
+    /// \li fallback value of 24
     USD_API
     double GetTimeCodesPerSecond() const;
 
@@ -1884,11 +1891,11 @@ private:
     // Specialized Value Resolution
     // --------------------------------------------------------------------- //
 
-    // Specifier composition is special.  See comments in .cpp in
-    // _ComposeSpecifier. This method returns either the authored specifier or
-    // the fallback value registered in Sdf.
-    SdfSpecifier _GetSpecifier(const UsdPrim &prim) const;
-    SdfSpecifier _GetSpecifier(Usd_PrimDataConstPtr primData) const;
+    // Helpers for resolving values for metadata fields requiring
+    // special behaviors.
+    static SdfSpecifier _GetSpecifier(Usd_PrimDataConstPtr primData);
+    static TfToken _GetKind(Usd_PrimDataConstPtr primData);
+    static bool _IsActive(Usd_PrimDataConstPtr primData);
 
     // Custom is true if it is true anywhere in the stack.
     bool _IsCustom(const UsdProperty &prop) const;
@@ -2001,10 +2008,6 @@ private:
     void _GetPrimTypeNameImpl(const UsdPrim &prim,
                               bool useFallbacks,
                               Composer *composer) const;
-
-    template <class Composer>
-    bool _GetPrimSpecifierImpl(Usd_PrimDataConstPtr primData,
-                               bool useFallbacks, Composer *composer) const;
 
     template <class Composer>
     bool _GetSpecialMetadataImpl(const UsdObject &obj,

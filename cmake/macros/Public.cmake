@@ -23,6 +23,35 @@
 #
 include(Private)
 
+function(pxr_build_documentation)
+    configure_file(${CMAKE_SOURCE_DIR}/pxr/usd/usd/Doxyfile.in
+                   ${CMAKE_BINARY_DIR}/Doxyfile)
+    set(DOCS_DIR "${CMAKE_BINARY_DIR}")
+    set(GEN_SCRIPT "${PROJECT_SOURCE_DIR}/cmake/macros/generateDocs.py")
+    set(PXR_SOURCE_DIR "${CMAKE_SOURCE_DIR}/pxr")
+    set(THIRD_PARTY_SOURCE_DIR "${CMAKE_SOURCE_DIR}/third_party")
+
+    add_custom_target(
+        documentation
+        ALL
+        COMMAND ${PYTHON_EXECUTABLE} ${GEN_SCRIPT} ${PXR_SOURCE_DIR} ${THIRD_PARTY_SOURCE_DIR} ${CMAKE_BINARY_DIR} ${DOCS_DIR} ${DOXYGEN_EXECUTABLE} ${DOT_EXECUTABLE}
+        DEPENDS ${CMAKE_BINARY_DIR}/include/pxr/pxr.h
+    )
+
+    set(BUILT_HTML_DOCS "${DOCS_DIR}/docs/doxy_html")
+    set(INST_DOCS_ROOT  "${CMAKE_INSTALL_PREFIX}/docs")
+    install(
+        DIRECTORY ${BUILT_HTML_DOCS}
+        DESTINATION ${INST_DOCS_ROOT}
+    )
+
+    set(BUILT_XML_DOCS "${DOCS_DIR}/docs/doxy_xml")
+    install(
+        DIRECTORY ${BUILT_XML_DOCS}
+        DESTINATION ${INST_DOCS_ROOT}
+    )
+endfunction()
+
 function(pxr_python_bin BIN_NAME)
     set(oneValueArgs
         PYTHON_FILE
@@ -168,7 +197,6 @@ endfunction()
 function(pxr_library NAME)
     set(options
         DISABLE_PRECOMPILED_HEADERS
-        KATANA_PLUGIN
     )
     set(oneValueArgs
         TYPE
@@ -253,12 +281,6 @@ function(pxr_library NAME)
 
         set(prefix "")
         set(suffix ${CMAKE_SHARED_LIBRARY_SUFFIX})
-
-        # Katana plugins install into a specific sub directory structure.
-        # In particular, shared objects install into plugin/Libs
-        if(args_KATANA_PLUGIN)
-            set(subdir "Libs")
-        endif()
     else()
         # If the caller didn't specify the library type then choose the
         # type now.
@@ -598,8 +620,8 @@ function(pxr_register_test TEST_NAME)
 
     cmake_parse_arguments(bt
         "RUN_SERIAL;PYTHON;REQUIRES_SHARED_LIBS;REQUIRES_PYTHON_MODULES" 
-        "CUSTOM_PYTHON;COMMAND;STDOUT_REDIRECT;STDERR_REDIRECT;DIFF_COMPARE;POST_COMMAND;POST_COMMAND_STDOUT_REDIRECT;POST_COMMAND_STDERR_REDIRECT;PRE_COMMAND;PRE_COMMAND_STDOUT_REDIRECT;PRE_COMMAND_STDERR_REDIRECT;FILES_EXIST;FILES_DONT_EXIST;CLEAN_OUTPUT;EXPECTED_RETURN_CODE;TESTENV"
-        "ENV;PRE_PATH;POST_PATH"
+        "CUSTOM_PYTHON;COMMAND;STDOUT_REDIRECT;STDERR_REDIRECT;POST_COMMAND;POST_COMMAND_STDOUT_REDIRECT;POST_COMMAND_STDERR_REDIRECT;PRE_COMMAND;PRE_COMMAND_STDOUT_REDIRECT;PRE_COMMAND_STDERR_REDIRECT;FILES_EXIST;FILES_DONT_EXIST;CLEAN_OUTPUT;EXPECTED_RETURN_CODE;TESTENV"
+        "DIFF_COMPARE;ENV;PRE_PATH;POST_PATH"
         ${ARGN}
     )
 
@@ -668,7 +690,9 @@ function(pxr_register_test TEST_NAME)
     set(testWrapperCmd ${testWrapperCmd} --testenv-dir=${testenvDir})
 
     if (bt_DIFF_COMPARE)
-        set(testWrapperCmd ${testWrapperCmd} --diff-compare=${bt_DIFF_COMPARE})
+        foreach(compareFile ${bt_DIFF_COMPARE})
+            set(testWrapperCmd ${testWrapperCmd} --diff-compare=${compareFile})
+        endforeach()
 
         # For now the baseline directory is assumed by convention from the test
         # name. There may eventually be cases where we'd want to specify it by
@@ -826,32 +850,6 @@ function(pxr_add_extra_plugins PLUGIN_AREAS)
 
     set(PXR_EXTRA_PLUGINS "${PXR_EXTRA_PLUGINS}" CACHE INTERNAL "${help}")
 endfunction() # pxr_setup_third_plugins
-
-function(pxr_katana_nodetypes NODE_TYPES)
-    set(installDir ${PXR_INSTALL_SUBDIR}/plugin/Plugins/NodeTypes)
-
-    set(pyFiles "")
-    set(importLines "")
-
-    foreach (nodeType ${NODE_TYPES})
-        list(APPEND pyFiles ${nodeType}.py)
-        set(importLines "import ${nodeType}\n")
-    endforeach()
-
-    install(
-        PROGRAMS ${pyFiles}
-        DESTINATION ${installDir}
-    )
-
-    # Install a __init__.py that imports all the known node types
-    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated_NodeTypes_init.py"
-         "${importLines}")
-    install(
-        FILES "${CMAKE_CURRENT_BINARY_DIR}/generated_NodeTypes_init.py"
-        DESTINATION "${installDir}"
-        RENAME "__init__.py"
-    )
-endfunction() # pxr_katana_nodetypes
 
 function(pxr_toplevel_prologue)
     # Generate a namespace declaration header, pxr.h, at the top level of

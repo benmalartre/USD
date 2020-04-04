@@ -93,6 +93,8 @@ void
 HdxPrman_RenderPass::_Execute(HdRenderPassStateSharedPtr const& renderPassState,
                             TfTokenVector const &renderTags)
 {
+    HD_TRACE_FUNCTION();
+    
     static const RtUString us_PxrPerspective("PxrPerspective");
     static const RtUString us_PxrOrthographic("PxrOrthographic");
     static const RtUString us_PathTracer("PathTracer");
@@ -222,7 +224,6 @@ HdxPrman_RenderPass::_Execute(HdRenderPassStateSharedPtr const& renderPassState,
         flipZ[2][2] = -1.0;
         viewToWorldCorrectionMatrix = flipZ * viewToWorldCorrectionMatrix;
 
-        riley::Transform xform;
         if (hdCam) {
             // Use time sampled transforms authored on the scene camera.
             HdTimeSampleArray<GfMatrix4d, HDPRMAN_MAX_TIME_SAMPLES> const& 
@@ -236,24 +237,31 @@ HdxPrman_RenderPass::_Execute(HdRenderPassStateSharedPtr const& renderPassState,
                     viewToWorldCorrectionMatrix * xforms.values[i]);
             }
 
-            xform = { unsigned(xforms.count), xf_rt_values.data(),
-                      xforms.times.data() };
+            riley::Transform xform = { unsigned(xforms.count),
+                                       xf_rt_values.data(),
+                                       xforms.times.data() };
+
+            // Commit camera.
+            riley->ModifyCamera(
+                _interactiveContext->cameraId, 
+                &cameraNode,
+                &xform, 
+                &camParams);
         } else {
             // Use the framing state as a single time sample.
             float const zerotime = 0.0f;
             RtMatrix4x4 matrix = HdPrman_GfMatrixToRtMatrix(
                 viewToWorldCorrectionMatrix * viewToWorldMatrix);
 
-            xform = {1, &matrix, &zerotime};
+            riley::Transform xform = {1, &matrix, &zerotime};
+
+            // Commit camera.
+            riley->ModifyCamera(
+                _interactiveContext->cameraId, 
+                &cameraNode,
+                &xform, 
+                &camParams);
         }
-
-        // Commit new camera.
-
-        riley->ModifyCamera(
-            _interactiveContext->cameraId, 
-            &cameraNode,
-            &xform, 
-            &camParams);
 
         // Update the framebuffer Z scaling
         _interactiveContext->framebuffer.proj = proj;
@@ -344,6 +352,30 @@ HdxPrman_RenderPass::_Execute(HdRenderPassStateSharedPtr const& renderPassState,
             _quickIntegratorId = riley->CreateIntegrator(integratorNode);
         }
 	_mainIntegratorId = _interactiveContext->integratorId;
+    }
+
+    // Request a framebuffer clear if the clear value in the aov has changed
+    // from the framebuffer clear value.
+    // We do this before StartRender() to avoid race conditions where some
+    // buckets may get discarded or cleared with the wrong value.
+    for (HdRenderPassAovBinding const& aov : renderPassState->GetAovBindings()){
+        if (aov.aovName == HdAovTokens->color) {
+            GfVec4f const& clear = aov.clearValue.Get<GfVec4f>(); 
+            if (clear != _interactiveContext->framebuffer.clearColor) {
+                _interactiveContext->StopRender();
+                _interactiveContext->framebuffer.pendingClear = true; 
+                _interactiveContext->framebuffer.clearColor = clear;
+                needStartRender = true;
+            }
+        } else if (aov.aovName == HdAovTokens->depth) {
+            float clear = aov.clearValue.Get<float>(); 
+            if (clear != _interactiveContext->framebuffer.clearDepth) {
+                _interactiveContext->StopRender();
+                _interactiveContext->framebuffer.pendingClear = true; 
+                _interactiveContext->framebuffer.clearDepth = clear;
+                needStartRender = true;
+            }
+        }
     }
 
     // NOTE:
