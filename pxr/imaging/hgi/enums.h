@@ -30,7 +30,7 @@
 
 PXR_NAMESPACE_OPEN_SCOPE
 
-typedef uint32_t HgiBits;
+using HgiBits = uint32_t;
 
 
 /// \enum HgiDeviceCapabilitiesBits
@@ -47,7 +47,29 @@ enum HgiDeviceCapabilitiesBits : HgiBits
     HgiDeviceCapabilitiesBitsPresentation = 1 << 0,
 };
 
-typedef HgiBits HgiDeviceCapabilities;
+using HgiDeviceCapabilities = HgiBits;
+
+/// \enum HgiTextureType
+///
+/// Describes the kind of texture.
+///
+/// <ul>
+/// <li>HgiTextureType1D:
+///   A one-dimensional texture.</li>
+/// <li>HgiTextureType2D:
+///   A two-dimensional texture.</li>
+/// <li>HgiTextureType3D:
+///   A three-dimensional texture.</li>
+/// </ul>
+///
+enum HgiTextureType
+{
+    HgiTextureType1D = 0,
+    HgiTextureType2D,
+    HgiTextureType3D,
+
+    HgiTextureTypeCount
+};
 
 /// \enum HgiTextureUsageBits
 ///
@@ -79,7 +101,7 @@ enum HgiTextureUsageBits : HgiBits
     HgiTextureUsageCustomBitsBegin = 1 << 4,
 };
 
-typedef HgiBits HgiTextureUsage;
+using HgiTextureUsage = HgiBits;
 
 /// \enum HgiSampleCount
 ///
@@ -110,6 +132,8 @@ enum HgiAttachmentLoadOp
     HgiAttachmentLoadOpDontCare = 0,
     HgiAttachmentLoadOpClear,
     HgiAttachmentLoadOpLoad,
+    
+    HgiAttachmentLoadOpCount
 };
 
 /// \enum HgiAttachmentStoreOp
@@ -127,6 +151,8 @@ enum HgiAttachmentStoreOp
 {
     HgiAttachmentStoreOpDontCare = 0,
     HgiAttachmentStoreOpStore,
+    
+    HgiAttachmentStoreOpCount
 };
 
 /// \enum HgiBufferUsageBits
@@ -157,7 +183,7 @@ enum HgiBufferUsageBits : HgiBits
 
     HgiBufferUsageCustomBitsBegin = 1 << 4,
 };
-typedef HgiBits HgiBufferUsage;
+using HgiBufferUsage = HgiBits;
 
 /// \enum HgiShaderStage
 ///
@@ -178,7 +204,7 @@ enum HgiShaderStageBits : HgiBits
     HgiShaderStageFragment = 1 << 1,
     HgiShaderStageCompute  = 1 << 2
 };
-typedef HgiBits HgiShaderStage;
+using HgiShaderStage = HgiBits;
 
 /// \enum HgiPipelineType
 ///
@@ -303,7 +329,7 @@ enum HgiWinding
 ///
 enum HgiBlendOp
 {
-    HgiBlendOpAdd,
+    HgiBlendOpAdd = 0,
     HgiBlendOpSubtract,
     HgiBlendOpReverseSubtract,
     HgiBlendOpMin,
@@ -318,7 +344,7 @@ enum HgiBlendOp
 ///
 enum HgiBlendFactor
 {
-    HgiBlendFactorZero,
+    HgiBlendFactorZero = 0,
     HgiBlendFactorOne,
     HgiBlendFactorSrcColor,
     HgiBlendFactorOneMinusSrcColor,
@@ -339,6 +365,25 @@ enum HgiBlendFactor
     HgiBlendFactorOneMinusSrc1Alpha,
 
     HgiBlendFactorCount
+};
+
+
+/// \enum HgiCompareFunction
+///
+/// Compare functions.
+///
+enum HgiCompareFunction
+{
+    HgiCompareFunctionNever = 0,
+    HgiCompareFunctionLess,
+    HgiCompareFunctionEqual,
+    HgiCompareFunctionLEqual,
+    HgiCompareFunctionGreater,
+    HgiCompareFunctionNotEqual,
+    HgiCompareFunctionGEqual,
+    HgiCompareFunctionAlways,
+
+    HgiCompareFunctionCount
 };
 
 PXR_NAMESPACE_CLOSE_SCOPE

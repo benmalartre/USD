@@ -24,16 +24,12 @@
 #ifndef PXR_IMAGING_HD_ST_RESOURCE_REGISTRY_H
 #define PXR_IMAGING_HD_ST_RESOURCE_REGISTRY_H
 
-#include <atomic>
-#include <map>
-#include <memory>
-#include <boost/shared_ptr.hpp>
-#include <tbb/concurrent_vector.h>
-
 #include "pxr/pxr.h"
 #include "pxr/base/vt/dictionary.h"
 
 #include "pxr/imaging/hdSt/api.h"
+
+#include "pxr/imaging/hgi/hgi.h"
 
 #include "pxr/imaging/hd/bufferArrayRange.h"
 #include "pxr/imaging/hd/bufferArrayRegistry.h"
@@ -42,30 +38,40 @@
 #include "pxr/imaging/hd/instanceRegistry.h"
 #include "pxr/imaging/hd/resourceRegistry.h"
 
+#include <boost/shared_ptr.hpp>
+#include <tbb/concurrent_vector.h>
+
+#include <atomic>
+#include <map>
+#include <memory>
+
 PXR_NAMESPACE_OPEN_SCOPE
 
-typedef boost::shared_ptr<class HdComputation>
-    HdComputationSharedPtr;
-typedef boost::shared_ptr<class HdStDispatchBuffer>
-    HdStDispatchBufferSharedPtr;
+using HdComputationSharedPtr = std::shared_ptr<class HdComputation>;
+
+using HdStDispatchBufferSharedPtr = std::shared_ptr<class HdStDispatchBuffer>;
+
 typedef boost::shared_ptr<class HdStGLSLProgram>
     HdStGLSLProgramSharedPtr;
-typedef boost::shared_ptr<class HdStPersistentBuffer>
-    HdStPersistentBufferSharedPtr;
-typedef boost::shared_ptr<class HdStResourceRegistry>
-    HdStResourceRegistrySharedPtr;
-typedef boost::shared_ptr<class HdStTextureResource>
-    HdStTextureResourceSharedPtr;
-typedef boost::shared_ptr<class HdStTextureResourceHandle>
-    HdStTextureResourceHandleSharedPtr;
 typedef boost::shared_ptr<class HdSt_BasisCurvesTopology>
     HdSt_BasisCurvesTopologySharedPtr;
 typedef boost::shared_ptr<class HdSt_GeometricShader>
     HdSt_GeometricShaderSharedPtr;
-typedef boost::shared_ptr<class HdSt_MeshTopology>
-    HdSt_MeshTopologySharedPtr;
-typedef boost::shared_ptr<class Hd_VertexAdjacency>
-    Hd_VertexAdjacencySharedPtr;
+
+using HdStTextureResourceSharedPtr =
+    std::shared_ptr<class HdStTextureResource>;
+using HdStTextureResourceHandleSharedPtr =
+    std::shared_ptr<class HdStTextureResourceHandle>;
+
+using HdStPersistentBufferSharedPtr =
+    std::shared_ptr<class HdStPersistentBuffer>; 
+
+using HdStResourceRegistrySharedPtr = 
+    std::shared_ptr<class HdStResourceRegistry>;
+using Hd_VertexAdjacencySharedPtr = 
+    std::shared_ptr<class Hd_VertexAdjacency>;
+using HdSt_MeshTopologySharedPtr = 
+    std::shared_ptr<class HdSt_MeshTopology>;
 
 /// \class HdStResourceRegistry
 ///
@@ -86,6 +92,9 @@ public:
 
     HDST_API
     VtDictionary GetResourceAllocation() const override;
+
+    HDST_API
+    void SetHgi(Hgi* hgi);
 
     /// ------------------------------------------------------------------------
     /// BAR allocation API
@@ -179,7 +188,7 @@ public:
     /// Append source data for given range to be committed later.
     HDST_API
     void AddSources(HdBufferArrayRangeSharedPtr const &range,
-                    HdBufferSourceVector &sources);
+                    HdBufferSourceSharedPtrVector &sources);
 
     /// Append a source data for given range to be committed later.
     HDST_API
@@ -413,8 +422,10 @@ private:
         }
 
         HdBufferArrayRangeSharedPtr range;
-        HdBufferSourceVector sources;
+        HdBufferSourceSharedPtrVector sources;
     };
+
+    Hgi* _hgi;
 
     typedef tbb::concurrent_vector<_PendingSource> _PendingSourceList;
     _PendingSourceList    _pendingSources;

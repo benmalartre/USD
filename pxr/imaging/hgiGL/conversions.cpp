@@ -137,6 +137,27 @@ static uint32_t _blendFactorTable[HgiBlendFactorCount][2] =
     {HgiBlendFactorOneMinusSrc1Alpha,     GL_ONE_MINUS_SRC1_COLOR},
 };
 
+static uint32_t
+_compareFunctionTable[HgiCompareFunctionCount][2] =
+{
+    {HgiCompareFunctionNever,    GL_NEVER},
+    {HgiCompareFunctionLess,     GL_LESS},
+    {HgiCompareFunctionEqual,    GL_EQUAL},
+    {HgiCompareFunctionLEqual,   GL_LEQUAL},
+    {HgiCompareFunctionGreater,  GL_GREATER},
+    {HgiCompareFunctionNotEqual, GL_NOTEQUAL},
+    {HgiCompareFunctionGEqual,   GL_GEQUAL},
+    {HgiCompareFunctionAlways,   GL_ALWAYS},
+};
+
+static uint32_t
+_textureTypeTable[HgiTextureTypeCount][2] =
+{
+    {HgiTextureType1D,           GL_TEXTURE_1D},
+    {HgiTextureType2D,           GL_TEXTURE_2D},
+    {HgiTextureType3D,           GL_TEXTURE_3D}
+};
+
 void
 HgiGLConversions::GetFormat(
         HgiFormat inFormat,
@@ -210,6 +231,18 @@ GLenum
 HgiGLConversions::GetBlendEquation(HgiBlendOp bo)
 {
     return _blendEquationTable[bo][1];
+}
+
+GLenum
+HgiGLConversions::GetDepthCompareFunction(HgiCompareFunction cf)
+{
+    return _compareFunctionTable[cf][1];
+}
+
+GLenum
+HgiGLConversions::GetTextureType(HgiTextureType tt)
+{
+    return _textureTypeTable[tt][1];
 }
 
 PXR_NAMESPACE_CLOSE_SCOPE

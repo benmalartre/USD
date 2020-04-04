@@ -39,6 +39,7 @@
 
 #include <boost/shared_ptr.hpp>
 
+#include <memory>
 #include <vector>
 
 PXR_NAMESPACE_OPEN_SCOPE
@@ -46,10 +47,12 @@ PXR_NAMESPACE_OPEN_SCOPE
 
 class HdSceneDelegate;
 
-typedef boost::shared_ptr<class HdBufferArrayRange> HdBufferArrayRangeSharedPtr;
+using HdBufferArrayRangeSharedPtr = std::shared_ptr<class HdBufferArrayRange>;
+
 typedef boost::shared_ptr<class HdStSurfaceShader> HdStSurfaceShaderSharedPtr;
-typedef boost::shared_ptr<class HdStResourceRegistry>
-    HdStResourceRegistrySharedPtr;
+
+using HdStResourceRegistrySharedPtr = 
+    std::shared_ptr<class HdStResourceRegistry>;
 
 /// \class HdStSurfaceShader
 ///
@@ -64,7 +67,7 @@ public:
     HDST_API
     HdStSurfaceShader();
     HDST_API
-    virtual ~HdStSurfaceShader();
+    ~HdStSurfaceShader() override;
 
 
     // ---------------------------------------------------------------------- //
@@ -73,7 +76,7 @@ public:
     HDST_API
     virtual std::string GetSource(TfToken const &shaderStageKey) const override;
     HDST_API
-    virtual HdMaterialParamVector const& GetParams() const override;
+    virtual HdSt_MaterialParamVector const& GetParams() const override;
     HDST_API
     void SetEnabledPrimvarFiltering(bool enabled);
     HDST_API
@@ -108,12 +111,12 @@ public:
     HDST_API
     void SetGeometrySource(const std::string &source);
     HDST_API
-    void SetParams(const HdMaterialParamVector &params);
+    void SetParams(const HdSt_MaterialParamVector &params);
     HDST_API
     void SetTextureDescriptors(const TextureDescriptorVector &texDesc);
     HDST_API
     void SetBufferSources(
-        HdBufferSourceVector &bufferSources, 
+        HdBufferSourceSharedPtrVector &bufferSources, 
         HdStResourceRegistrySharedPtr const &resourceRegistry);
 
     HDST_API
@@ -140,7 +143,7 @@ private:
     std::string _geometrySource;
 
     // Shader Parameters
-    HdMaterialParamVector       _params;
+    HdSt_MaterialParamVector       _params;
     HdBufferSpecVector          _paramSpec;
     HdBufferArrayRangeSharedPtr _paramArray;
     TfTokenVector               _primvarNames;

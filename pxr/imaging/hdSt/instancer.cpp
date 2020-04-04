@@ -129,7 +129,7 @@ HdStInstancer::UpdateInstancePrimvarRange(HdRprim *prim,
     HdPrimvarDescriptorVector primvars =
         HdStGetInstancerPrimvarDescriptors(this, prim, drawItem, delegate);
 
-    HdBufferSourceVector sources;
+    HdBufferSourceSharedPtrVector sources;
     sources.reserve(primvars.size());
 
     // Always reset numInstancePrimvars, for the case the number of
@@ -208,7 +208,7 @@ HdStInstancer::UpdateInstancePrimvarRange(HdRprim *prim,
         HdBufferSpec::GetBufferSpecs(sources, &bufferSpecs);
 
         HdStResourceRegistrySharedPtr const& resourceRegistry =
-            boost::static_pointer_cast<HdStResourceRegistry>(
+            std::static_pointer_cast<HdStResourceRegistry>(
             delegate->GetRenderIndex().GetResourceRegistry());
 
         // Update local primvar range.
@@ -294,7 +294,7 @@ HdStInstancer::GetInstanceIndices(SdfPath const &prototypeId)
     // this on DirtyInstanceIndex (set on this instancer).
 
     HdStResourceRegistrySharedPtr const& resourceRegistry =
-        boost::static_pointer_cast<HdStResourceRegistry>(
+        std::static_pointer_cast<HdStResourceRegistry>(
         GetDelegate()->GetRenderIndex().GetResourceRegistry());
 
     // delegate provides sparse index array for prototypeId.
@@ -388,7 +388,7 @@ HdStInstancer::GetInstanceIndices(SdfPath const &prototypeId)
     }
 
     // update instance indices
-    HdBufferSourceVector sources;
+    HdBufferSourceSharedPtrVector sources;
     HdBufferSourceSharedPtr source(
         new HdVtBufferSource(HdInstancerTokens->instanceIndices,
                              VtValue(instanceIndices)));

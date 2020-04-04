@@ -26,6 +26,7 @@
 
 #include "pxr/pxr.h"
 #include "pxr/imaging/hgi/api.h"
+#include "pxr/imaging/hgi/attachmentDesc.h"
 #include "pxr/imaging/hgi/enums.h"
 #include "pxr/imaging/hgi/handle.h"
 #include "pxr/imaging/hgi/resourceBindings.h"
@@ -36,6 +37,76 @@
 #include <vector>
 
 PXR_NAMESPACE_OPEN_SCOPE
+
+
+/// \struct HgiVertexAttributeDesc
+///
+/// Describes one attribute of a vertex.
+///
+/// <ul>
+/// <li>format:
+///   Format of the vertex attribute.</li>
+/// <li>offset:
+///    The byte offset of the attribute in vertex buffer</li>
+/// <li>shaderBindLocation:
+///    The location of the attribute in the shader. layout(location = X)</li>
+/// </ul>
+///
+struct HgiVertexAttributeDesc
+{
+    HGI_API
+    HgiVertexAttributeDesc();
+
+    HgiFormat format;
+    uint32_t offset;
+    uint32_t shaderBindLocation;
+};
+using HgiVertexAttributeDescVector = std::vector<HgiVertexAttributeDesc>;
+
+HGI_API
+bool operator==(
+    const HgiVertexAttributeDesc& lhs,
+    const HgiVertexAttributeDesc& rhs);
+
+HGI_API
+inline bool operator!=(
+    const HgiVertexAttributeDesc& lhs,
+    const HgiVertexAttributeDesc& rhs);
+
+
+/// \struct HgiVertexBufferDesc
+///
+/// Describes the attributes of a vertex buffer.
+///
+/// <ul>
+/// <li>bindingIndex:
+///    Binding location for this vertex buffer.</li>
+/// <li>vertexAttributes:
+///   List of vertex attributes (in vertex buffer).</li>
+/// <li>vertexStride:
+///   The byte size of a vertex (distance between two vertices).</li>
+/// </ul>
+///
+struct HgiVertexBufferDesc
+{
+    HGI_API
+    HgiVertexBufferDesc();
+
+    uint32_t bindingIndex;
+    HgiVertexAttributeDescVector vertexAttributes;
+    uint32_t vertexStride;
+};
+using HgiVertexBufferDescVector = std::vector<HgiVertexBufferDesc>;
+
+HGI_API
+bool operator==(
+    const HgiVertexBufferDesc& lhs,
+    const HgiVertexBufferDesc& rhs);
+
+HGI_API
+inline bool operator!=(
+    const HgiVertexBufferDesc& lhs,
+    const HgiVertexBufferDesc& rhs);
 
 
 /// \struct HgiMultiSampleState
@@ -107,11 +178,11 @@ bool operator!=(
 ///
 /// <ul>
 /// <li>depthTestEnabled:
-///   When enabled uses `depthCompareOp` to test if a fragment passes the 
+///   When enabled uses `depthCompareFn` to test if a fragment passes the 
 ///   depth test. Note that depth writes are automatically disabled when
 ///   depthTestEnabled is false.</li>
 /// <li>depthWriteEnabled:
-///   When enabled uses `depthCompareOp` to test if a fragment passes the 
+///   When enabled uses `depthCompareFn` to test if a fragment passes the 
 ///   depth test. Note that depth writes are automatically disabled when
 ///   depthTestEnabled is false.</li>
 /// <li>stencilTestEnabled:
@@ -125,6 +196,8 @@ struct HgiDepthStencilState
 
     bool depthTestEnabled;
     bool depthWriteEnabled;
+    HgiCompareFunction depthCompareFn;
+
     bool stencilTestEnabled;
 };
 
@@ -159,6 +232,13 @@ bool operator!=(
 /// <li>rasterizationState:
 ///   (Graphics pipeline only)
 ///   Various settings to control rasterization.</li>
+/// <li>vertexBuffers:
+///   Description of the vertex buffers (per-vertex attributes).
+///   The actual VBOs are bound via GraphicsEncoder.</li>
+/// <li>colorAttachmentDescs:
+///   Describes each of the color attachments.</li>
+/// <li>depthAttachmentDesc:
+///   Describes the depth attachment (optional)</li>
 /// </ul>
 ///
 struct HgiPipelineDesc
@@ -173,6 +253,9 @@ struct HgiPipelineDesc
     HgiDepthStencilState depthState;
     HgiMultiSampleState multiSampleState;
     HgiRasterizationState rasterizationState;
+    HgiVertexBufferDescVector vertexBuffers;
+    HgiAttachmentDescVector colorAttachmentDescs;
+    HgiAttachmentDesc depthAttachmentDesc;
 };
 
 HGI_API
@@ -219,8 +302,8 @@ private:
 
 /// Explicitly instantiate and define pipeline handle
 template class HgiHandle<class HgiPipeline>;
-typedef HgiHandle<class HgiPipeline> HgiPipelineHandle;
-typedef std::vector<HgiPipelineHandle> HgiPipelineHandleVector;
+using HgiPipelineHandle = HgiHandle<class HgiPipeline>;
+using HgiPipelineHandleVector = std::vector<HgiPipelineHandle>;
 
 
 PXR_NAMESPACE_CLOSE_SCOPE

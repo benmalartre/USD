@@ -34,7 +34,7 @@
 #include "pxr/usd/sdf/layerTree.h"
 #include "pxr/base/tf/declarePtrs.h"
 
-#include <boost/noncopyable.hpp>
+#include <tbb/spin_mutex.h>
 #include <iosfwd>
 #include <memory>
 #include <string>
@@ -62,7 +62,10 @@ class PcpLifeboat;
 ///
 /// PcpLayerStacks are constructed and managed by a Pcp_LayerStackRegistry.
 ///
-class PcpLayerStack : public TfRefBase, public TfWeakBase, boost::noncopyable {
+class PcpLayerStack : public TfRefBase, public TfWeakBase {
+    PcpLayerStack(const PcpLayerStack&) = delete;
+    PcpLayerStack& operator=(const PcpLayerStack&) = delete;
+
 public:
     // See Pcp_LayerStackRegistry for creating layer stacks.
     PCP_API
@@ -284,9 +287,10 @@ private:
     /// the current value of relocations given out by
     /// GetExpressionForRelocatesAtPath().  This map is used to update
     /// those values when relocations change.
-    typedef std::map<SdfPath, PcpMapExpression::VariableRefPtr,
+    typedef std::map<SdfPath, PcpMapExpression::VariableUniquePtr,
             SdfPath::FastLessThan> _RelocatesVarMap;
     _RelocatesVarMap _relocatesVariables;
+    tbb::spin_mutex _relocatesVariablesMutex;
 
     /// List of all prim spec paths where relocations were found.
     SdfPathVector _relocatesPrimPaths;

@@ -26,14 +26,14 @@
 
 #include "pxr/pxr.h"
 #include "pxr/base/gf/vec4i.h"
-#include "pxr/imaging/hgiGL/api.h"
 #include "pxr/imaging/hgi/graphicsEncoder.h"
+#include "pxr/imaging/hgiGL/api.h"
+#include "pxr/imaging/hgiGL/device.h"
 #include <cstdint>
 
 PXR_NAMESPACE_OPEN_SCOPE
 
 struct HgiGraphicsEncoderDesc;
-class HgiGLImmediateCommandBuffer;
 
 
 /// \class HgiGLGraphicsEncoder
@@ -44,10 +44,18 @@ class HgiGLGraphicsEncoder final : public HgiGraphicsEncoder
 {
 public:
     HGIGL_API
-    virtual ~HgiGLGraphicsEncoder();
+    ~HgiGLGraphicsEncoder() override;
+
+    /// XXX This function is exposed temporarily for Hgi transition.
+    /// It allows code that is not yet converted to Hgi (e.g. HdSt) to insert
+    /// its opengl calls into the ops-stack of HgiGL to esnure that all commands
+    /// execute in the correct order. Once HdSt has transition fully to Hgi we
+    /// should remove this function.
+    HGIGL_API
+    void InsertFunctionOp(std::function<void(void)> const& fn);
 
     HGIGL_API
-    void EndEncoding() override;
+    void Commit() override;
 
     HGIGL_API
     void SetViewport(GfVec4i const& vp) override;
@@ -84,18 +92,22 @@ public:
 
 protected:
     friend class HgiGL;
-    friend class HgiGLImmediateCommandBuffer;
 
     HGIGL_API
-    HgiGLGraphicsEncoder(HgiGraphicsEncoderDesc const& desc);
+    HgiGLGraphicsEncoder(
+        HgiGLDevice* device,
+        HgiGraphicsEncoderDesc const& desc);
 
 private:
     HgiGLGraphicsEncoder() = delete;
     HgiGLGraphicsEncoder & operator=(const HgiGLGraphicsEncoder&) = delete;
     HgiGLGraphicsEncoder(const HgiGLGraphicsEncoder&) = delete;
 
+    bool _committed;
+    HgiGLOpsVector _ops;
+
     // Encoder is used only one frame so storing multi-frame state on encoder
-    // will not survive. Store onto HgiGLImmediateCommandBuffer instead.
+    // will not survive.
 };
 
 PXR_NAMESPACE_CLOSE_SCOPE

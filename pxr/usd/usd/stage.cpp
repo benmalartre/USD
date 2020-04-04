@@ -2248,6 +2248,13 @@ UsdStage::SetLoadRules(UsdStageLoadRules const &rules)
     PcpChanges changes;
     changes.DidChangeSignificantly(_cache.get(), SdfPath::AbsoluteRootPath());
     _Recompose(changes);
+
+    // Notify.
+    UsdStageWeakPtr self(this);
+    UsdNotice::ObjectsChanged::_PathsToChangesMap resyncChanges, infoChanges;
+    resyncChanges[SdfPath::AbsoluteRootPath()];
+    UsdNotice::ObjectsChanged(self, &resyncChanges, &infoChanges).Send(self);
+    UsdNotice::StageContentsChanged(self).Send(self);
 }
 
 void
@@ -2259,6 +2266,13 @@ UsdStage::SetPopulationMask(UsdStagePopulationMask const &mask)
     PcpChanges changes;
     changes.DidChangeSignificantly(_cache.get(), SdfPath::AbsoluteRootPath());
     _Recompose(changes);
+
+    // Notify.
+    UsdStageWeakPtr self(this);
+    UsdNotice::ObjectsChanged::_PathsToChangesMap resyncChanges, infoChanges;
+    resyncChanges[SdfPath::AbsoluteRootPath()];
+    UsdNotice::ObjectsChanged(self, &resyncChanges, &infoChanges).Send(self);
+    UsdNotice::StageContentsChanged(self).Send(self);
 }
 
 void
@@ -5703,23 +5717,123 @@ UsdStage::_SetValueImpl(
 }
 
 // --------------------------------------------------------------------- //
-// Specialized Value Resolution
+// Helpers for Metadata Resolution
 // --------------------------------------------------------------------- //
 
+template <class Composer>
+static bool
+_GetFallbackMetadataImpl(Usd_PrimDataConstPtr primData,
+                         const TfToken& propName,
+                         const TfToken &fieldName,
+                         const TfToken &keyPath,
+                         Composer *composer)
+{
+    // Look for a fallback value in the definition.
+    // NOTE: This code is performance critical.
+    composer->ConsumeUsdFallback(
+        primData->GetPrimDefinition(), propName, fieldName, keyPath);
+    return composer->IsDone();
+}
+
+template <class Composer>
+static bool
+_ComposeGeneralMetadataImpl(Usd_PrimDataConstPtr primData,
+                            const TfToken& propName,
+                            const TfToken& fieldName,
+                            const TfToken& keyPath,
+                            bool useFallbacks,
+                            Usd_Resolver* res,
+                            Composer *composer)
+{
+    // Main resolution loop.
+    SdfPath specPath = res->GetLocalPath(propName);
+    bool gotOpinion = false;
+
+    for (bool isNewNode = false; res->IsValid(); isNewNode = res->NextLayer()) {
+        if (isNewNode) {
+            specPath = res->GetLocalPath(propName);
+        }
+
+        // Consume an authored opinion here, if one exists.
+        gotOpinion |= composer->ConsumeAuthored(
+            res->GetNode(), res->GetLayer(), specPath, fieldName, keyPath);
+        
+        if (composer->IsDone()) {
+            return true;
+        }
+    }
+
+    if (useFallbacks) {
+        _GetFallbackMetadataImpl(
+            primData, propName, fieldName, keyPath, composer);
+    }
+
+    return gotOpinion || composer->IsDone();
+}
+
+// --------------------------------------------------------------------- //
+// Specialized Metadata Resolution
+// --------------------------------------------------------------------- //
+
+template <class Composer>
+static bool
+_GetPrimSpecifierImpl(Usd_PrimDataConstPtr primData,
+                      bool useFallbacks, Composer *composer);
+
 SdfSpecifier
-UsdStage::_GetSpecifier(Usd_PrimDataConstPtr primData) const
+UsdStage::_GetSpecifier(Usd_PrimDataConstPtr primData)
 {
     SdfSpecifier result = SdfSpecifierOver;
     SdfAbstractDataTypedValue<SdfSpecifier> resultVal(&result);
     TypeSpecificValueComposer<SdfSpecifier> composer(&resultVal);
-    _GetPrimSpecifierImpl(primData, /*useFallbacks=*/true, &composer);
+    _GetPrimSpecifierImpl(primData, /* useFallbacks = */ true, &composer);
     return result;
 }
 
-SdfSpecifier
-UsdStage::_GetSpecifier(const UsdPrim &prim) const
+template <class Composer>
+static bool 
+_GetPrimKindImpl(Usd_PrimDataConstPtr primData,
+                 bool useFallbacks, Composer *composer)
 {
-    return _GetSpecifier(get_pointer(prim._Prim()));
+    Usd_Resolver resolver(&primData->GetPrimIndex());
+    return _ComposeGeneralMetadataImpl(
+        primData, TfToken(), SdfFieldKeys->Kind, TfToken(), useFallbacks, 
+        &resolver, composer);
+}
+
+TfToken
+UsdStage::_GetKind(Usd_PrimDataConstPtr primData)
+{
+    TfToken kind;
+    SdfAbstractDataTypedValue<TfToken> resultValue(&kind);
+    TypeSpecificValueComposer<TfToken> composer(&resultValue);
+
+    // We don't allow fallbacks for kind.
+    _GetPrimKindImpl(primData, /* useFallbacks = */ false, &composer);
+    return kind;
+}
+
+template <class Composer>
+static bool 
+_GetPrimActiveImpl(Usd_PrimDataConstPtr primData,
+                   bool useFallbacks, Composer *composer)
+{
+    Usd_Resolver resolver(&primData->GetPrimIndex());
+    return _ComposeGeneralMetadataImpl(
+        primData, TfToken(), SdfFieldKeys->Active, TfToken(), useFallbacks, 
+        &resolver, composer);
+}
+
+bool
+UsdStage::_IsActive(Usd_PrimDataConstPtr primData)
+{
+    bool active = true;
+    SdfAbstractDataTypedValue<bool> resultValue(&active);
+    TypeSpecificValueComposer<bool> composer(&resultValue);
+
+    // We don't allow fallbacks for active.
+    _GetPrimActiveImpl(primData, /* useFallbacks = */ false, &composer);
+    return active;
 }
 
 bool
@@ -5898,28 +6012,6 @@ UsdStage::_GetTypeSpecificResolvedMetadata(const UsdObject &obj,
 }
 
 template <class Composer>
-static bool
-_GetFallbackMetadataImpl(Usd_PrimDataConstPtr primData,
-                         const TfToken& propName,
-                         const TfToken &fieldName,
-                         const TfToken &keyPath,
-                         Composer *composer)
-{
-    // Look for a fallback value in the definition.  XXX: This currently only
-    // handles property definitions -- needs to be extended to prim definitions
-    // as well.
-    if (!propName.IsEmpty()) {
-        // NOTE: This code is performance critical.
-        composer->ConsumeUsdFallback(
-            primData->GetPrimDefinition(), propName, fieldName, keyPath);
-        if (composer->IsDone()) {
-            return true;
-        }
-    }
-    return false;
-}
-
-template <class Composer>
 void
 UsdStage::_GetAttrTypeImpl(const UsdAttribute &attr,
                            const TfToken &fieldName,
@@ -6022,13 +6114,14 @@ UsdStage::_GetPrimTypeNameImpl(const UsdPrim &prim, bool useFallbacks,
 }
 
 template <class Composer>
-bool
-UsdStage::_GetPrimSpecifierImpl(Usd_PrimDataConstPtr primData,
-                                bool useFallbacks, Composer *composer) const
+static bool
+_GetPrimSpecifierImpl(Usd_PrimDataConstPtr primData,
+                      bool useFallbacks, Composer *composer)
 {
     // Handle the pseudo root as a special case.
-    if (primData == _pseudoRoot)
+    if (primData->GetPath().IsAbsoluteRootPath()) {
         return false;
+    }
 
     // Instance master prims are always defined -- see Usd_PrimData for
     // details. Since the fallback for specifier is 'over', we have to
@@ -6208,6 +6301,7 @@ UsdStage::_GetSpecialMetadataImpl(const UsdObject &obj,
                                   Composer *composer) const
 {
     // Dispatch to special-case composition rules based on type and field.
+    // Return true if the given field was handled, false otherwise.
     if (obj.Is<UsdProperty>()) {
         if (obj.Is<UsdAttribute>()) {
             if (fieldName == SdfFieldKeys->TypeName) {
@@ -6232,6 +6326,20 @@ UsdStage::_GetSpecialMetadataImpl(const UsdObject &obj,
             _GetPrimSpecifierImpl(
                 get_pointer(obj._Prim()), useFallbacks, composer);
             return true;
+        } else if (fieldName == SdfFieldKeys->Kind) {
+            // XXX: We do not not respect fallback kind values during
+            // Usd_PrimData composition (see _GetKind), but we do allow
+            // fallback values here to maintain existing behavior. However,
+            // we may want to force the useFallbacks flag to false here for
+            // consistency.
+            _GetPrimKindImpl(
+                get_pointer(obj._Prim()), useFallbacks, composer);
+            return true;
+        } else if (fieldName == SdfFieldKeys->Active) {
+            // XXX: See comment in the handling of 'kind' re: fallback values.
+            _GetPrimActiveImpl(
+                get_pointer(obj._Prim()), useFallbacks, composer);
+            return true;
         }
     }
 
@@ -6253,13 +6361,7 @@ UsdStage::_GetMetadataImpl(
     // Handle special cases.
     if (_GetSpecialMetadataImpl(
             obj, fieldName, keyPath, useFallbacks, composer)) {
-
-        return true;
-    }
-
-    if (!m.IsClean()) {
-        // An error occurred during _GetSpecialMetadataImpl.
-        return false;
+        return composer->IsDone() && m.IsClean();
     }
 
     return _GetGeneralMetadataImpl(
@@ -6328,42 +6430,6 @@ UsdStage::_GetGeneralMetadataImpl(const UsdObject &obj,
     return true;
 }
 
-template <class Composer>
-static bool
-_ComposeGeneralMetadataImpl(Usd_PrimDataConstPtr primData,
-                            const TfToken& propName,
-                            const TfToken& fieldName,
-                            const TfToken& keyPath,
-                            bool useFallbacks,
-                            Usd_Resolver* res,
-                            Composer *composer)
-{
-    // Main resolution loop.
-    SdfPath specPath = res->GetLocalPath(propName);
-    bool gotOpinion = false;
-
-    for (bool isNewNode = false; res->IsValid(); isNewNode = res->NextLayer()) {
-        if (isNewNode) {
-            specPath = res->GetLocalPath(propName);
-        }
-
-        // Consume an authored opinion here, if one exists.
-        gotOpinion |= composer->ConsumeAuthored(
-            res->GetNode(), res->GetLayer(), specPath, fieldName, keyPath);
-        
-        if (composer->IsDone()) {
-            return true;
-        }
-    }
-
-    if (useFallbacks) {
-        _GetFallbackMetadataImpl(
-            primData, propName, fieldName, keyPath, composer);
-    }
-
-    return gotOpinion || composer->IsDone();
-}
-
 bool
 UsdStage::_HasMetadata(const UsdObject &obj, const TfToken& fieldName,
                        const TfToken &keyPath, bool useFallbacks) const
@@ -6388,13 +6454,11 @@ UsdStage::_ListMetadataFields(const UsdObject &obj, bool useFallbacks) const
     PcpNodeRef lastNode = res.GetNode();
     SdfSpecType specType = SdfSpecTypeUnknown;
 
-    SdfPropertySpecHandle propDef;
+    const UsdPrimDefinition &primDef = obj.GetPrim().GetPrimDefinition();
 
     // If this is a builtin property, determine specType from the definition.
     if (obj.Is<UsdProperty>()) {
-        propDef = _GetSchemaPropertySpec(obj.As<UsdProperty>());
-        if (propDef)
-            specType = propDef->GetSpecType();
+        specType = primDef.GetSpecType(propName);
     }
 
     // Insert authored fields, discovering spec type along the way.
@@ -6423,13 +6487,13 @@ UsdStage::_ListMetadataFields(const UsdObject &obj, bool useFallbacks) const
         }
     }
 
-    // If this is a builtin property, add any defined metadata fields.
-    // XXX: this should handle prim definitions too.
-    if (useFallbacks && propDef) {
-        for (const auto& fieldName : propDef->ListFields()) {
-            if (!_IsPrivateFieldKey(fieldName))
-                result.push_back(fieldName);
-        }
+    // If including fallbacks, add any defined metadata fields from the prim
+    // definition for the property (or the prim if the prop name is empty). 
+    if (useFallbacks) {
+        const TfTokenVector fallbackFields = propName.IsEmpty() ?
+            primDef.ListMetadataFields() : 
+            primDef.ListPropertyMetadataFields(propName);
+        result.insert(result.end(), fallbackFields.begin(), fallbackFields.end());
     }
 
     // Sort & remove duplicate fields.
@@ -8232,10 +8296,17 @@ UsdStage::HasAuthoredTimeCodeRange() const
 double 
 UsdStage::GetTimeCodesPerSecond() const
 {
-    // We expect the SdfSchema to provide a fallback, so simply:
-    double result = 0;
-    GetMetadata(SdfFieldKeys->TimeCodesPerSecond, &result);
-    return result;
+    // Imitate what SdfLayer does: prefer TCPS, but if it isn't set, fall back
+    // dynamically to FPS.  Adapt that rule to include the session layer.  In
+    // order of priority, use: session TCPS, root layer TCPS, session FPS, root
+    // layer FPS.
+    if (HasAuthoredMetadata(SdfFieldKeys->TimeCodesPerSecond)) {
+        double result = 0;
+        GetMetadata(SdfFieldKeys->TimeCodesPerSecond, &result);
+        return result;
+    }
+
+    return GetFramesPerSecond();
 }
 
 void 
@@ -8359,9 +8430,11 @@ UsdStage::SetInterpolationType(UsdInterpolationType interpolationType)
     if (_interpolationType != interpolationType) {
         _interpolationType = interpolationType;
 
-        // Emit StageContentsChanged, as interpolated attributes values
-        // have likely changed.
+        // Notify, as interpolated attributes values have likely changed.
         UsdStageWeakPtr self(this);
+        UsdNotice::ObjectsChanged::_PathsToChangesMap resyncChanges, infoChanges;
+        resyncChanges[SdfPath::AbsoluteRootPath()];
+        UsdNotice::ObjectsChanged(self, &resyncChanges, &infoChanges).Send(self);
         UsdNotice::StageContentsChanged(self).Send(self);
     }
 }

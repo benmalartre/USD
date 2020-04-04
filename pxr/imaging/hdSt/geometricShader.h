@@ -27,13 +27,14 @@
 #include "pxr/pxr.h"
 #include "pxr/imaging/hdSt/api.h"
 #include "pxr/imaging/hd/version.h"
+#include "pxr/imaging/hd/enums.h"
 #include "pxr/imaging/hdSt/shaderCode.h"
 #include "pxr/imaging/hdSt/resourceRegistry.h"
 #include "pxr/usd/sdf/path.h"
 #include "pxr/imaging/garch/gl.h"
 #include "pxr/imaging/hio/glslfx.h"
 
-#include <boost/scoped_ptr.hpp>
+#include <memory>
 
 PXR_NAMESPACE_OPEN_SCOPE
 
@@ -200,7 +201,7 @@ private:
     HdPolygonMode _polygonMode;
     float _lineWidth;
 
-    boost::scoped_ptr<HioGlslfx> _glslfx;
+    std::unique_ptr<HioGlslfx> _glslfx;
     bool _frustumCullingPass;
     ID _hash;
 

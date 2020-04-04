@@ -232,7 +232,7 @@ Usd_PrimData::GetSourcePrimIndex() const
 SdfSpecifier
 Usd_PrimData::GetSpecifier() const
 {
-    return _stage->_GetSpecifier(this);
+    return UsdStage::_GetSpecifier(this);
 }
 
 // Iterate over a prim's specs until we get a non-empty, non-any-type typeName.
@@ -298,9 +298,6 @@ Usd_PrimData::_ComposeAndCacheTypeAndFlags(Usd_PrimDataConstPtr parent,
         _primTypeInfo = _primTypeInfoCache->GetEmptyPrimTypeInfo();
     } 
     else {
-        // Compose and cache 'active'.
-        UsdPrim self(Usd_PrimDataIPtr(this), SdfPath());
-
         const TfToken primTypeName = _ComposeTypeName(_primIndex);
 
         TfTokenVector appliedSchemas;
@@ -309,8 +306,8 @@ Usd_PrimData::_ComposeAndCacheTypeAndFlags(Usd_PrimDataConstPtr parent,
         _primTypeInfo = _primTypeInfoCache
             ->FindOrCreatePrimTypeInfo(primTypeName, std::move(appliedSchemas));
 
-        bool active = true;
-        self.GetMetadata(SdfFieldKeys->Active, &active);
+        // Compose and cache 'active'.
+        const bool active = UsdStage::_IsActive(this);
         _flags[Usd_PrimActiveFlag] = active;
 
         // Cache whether or not this prim has a payload.
@@ -330,9 +327,7 @@ Usd_PrimData::_ComposeAndCacheTypeAndFlags(Usd_PrimDataConstPtr parent,
         // Otherwise we look up the kind metadata and consult the kind registry.
         bool isGroup = false, isModel = false;
         if (parent->IsGroup()) {
-            static TfToken kindToken("kind");
-            TfToken kind;
-            self.GetMetadata(kindToken, &kind);
+            const TfToken kind = UsdStage::_GetKind(this);
             // Use the kind registry to determine model/groupness.
             if (!kind.IsEmpty()) {
                 isGroup = KindRegistry::IsA(kind, KindTokens->group);
@@ -343,7 +338,7 @@ Usd_PrimData::_ComposeAndCacheTypeAndFlags(Usd_PrimDataConstPtr parent,
         _flags[Usd_PrimModelFlag] = isModel;
 
         // Get specifier.
-        SdfSpecifier specifier = GetSpecifier();
+        const SdfSpecifier specifier = GetSpecifier();
 
         // This prim is abstract if its parent is or if it's a class.
         _flags[Usd_PrimAbstractFlag] =

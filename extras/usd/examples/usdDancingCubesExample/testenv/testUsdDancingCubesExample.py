@@ -39,8 +39,8 @@ assert dynamicFormat
 
 # Find the layer that matches the dynamic file format. There should be exactly
 # one.
-dynamicLayers = filter(lambda l: l.GetFileFormat() == dynamicFormat, 
-                       stage.GetUsedLayers())
+dynamicLayers = list(filter(lambda l: l.GetFileFormat() == dynamicFormat, 
+                            stage.GetUsedLayers()))
 assert len(dynamicLayers) == 1
 
 # Export the dynamic layer as usda for baseline comparison
@@ -60,8 +60,8 @@ p.SetMetadata("Usd_DCE_Params",
 
 # Find the dynamic layer again. Note that this layer has a different identity
 # as the file format arguments have changed.
-dynamicLayers = filter(lambda l: l.GetFileFormat() == dynamicFormat, 
-                       stage.GetUsedLayers())
+dynamicLayers = list(filter(lambda l: l.GetFileFormat() == dynamicFormat, 
+                            stage.GetUsedLayers()))
 assert len(dynamicLayers) == 1
 
 # Export the new dynamic layer as usda for baseline comparison.

@@ -99,7 +99,7 @@ HdStRenderPassState::Prepare(
     HdRenderPassState::Prepare(resourceRegistry);
 
     HdStResourceRegistrySharedPtr const& hdStResourceRegistry =
-        boost::static_pointer_cast<HdStResourceRegistry>(resourceRegistry);
+        std::static_pointer_cast<HdStResourceRegistry>(resourceRegistry);
 
     VtVec4fArray clipPlanes;
     TF_FOR_ALL(it, GetClipPlanes()) {
@@ -184,7 +184,7 @@ HdStRenderPassState::Prepare(
                 HdTokens->drawingShader, bufferSpecs, HdBufferArrayUsageHint());
 
         HdStBufferArrayRangeGLSharedPtr _renderPassStateBar_ =
-            boost::static_pointer_cast<HdStBufferArrayRangeGL> (_renderPassStateBar);
+            std::static_pointer_cast<HdStBufferArrayRangeGL> (_renderPassStateBar);
 
         // add buffer binding request
         _renderPassShader->AddBufferBinding(
@@ -199,7 +199,7 @@ HdStRenderPassState::Prepare(
     GfMatrix4d const& worldToViewMatrix = GetWorldToViewMatrix();
     GfMatrix4d projMatrix = GetProjectionMatrix();
 
-    HdBufferSourceVector sources;
+    HdBufferSourceSharedPtrVector sources;
     sources.push_back(HdBufferSourceSharedPtr(
                          new HdVtBufferSource(HdShaderTokens->worldToViewMatrix,
                                               worldToViewMatrix)));
@@ -289,7 +289,7 @@ HdStRenderPassState::SetRenderPassShader(HdStRenderPassShaderSharedPtr const &re
     if (_renderPassStateBar) {
 
         HdStBufferArrayRangeGLSharedPtr _renderPassStateBar_ =
-            boost::static_pointer_cast<HdStBufferArrayRangeGL> (_renderPassStateBar);
+            std::static_pointer_cast<HdStBufferArrayRangeGL> (_renderPassStateBar);
 
         _renderPassShader->AddBufferBinding(
             HdBindingRequest(HdBinding::UBO, _tokens->renderPassState,
@@ -502,7 +502,6 @@ HdStRenderPassState::MakeGraphicsEncoderDesc() const
             HgiAttachmentLoadOpDontCare :
             HgiAttachmentLoadOpClear;
 
-        attachmentDesc.texture = hgiTexHandle;
         attachmentDesc.loadOp = loadOp;
         attachmentDesc.storeOp = HgiAttachmentStoreOpStore;
 
@@ -525,11 +524,14 @@ HdStRenderPassState::MakeGraphicsEncoderDesc() const
         attachmentDesc.alphaBlendOp = HgiBlendOp(_blendAlphaOp);
 
         if (aov.aovName == HdAovTokens->depth) {
-            desc.depthAttachment = std::move(attachmentDesc);
-        } else if (TF_VERIFY(desc.colorAttachments.size() < maxColorAttachments, 
-                            "Too many aov bindings for color attachments")) 
+            desc.depthAttachmentDesc = std::move(attachmentDesc);
+            desc.depthTexture = hgiTexHandle;
+        } else if (TF_VERIFY(
+            desc.colorAttachmentDescs.size() < maxColorAttachments,
+            "Too many aov bindings for color attachments"))
         {
-            desc.colorAttachments.emplace_back(std::move(attachmentDesc));
+            desc.colorAttachmentDescs.emplace_back(std::move(attachmentDesc));
+            desc.colorTextures.emplace_back(hgiTexHandle);
         }
     }
 

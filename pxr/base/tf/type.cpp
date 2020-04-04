@@ -42,6 +42,7 @@
 // XXX: This include is a hack to avoid build errors due to
 // incompatible macro definitions in pyport.h on macOS.
 #include <locale>
+#include "pxr/base/tf/cxxCast.h"
 #include "pxr/base/tf/pyLock.h"
 #include "pxr/base/tf/pyObjWrapper.h"
 #include "pxr/base/tf/pyObjectFinder.h"
@@ -530,7 +531,13 @@ TfType::_FindByTypeid(const std::type_info &typeInfo)
     ScopedLock readLock(r.GetMutex(), /*write=*/false);
     TfType::_TypeInfo *info = r.FindByTypeid(typeInfo, WriteUpgrader(readLock));
 
-    return info ? info->canonicalTfType : GetUnknownType();
+    if (ARCH_LIKELY(info)) {
+        return info->canonicalTfType;
+    }
+    // It's possible that this type is only declared and not yet defined.  In
+    // that case we will fail to find it by type_info, so attempt to find the
+    // type by name instead.
+    return FindByName(GetCanonicalTypeName(typeInfo));
 }
 
 #ifdef PXR_PYTHON_SUPPORT_ENABLED

@@ -122,14 +122,6 @@ public:
     /// \name Instancing
     // ---------------------------------------------------------------------- //
 
-    virtual SdfPath GetPathForInstanceIndex(SdfPath const &protoCachePath,
-                                            int protoIndex,
-                                            int *instanceCountForThisLevel,
-                                            int *instancerIndex,
-                                            SdfPath *masterCachePath = NULL,
-                                            SdfPathVector *
-                                                instanceContext = NULL) override;
-
     virtual size_t
     SampleInstancerTransform(UsdPrim const& instancerPrim,
                              SdfPath const& instancerPath,
@@ -169,23 +161,20 @@ public:
         UsdTimeCode time) const override;
 
     // ---------------------------------------------------------------------- //
-    /// \name Selection
+    /// \name Picking & selection
     // ---------------------------------------------------------------------- //
 
-    virtual bool PopulateSelection(
-                                HdSelection::HighlightMode const& highlightMode,
-                                SdfPath const &cachePath,
-                                UsdPrim const &usdPrim,
-                                VtIntArray const &instanceIndices,
-                                HdSelectionSharedPtr const &result) override;
+    virtual SdfPath GetScenePrimPath(
+        SdfPath const& cachePath,
+        int instanceIndex) const override;
 
-    virtual SdfPath GetPathForInstanceIndex(SdfPath const &instancerCachePath,
-                                            SdfPath const &protoCachePath,
-                                            int protoIndex,
-                                            int *instanceCountForThisLevel,
-                                            int *instancerIndex,
-                                            SdfPath *masterCachePath,
-                                            SdfPathVector *instanceContext) override;
+    virtual bool PopulateSelection(
+        HdSelection::HighlightMode const& highlightMode,
+        SdfPath const &cachePath,
+        UsdPrim const &usdPrim,
+        int const hydraInstanceIndex,
+        VtIntArray const &parentInstanceIndices,
+        HdSelectionSharedPtr const &result) const override;
 
     // ---------------------------------------------------------------------- //
     /// \name Volume field information
