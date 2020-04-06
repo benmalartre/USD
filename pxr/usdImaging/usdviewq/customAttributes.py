@@ -23,7 +23,7 @@
 #
 
 from pxr import Usd, UsdGeom, UsdShade
-from .constantGroup import ConstantGroup
+from constantGroup import ConstantGroup
 
 
 class ComputedPropertyNames(ConstantGroup):
@@ -97,7 +97,7 @@ class BoundingBoxAttribute(CustomAttribute):
         try:
             bbox = self._rootDataModel.computeWorldBound(self._currentPrim)
             bbox = bbox.ComputeAlignedRange()
-        except RuntimeError as err:
+        except RuntimeError, err:
             bbox = "Invalid: " + str(err)
 
         return bbox
@@ -115,7 +115,7 @@ class LocalToWorldXformAttribute(CustomAttribute):
     def Get(self, frame):
         try:
             pwt = self._rootDataModel.getLocalToWorldTransform(self._currentPrim)
-        except RuntimeError as err:
+        except RuntimeError, err:
             pwt = "Invalid: " + str(err)
 
         return pwt
@@ -140,7 +140,7 @@ class ResolvedBoundMaterial(CustomAttribute):
                         self._purpose)
             boundMatPath = boundMaterial.GetPrim().GetPath() if boundMaterial \
                 else "<unbound>"
-        except RuntimeError as err:
+        except RuntimeError, err:
             boundMatPath = "Invalid: " + str(err)
         return boundMatPath
 

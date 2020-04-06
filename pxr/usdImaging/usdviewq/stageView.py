@@ -806,14 +806,14 @@ class StageView(QtOpenGL.QGLWidget):
         return self._rendererAovName
 
     def __init__(self, parent=None, dataModel=None, printTiming=False):
+
         glFormat = QtOpenGL.QGLFormat()
         msaa = os.getenv("USDVIEW_ENABLE_MSAA", "1")
         if msaa == "1":
             glFormat.setSampleBuffers(True)
             glFormat.setSamples(4)
         # XXX: for OSX (QT5 required)
-        glFormat.setVersion(3, 3)
-        glFormat.setProfile(QtOpenGL.QGLFormat.CoreProfile)
+        # glFormat.setProfile(QtOpenGL.QGLFormat.CoreProfile)
         super(StageView, self).__init__(glFormat, parent)
 
         self._dataModel = dataModel or StageView.DefaultDataModel()
