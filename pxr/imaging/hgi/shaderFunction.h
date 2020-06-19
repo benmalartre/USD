@@ -42,8 +42,12 @@ PXR_NAMESPACE_OPEN_SCOPE
 /// Describes the properties needed to create a GPU shader function.
 ///
 /// <ul>
+/// <li>debugName:
+///   This label can be applied as debug label for gpu debugging.</li>
 /// <li>shaderCode:
 ///   The ascii shader code.</li>
+/// <li>shaderStage:
+///   The shader stage this function represents (e.g. vertex or fragment shader).</li>
 /// </ul>
 ///
 struct HgiShaderFunctionDesc
@@ -96,6 +100,20 @@ public:
     HGI_API
     virtual std::string const& GetCompileErrors() = 0;
 
+    /// This function returns the handle to the Hgi backend's gpu resource, cast
+    /// to a uint64_t. Clients should avoid using this function and instead
+    /// use Hgi base classes so that client code works with any Hgi platform.
+    /// For transitioning code to Hgi, it can however we useful to directly
+    /// access a platform's internal resource handles.
+    /// There is no safety provided in using this. If you by accident pass a
+    /// HgiMetal resource into an OpenGL call, bad things may happen.
+    /// In OpenGL this returns the GLuint resource name.
+    /// In Metal this returns the id<MTLFunction> as uint64_t.
+    /// In Vulkan this returns the VkShaderModule as uint64_t.
+    /// In DX12 this returns the ID3D12Resource pointer as uint64_t.
+    HGI_API
+    virtual uint64_t GetRawResource() const = 0;
+
 protected:
     HGI_API
     HgiShaderFunction(HgiShaderFunctionDesc const& desc);
@@ -110,8 +128,8 @@ private:
 
 /// Explicitly instantiate and define ShaderFunction handle
 template class HgiHandle<class HgiShaderFunction>;
-typedef HgiHandle<class HgiShaderFunction> HgiShaderFunctionHandle;
-typedef std::vector<HgiShaderFunctionHandle> HgiShaderFunctionHandleVector;
+using HgiShaderFunctionHandle = HgiHandle<class HgiShaderFunction>;
+using HgiShaderFunctionHandleVector = std::vector<HgiShaderFunctionHandle>;
 
 
 PXR_NAMESPACE_CLOSE_SCOPE

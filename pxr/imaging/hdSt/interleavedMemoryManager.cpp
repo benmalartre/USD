@@ -39,7 +39,6 @@
 
 #include "pxr/imaging/hf/perfLog.h"
 
-#include <boost/make_shared.hpp>
 #include <vector>
 
 PXR_NAMESPACE_OPEN_SCOPE
@@ -50,7 +49,7 @@ PXR_NAMESPACE_OPEN_SCOPE
 HdBufferArrayRangeSharedPtr
 HdStInterleavedMemoryManager::CreateBufferArrayRange()
 {
-    return (boost::make_shared<_StripedInterleavedBufferRange>());
+    return (std::make_shared<_StripedInterleavedBufferRange>());
 }
 
 /// Returns the buffer specs from a given buffer array
@@ -59,7 +58,7 @@ HdStInterleavedMemoryManager::GetBufferSpecs(
     HdBufferArraySharedPtr const &bufferArray) const
 {
     _StripedInterleavedBufferSharedPtr bufferArray_ =
-        boost::static_pointer_cast<_StripedInterleavedBuffer> (bufferArray);
+        std::static_pointer_cast<_StripedInterleavedBuffer> (bufferArray);
     return bufferArray_->GetBufferSpecs();
 }
 
@@ -73,7 +72,7 @@ HdStInterleavedMemoryManager::GetResourceAllocation(
     size_t gpuMemoryUsed = 0;
 
     _StripedInterleavedBufferSharedPtr bufferArray_ =
-        boost::static_pointer_cast<_StripedInterleavedBuffer> (bufferArray);
+        std::static_pointer_cast<_StripedInterleavedBuffer> (bufferArray);
 
     TF_FOR_ALL(resIt, bufferArray_->GetResources()) {
         HdStBufferResourceGLSharedPtr const & resource = resIt->second;
@@ -111,7 +110,7 @@ HdStInterleavedUBOMemoryManager::CreateBufferArray(
 {
     const GlfContextCaps &caps = GlfContextCaps::GetInstance();
 
-    return boost::make_shared<
+    return std::make_shared<
         HdStInterleavedMemoryManager::_StripedInterleavedBuffer>(
             role,
             bufferSpecs,
@@ -130,13 +129,7 @@ HdStInterleavedUBOMemoryManager::ComputeAggregationId(
     static size_t salt = ArchHash(__FUNCTION__, sizeof(__FUNCTION__));
     size_t result = salt;
     for (HdBufferSpec const &spec : bufferSpecs) {
-        size_t const params[] = { 
-            spec.name.Hash(),
-            (size_t) spec.tupleType.type,
-            spec.tupleType.count
-        };
-        boost::hash_combine(result,
-                ArchHash((char const*)params, sizeof(size_t) * 3));
+        boost::hash_combine(result, spec.Hash());
     }
     boost::hash_combine(result, usageHint.value);
 
@@ -155,7 +148,7 @@ HdStInterleavedSSBOMemoryManager::CreateBufferArray(
 {
     const GlfContextCaps &caps = GlfContextCaps::GetInstance();
 
-    return boost::make_shared<
+    return std::make_shared<
         HdStInterleavedMemoryManager::_StripedInterleavedBuffer>(
             role,
             bufferSpecs,
@@ -174,13 +167,7 @@ HdStInterleavedSSBOMemoryManager::ComputeAggregationId(
     static size_t salt = ArchHash(__FUNCTION__, sizeof(__FUNCTION__));
     size_t result = salt;
     for (HdBufferSpec const &spec : bufferSpecs) {
-        size_t const params[] = { 
-            spec.name.Hash(),
-            (size_t) spec.tupleType.type,
-            spec.tupleType.count
-        };
-        boost::hash_combine(result,
-                ArchHash((char const*)params, sizeof(size_t) * 3));
+        boost::hash_combine(result, spec.Hash());
     }
     boost::hash_combine(result, usageHint.value);
 
@@ -432,7 +419,7 @@ HdStInterleavedMemoryManager::_StripedInterleavedBuffer::Reallocate(
     GLuint oldId = GetResources().begin()->second->GetId();
 
     _StripedInterleavedBufferSharedPtr curRangeOwner_ =
-        boost::static_pointer_cast<_StripedInterleavedBuffer> (curRangeOwner);
+        std::static_pointer_cast<_StripedInterleavedBuffer> (curRangeOwner);
 
     GLuint curId = curRangeOwner_->GetResources().begin()->second->GetId();
 

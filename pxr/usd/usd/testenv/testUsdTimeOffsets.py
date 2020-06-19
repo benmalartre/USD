@@ -22,6 +22,7 @@
 # KIND, either express or implied. See the Apache License for the specific
 # language governing permissions and limitations under the Apache License.
 
+from __future__ import print_function
 import sys, os, unittest
 from pxr import Sdf, Usd, Pcp, Vt, Tf, Gf
 
@@ -89,8 +90,8 @@ def VerifyOffset(adjPrim):
     prim = adjPrim.prim
     offset = adjPrim.layerOffset
 
-    print "Testing offset:", 
-    print offset.offset, "scale:", offset.scale, "prim:", adjPrim.prim.GetPath()
+    print("Testing offset:", offset.offset, "scale:", offset.scale,
+          "prim:", adjPrim.prim.GetPath())
 
     # When offset=1.0:
     #
@@ -106,31 +107,31 @@ def VerifyOffset(adjPrim):
         assert t == attr.Get(offset * t)
         expectedTimes.append(offset * t)
 
-    print "    Expected Times:", tuple(expectedTimes)
-    print "    Authored Times:", attr.GetTimeSamples()
+    print("    Expected Times:", tuple(expectedTimes))
+    print("    Authored Times:", attr.GetTimeSamples())
     for index, time in enumerate(attr.GetTimeSamples()):
         assert Gf.IsClose(expectedTimes[index], time, 1e-5)
 
     for t in (1.,2.,10.):
         stageTime = offset * t
-        print "    Bracketing time samples for t=%s: %s" \
-            % (stageTime, attr.GetBracketingTimeSamples(stageTime))
+        print("    Bracketing time samples for t=%s: %s" \
+            % (stageTime, attr.GetBracketingTimeSamples(stageTime)))
         assert (stageTime, stageTime) == attr.GetBracketingTimeSamples(stageTime)
 
     stageTime = offset * 0.
-    print "    Bracketing time samples for t=%s: %s" \
-        % (stageTime, attr.GetBracketingTimeSamples(stageTime))
+    print("    Bracketing time samples for t=%s: %s" \
+        % (stageTime, attr.GetBracketingTimeSamples(stageTime)))
     assert (offset * 1., offset * 1.) == attr.GetBracketingTimeSamples(stageTime)
 
     for (lo, hi) in [(1., 2.), (2., 10.)]:
         stageTime = ((offset * lo) + (offset * hi)) / 2.
-        print "    Bracketing time samples for t=%s: %s" \
-            % (stageTime, attr.GetBracketingTimeSamples(stageTime))
+        print("    Bracketing time samples for t=%s: %s" \
+            % (stageTime, attr.GetBracketingTimeSamples(stageTime)))
         assert ((offset * lo), (offset *hi)) == attr.GetBracketingTimeSamples(stageTime)
         
     stageTime = offset * 11.
-    print "    Bracketing time samples for t=%s: %s" \
-        % (stageTime, attr.GetBracketingTimeSamples(stageTime))
+    print("    Bracketing time samples for t=%s: %s" \
+        % (stageTime, attr.GetBracketingTimeSamples(stageTime)))
     assert (offset * 10., offset * 10.) == attr.GetBracketingTimeSamples(stageTime)
 
 def BuildReferenceOffsets(rootLyr, testLyr, makePayloads=False):
@@ -163,6 +164,14 @@ def BuildReferenceOffsets(rootLyr, testLyr, makePayloads=False):
                          makePayload=makePayloads)
                 for c in cases]
 
+    # If the layers have different tcps values, this will be factored in as an
+    # additional scale in the composed layer offset.
+    if rootLyr.timeCodesPerSecond != testLyr.timeCodesPerSecond:
+        tcpsScale = Sdf.LayerOffset(
+            scale=rootLyr.timeCodesPerSecond / testLyr.timeCodesPerSecond)
+        for p in adjPrims:
+            p.layerOffset = p.layerOffset * tcpsScale
+
     rootLyr.Save()
     testLyr.Save()
 
@@ -185,7 +194,11 @@ def BuildNestedReferenceOffsets(adjustedPrims, rootLyr, refLyr, makePayloads=Fal
         # ours so the verification code works. We're assuming that
         # SdLayerOffset operators are tested elsewhere.
         #
-        adjPrim.layerOffset = adjPrim.layerOffset * p.layerOffset
+        # If the layers have different tcps values, this will be factored in as
+        # an additional scale in the composed layer offset.
+        tcpsScale = Sdf.LayerOffset(
+            scale=rootLyr.timeCodesPerSecond / refLyr.timeCodesPerSecond)
+        adjPrim.layerOffset = adjPrim.layerOffset * tcpsScale * p.layerOffset
         adjPrims += [adjPrim]
 
     rootLyr.Save()
@@ -203,18 +216,19 @@ class TestUsdTimeOffsets(unittest.TestCase):
             testLyr = GenTestLayer("TestReferenceOffsets", fmt)
             rootLyr = Sdf.Layer.CreateNew("TestReferenceOffsets."+fmt)
             nestedRootLyr = Sdf.Layer.CreateNew("TestReferenceOffsetsNested."+fmt)
+            nestedRootLyr.timeCodesPerSecond = 48.0
 
-            print "-"*80
-            print "Testing flat offsets:"
-            print "-"*80
+            print("-"*80)
+            print("Testing flat offsets:")
+            print("-"*80)
             adjPrims = BuildReferenceOffsets(rootLyr, testLyr)
             for adjPrim in adjPrims:
                 VerifyOffset(adjPrim)
 
-            print
-            print "-"*80
-            print "Testing nested offsets:"
-            print "-"*80
+            print()
+            print("-"*80)
+            print("Testing nested offsets:")
+            print("-"*80)
             for adjPrim in BuildNestedReferenceOffsets(
                 adjPrims, nestedRootLyr, rootLyr):
                 VerifyOffset(adjPrim)
@@ -224,18 +238,19 @@ class TestUsdTimeOffsets(unittest.TestCase):
             testLyr = GenTestLayer("TestPayloadOffsets", fmt)
             rootLyr = Sdf.Layer.CreateNew("TestPayloadOffsets."+fmt)
             nestedRootLyr = Sdf.Layer.CreateNew("TestPayloadOffsetsNested."+fmt)
+            rootLyr.timeCodesPerSecond = 48.0
 
-            print "-"*80
-            print "Testing flat offsets:"
-            print "-"*80
+            print("-"*80)
+            print("Testing flat offsets:")
+            print("-"*80)
             adjPrims = BuildReferenceOffsets(rootLyr, testLyr, makePayloads=True)
             for adjPrim in adjPrims:
                 VerifyOffset(adjPrim)
 
-            print
-            print "-"*80
-            print "Testing nested offsets:"
-            print "-"*80
+            print()
+            print("-"*80)
+            print("Testing nested offsets:")
+            print("-"*80)
             for adjPrim in BuildNestedReferenceOffsets(
                 adjPrims, nestedRootLyr, rootLyr, makePayloads=True):
                 VerifyOffset(adjPrim)
@@ -273,9 +288,14 @@ class TestUsdTimeOffsets(unittest.TestCase):
             bazPayload = Sdf.PrimSpec(payloadLayer, 'Baz', Sdf.SpecifierDef)
 
             # make Foo reference Baz.
-            payloadOffset = Sdf.LayerOffset(scale=0.5, offset=-1.0)
+            payloadOffset = Sdf.LayerOffset(offset=-1.0)
             fooRoot.payloadList.Add(Sdf.Payload(payloadLayer.identifier,
                                                 bazPayload.path, payloadOffset))
+            # Set the payload layer to have a different tcps. The effective
+            # payloadOffset for verification below will have the effective scale
+            # from the tcps difference between layers.
+            payloadLayer.timeCodesPerSecond = 48.0
+            payloadOffset = payloadOffset * Sdf.LayerOffset(scale = 24.0 / 48.0)
 
             # Create a UsdStage, get 'Foo'.
             stage = Usd.Stage.Open(rootLayer)
@@ -293,8 +313,8 @@ class TestUsdTimeOffsets(unittest.TestCase):
                      attr.Get(time=2.0)))
                 # Check that the time value in the reference is correctly
                 # transformed.
-                authoredTime = barRef.attributes[
-                    'attr'].GetInfo('timeSamples').keys()[0]
+                authoredTime = list(barRef.attributes[
+                    'attr'].GetInfo('timeSamples').keys())[0]
                 self.assertEqual(refOffset.GetInverse() * 2.0, authoredTime)
 
             # Make an EditTarget to author into the payloaded Baz.
@@ -309,8 +329,8 @@ class TestUsdTimeOffsets(unittest.TestCase):
                      attr.Get(time=2.0)))
                 # Check that the time value in the payload is correctly
                 # transformed.
-                authoredTime = bazPayload.attributes[
-                    'attrFromBaz'].GetInfo('timeSamples').keys()[0]
+                authoredTime = list(bazPayload.attributes[
+                    'attrFromBaz'].GetInfo('timeSamples').keys())[0]
                 self.assertEqual(payloadOffset.GetInverse() * 2.0, authoredTime)
 
             # Make an EditTarget to author into the sublayer.
@@ -323,8 +343,8 @@ class TestUsdTimeOffsets(unittest.TestCase):
                          attr.Get(time=2.0)))
                 # Check that the time value in the sublayer is correctly
                 # transformed.
-                authoredTime = subLayer.GetAttributeAtPath(
-                    '/Foo.attr').GetInfo('timeSamples').keys()[0]
+                authoredTime = list(subLayer.GetAttributeAtPath(
+                    '/Foo.attr').GetInfo('timeSamples').keys())[0]
                 self.assertEqual(subOffset.GetInverse() * 2.0, authoredTime)
 
 if __name__ == '__main__':

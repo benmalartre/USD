@@ -254,13 +254,11 @@ HdSceneDelegate::SampleInstancerTransform(SdfPath const &instancerId,
 
 /*virtual*/
 SdfPath
-HdSceneDelegate::GetPathForInstanceIndex(const SdfPath &protoRprimId,
-                                         int protoIndex,
-                                         int *instancerIndex,
-                                         SdfPath *masterCachePath,
-                                         SdfPathVector *instanceContext)
+HdSceneDelegate::GetScenePrimPath(SdfPath const& rprimId,
+                                  int instanceIndex,
+                                  HdInstancerContext *instancerContext)
 {
-    return SdfPath();
+    return rprimId.ReplacePrefix(_delegateID, SdfPath::AbsoluteRootPath());
 }
 
 

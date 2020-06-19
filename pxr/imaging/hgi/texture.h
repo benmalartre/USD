@@ -49,7 +49,9 @@ PXR_NAMESPACE_OPEN_SCOPE
 /// <li>format:
 ///   The format of the texture.
 /// <li>dimensions:
-///   The resolution of the texture (width, height, depth/volume).</li>
+///   The resolution of the texture (width, height, depth).</li>
+/// <li>type:
+///   Type of texture (2D, 3D).</li>
 /// <li>layerCount:
 ///   The number of layers (texture-arrays).</li>
 /// <li>mipLevels:
@@ -57,7 +59,7 @@ PXR_NAMESPACE_OPEN_SCOPE
 /// <li>sampleCount:
 ///   samples per texel (multi-sampling).</li>
 /// <li>pixelsByteSize:
-///   Byte size (length) of pixel data.</li>
+///   Byte size (length) of pixel data (i.e., initialData).</li>
 /// <li>initialData:
 ///   CPU pointer to initialization pixels of the texture.
 ///   The memory is consumed immediately during the creation of the HgiTexture.
@@ -71,6 +73,7 @@ struct HgiTextureDesc
     HgiTextureDesc()
     : usage(HgiTextureUsageBitsColorTarget)
     , format(HgiFormatInvalid)
+    , type(HgiTextureType2D)
     , dimensions(0)
     , layerCount(1)
     , mipLevels(1)
@@ -82,6 +85,7 @@ struct HgiTextureDesc
     std::string debugName;
     HgiTextureUsage usage;
     HgiFormat format;
+    HgiTextureType type;
     GfVec3i dimensions;
     uint16_t layerCount;
     uint16_t mipLevels;
@@ -121,6 +125,20 @@ public:
     HGI_API
     HgiTextureDesc const& GetDescriptor() const;
 
+    /// This function returns the handle to the Hgi backend's gpu resource, cast
+    /// to a uint64_t. Clients should avoid using this function and instead
+    /// use Hgi base classes so that client code works with any Hgi platform.
+    /// For transitioning code to Hgi, it can however we useful to directly
+    /// access a platform's internal resource handles.
+    /// There is no safety provided in using this. If you by accident pass a
+    /// HgiMetal resource into an OpenGL call, bad things may happen.
+    /// In OpenGL this returns the GLuint resource name.
+    /// In Metal this returns the id<MTLTexture> as uint64_t.
+    /// In Vulkan this returns the VkImage as uint64_t.
+    /// In DX12 this returns the ID3D12Resource pointer as uint64_t.
+    HGI_API
+    virtual uint64_t GetRawResource() const = 0;
+
 protected:
     HGI_API
     HgiTexture(HgiTextureDesc const& desc);
@@ -136,8 +154,8 @@ private:
 
 /// Explicitly instantiate and define texture handle
 template class HgiHandle<class HgiTexture>;
-typedef HgiHandle<class HgiTexture> HgiTextureHandle;
-typedef std::vector<HgiTextureHandle> HgiTextureHandleVector;
+using HgiTextureHandle = HgiHandle<class HgiTexture>;
+using HgiTextureHandleVector = std::vector<HgiTextureHandle>;
 
 
 PXR_NAMESPACE_CLOSE_SCOPE

@@ -30,14 +30,12 @@
 #include "pxr/usd/sdf/path.h"
 #include "pxr/base/vt/value.h"
 
-#include <boost/shared_ptr.hpp>
-
 #include <vector>
 
 PXR_NAMESPACE_OPEN_SCOPE
 
 class HdSceneDelegate;
-typedef boost::shared_ptr<class HdBufferArrayRange> HdBufferArrayRangeSharedPtr;
+using HdBufferArrayRangeSharedPtr = std::shared_ptr<class HdBufferArrayRange>;
 
 /// \class HdStExtComputation
 ///

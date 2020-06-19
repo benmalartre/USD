@@ -39,14 +39,13 @@ class HgiGLTexture final : public HgiTexture
 {
 public:
     HGIGL_API
-    virtual ~HgiGLTexture();
+    ~HgiGLTexture() override;
 
-    /// Returns the internal OpenGL unique Id of the texture.
-    uint32_t GetTextureId() const {return _textureId;}
-
-    /// Returns the descriptor of the texture.
     HGIGL_API
-    HgiTextureDesc const& GetDescriptor() const;
+    uint64_t GetRawResource() const override;
+
+    /// Returns the OpenGL id / name of the texture.
+    uint32_t GetTextureId() const {return _textureId;}
 
 protected:
     friend class HgiGL;
@@ -59,7 +58,6 @@ private:
     HgiGLTexture & operator=(const HgiGLTexture&) = delete;
     HgiGLTexture(const HgiGLTexture&) = delete;
 
-    HgiTextureDesc _descriptor;
     uint32_t _textureId;
 };
 

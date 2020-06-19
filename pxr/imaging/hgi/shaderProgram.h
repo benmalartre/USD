@@ -42,6 +42,8 @@ PXR_NAMESPACE_OPEN_SCOPE
 /// Describes the properties needed to create a GPU shader program.
 ///
 /// <ul>
+/// <li>debugName:
+///   This label can be applied as debug label for gpu debugging.</li>
 /// <li>shaderFunctions:
 ///   Holds handles to shader functions for each shader stage.</li>
 /// </ul>
@@ -97,6 +99,17 @@ public:
     HGI_API
     virtual HgiShaderFunctionHandleVector const& GetShaderFunctions() const = 0;
 
+    /// This function returns the handle to the Hgi backend's gpu resource, cast
+    /// to a uint64_t. Clients should avoid using this function and instead
+    /// use Hgi base classes so that client code works with any Hgi platform.
+    /// For transitioning code to Hgi, it can however we useful to directly
+    /// access a platform's internal resource handles.
+    /// There is no safety provided in using this. If you by accident pass a
+    /// HgiMetal resource into an OpenGL call, bad things may happen.
+    /// In OpenGL this returns the GLuint resource name.
+    /// In Metal, Vulkan this returns 0.
+    HGI_API
+    virtual uint64_t GetRawResource() const = 0;
 
 protected:
     HGI_API
@@ -112,8 +125,8 @@ private:
 
 /// Explicitly instantiate and define ShaderProgram handle
 template class HgiHandle<class HgiShaderProgram>;
-typedef HgiHandle<class HgiShaderProgram> HgiShaderProgramHandle;
-typedef std::vector<HgiShaderProgramHandle> HgiShaderProgramHandleVector;
+using HgiShaderProgramHandle = HgiHandle<class HgiShaderProgram>;
+using HgiShaderProgramHandleVector = std::vector<HgiShaderProgramHandle>;
 
 
 PXR_NAMESPACE_CLOSE_SCOPE

@@ -40,8 +40,6 @@ HdxPrmanRenderDelegate::HdxPrmanRenderDelegate(
     std::shared_ptr<HdPrman_Context> context)
     : HdPrmanRenderDelegate(context)
 {
-    context->SetIsInteractive(true);
-    context->SetInstantaneousShutter(false);
     _Initialize(context);
 }
 
@@ -50,10 +48,6 @@ HdxPrmanRenderDelegate::HdxPrmanRenderDelegate(
     HdRenderSettingsMap const& settingsMap)
     : HdPrmanRenderDelegate(context, settingsMap)
 {
-    // If we get a settingsMap, assume this is non-interactive batch mode.
-    // Temporary until hydra has a formal notion of batch versus interactive
-    context->SetIsInteractive(false);
-    context->SetInstantaneousShutter(false);
     _Initialize(context);
 }
 
@@ -70,7 +64,7 @@ HdxPrmanRenderDelegate::_Initialize(std::shared_ptr<HdPrman_Context> context)
         _interactiveContext->Begin(this);
     }
 
-    _resourceRegistry = boost::make_shared<HdxPrman_ResourceRegistry>(
+    _resourceRegistry = std::make_shared<HdxPrman_ResourceRegistry>(
         _interactiveContext);
 }
 
@@ -169,7 +163,8 @@ HdxPrmanRenderDelegate::GetDefaultAovDescriptor(
         return HdAovDescriptor(HdFormatInt32, false, VtValue(-1));
     }
 
-    return HdAovDescriptor();
+    return HdAovDescriptor(HdFormatFloat32Vec3, false,
+                           VtValue(GfVec3f(0.0f)));
 }
 
 bool

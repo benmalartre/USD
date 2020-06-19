@@ -1318,6 +1318,27 @@ public:
     bool ClearMetadataByDictKey(
         const TfToken& key, const TfToken& keyPath) const;
 
+    /// Writes the fallback prim types defined in the schema registry to the 
+    /// stage as dictionary valued fallback prim type metadata. If the stage 
+    /// already has fallback prim type metadata, the fallback types from the 
+    /// schema registry will be added to the existing metadata, only for types 
+    /// that are already present in the dictionary, i.e. this won't overwrite 
+    /// existing fallback entries.
+    ///
+    /// The current edit target determines whether the metadata is written to 
+    /// the root layer or the session layer. If the edit target specifies 
+    /// another layer besides these, this will produce an error.
+    ///
+    /// This function can be used at any point before calling Save or Export on 
+    /// a stage to record the fallback types for the current schemas. This 
+    /// allows another version of Usd to open this stage and treat prim types it
+    /// doesn't recognize as a type it does recognize defined for it in this 
+    /// metadata.
+    /// 
+    /// \sa \ref Usd_OM_FallbackPrimTypes UsdSchemaRegistry::GetFallbackPrimTypes
+    USD_API
+    void WriteFallbackPrimTypes();
+
     /// @}
 
     // --------------------------------------------------------------------- //
@@ -1368,9 +1389,16 @@ public:
     /// The timeCodesPerSecond value scales the time ordinate for the samples
     /// contained in the stage to seconds. If timeCodesPerSecond is 24, then a 
     /// sample at time ordinate 24 should be viewed exactly one second after the 
-    /// sample at time ordinate 0. 
+    /// sample at time ordinate 0.
     ///
-    /// The default value of timeCodesPerSecond is 24.
+    /// Like SdfLayer::GetTimeCodesPerSecond, this accessor uses a dynamic
+    /// fallback to framesPerSecond.  The order of precedence is:
+    ///
+    /// \li timeCodesPerSecond from session layer
+    /// \li timeCodesPerSecond from root layer
+    /// \li framesPerSecond from session layer
+    /// \li framesPerSecond from root layer
+    /// \li fallback value of 24
     USD_API
     double GetTimeCodesPerSecond() const;
 
@@ -1884,11 +1912,11 @@ private:
     // Specialized Value Resolution
     // --------------------------------------------------------------------- //
 
-    // Specifier composition is special.  See comments in .cpp in
-    // _ComposeSpecifier. This method returns either the authored specifier or
-    // the fallback value registered in Sdf.
-    SdfSpecifier _GetSpecifier(const UsdPrim &prim) const;
-    SdfSpecifier _GetSpecifier(Usd_PrimDataConstPtr primData) const;
+    // Helpers for resolving values for metadata fields requiring
+    // special behaviors.
+    static SdfSpecifier _GetSpecifier(Usd_PrimDataConstPtr primData);
+    static TfToken _GetKind(Usd_PrimDataConstPtr primData);
+    static bool _IsActive(Usd_PrimDataConstPtr primData);
 
     // Custom is true if it is true anywhere in the stack.
     bool _IsCustom(const UsdProperty &prop) const;
@@ -1998,20 +2026,11 @@ private:
                             Composer *composer) const;
 
     template <class Composer>
-    void _GetPrimTypeNameImpl(const UsdPrim &prim,
-                              bool useFallbacks,
-                              Composer *composer) const;
-
-    template <class Composer>
-    bool _GetPrimSpecifierImpl(Usd_PrimDataConstPtr primData,
-                               bool useFallbacks, Composer *composer) const;
-
-    template <class Composer>
-    bool _GetSpecialMetadataImpl(const UsdObject &obj,
-                                 const TfToken &fieldName,
-                                 const TfToken &keyPath,
-                                 bool useFallbacks,
-                                 Composer *composer) const;
+    bool _GetSpecialPropMetadataImpl(const UsdObject &obj,
+                                     const TfToken &fieldName,
+                                     const TfToken &keyPath,
+                                     bool useFallbacks,
+                                     Composer *composer) const;
     template <class Composer>
     bool _GetMetadataImpl(const UsdObject &obj,
                           const TfToken& fieldName,
@@ -2168,6 +2187,8 @@ private:
     std::unique_ptr<Usd_ClipCache> _clipCache;
     std::unique_ptr<Usd_InstanceCache> _instanceCache;
 
+    TfHashMap<TfToken, TfToken, TfHash> _invalidPrimTypeToFallbackMap;
+
     // A map from Path to Prim, for fast random access.
     typedef TfHashMap<
         SdfPath, Usd_PrimDataIPtr, SdfPath::Hash> PathToNodeMap;
@@ -2198,6 +2219,7 @@ private:
     UsdStageLoadRules _loadRules;
     
     bool _isClosingStage;
+    bool _isWritingFallbackPrimTypes;
 
     friend class UsdAPISchemaBase;
     friend class UsdAttribute;

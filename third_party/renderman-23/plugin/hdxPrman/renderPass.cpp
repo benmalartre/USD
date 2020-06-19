@@ -91,8 +91,10 @@ _DiffTimeToNow(std::chrono::steady_clock::time_point const& then)
 
 void
 HdxPrman_RenderPass::_Execute(HdRenderPassStateSharedPtr const& renderPassState,
-                            TfTokenVector const &renderTags)
+                              TfTokenVector const &/*renderTags*/)
 {
+    HD_TRACE_FUNCTION();
+    
     static const RtUString us_PxrPerspective("PxrPerspective");
     static const RtUString us_PxrOrthographic("PxrOrthographic");
     static const RtUString us_PathTracer("PathTracer");
@@ -116,6 +118,14 @@ HdxPrman_RenderPass::_Execute(HdRenderPassStateSharedPtr const& renderPassState,
     if (currentSceneVersion != _lastRenderedVersion) {
         needStartRender = true;
         _lastRenderedVersion = currentSceneVersion;
+    }
+
+    // Creates displays if needed
+    HdRenderPassAovBindingVector aovBindings =
+        renderPassState->GetAovBindings();
+    if(_interactiveContext->CreateDisplays(aovBindings))
+    {
+        needStartRender = true;
     }
 
     // Enable/disable the fallback light when the scene provides no lights.
@@ -222,7 +232,6 @@ HdxPrman_RenderPass::_Execute(HdRenderPassStateSharedPtr const& renderPassState,
         flipZ[2][2] = -1.0;
         viewToWorldCorrectionMatrix = flipZ * viewToWorldCorrectionMatrix;
 
-        riley::Transform xform;
         if (hdCam) {
             // Use time sampled transforms authored on the scene camera.
             HdTimeSampleArray<GfMatrix4d, HDPRMAN_MAX_TIME_SAMPLES> const& 
@@ -236,24 +245,31 @@ HdxPrman_RenderPass::_Execute(HdRenderPassStateSharedPtr const& renderPassState,
                     viewToWorldCorrectionMatrix * xforms.values[i]);
             }
 
-            xform = { unsigned(xforms.count), xf_rt_values.data(),
-                      xforms.times.data() };
+            riley::Transform xform = { unsigned(xforms.count),
+                                       xf_rt_values.data(),
+                                       xforms.times.data() };
+
+            // Commit camera.
+            riley->ModifyCamera(
+                _interactiveContext->cameraId, 
+                &cameraNode,
+                &xform, 
+                &camParams);
         } else {
             // Use the framing state as a single time sample.
             float const zerotime = 0.0f;
             RtMatrix4x4 matrix = HdPrman_GfMatrixToRtMatrix(
                 viewToWorldCorrectionMatrix * viewToWorldMatrix);
 
-            xform = {1, &matrix, &zerotime};
+            riley::Transform xform = {1, &matrix, &zerotime};
+
+            // Commit camera.
+            riley->ModifyCamera(
+                _interactiveContext->cameraId, 
+                &cameraNode,
+                &xform, 
+                &camParams);
         }
-
-        // Commit new camera.
-
-        riley->ModifyCamera(
-            _interactiveContext->cameraId, 
-            &cameraNode,
-            &xform, 
-            &camParams);
 
         // Update the framebuffer Z scaling
         _interactiveContext->framebuffer.proj = proj;
@@ -389,15 +405,12 @@ HdxPrman_RenderPass::_Execute(HdRenderPassStateSharedPtr const& renderPassState,
 
     _converged = !_interactiveContext->renderThread.IsRendering();
 
-    HdRenderPassAovBindingVector aovBindings =
-        renderPassState->GetAovBindings();
-
-
     // Blit from the framebuffer to the currently selected AOVs.
     // Lock the framebuffer when reading so we don't overlap
     // with RenderMan's resize/writing.
     _interactiveContext->framebuffer.mutex.lock();
-    for (size_t aov = 0; aov < aovBindings.size(); ++aov) {
+
+    for(size_t aov = 0; aov < aovBindings.size(); ++aov) {
         if(!TF_VERIFY(aovBindings[aov].renderBuffer)) {
             continue;
         }
@@ -406,38 +419,12 @@ HdxPrman_RenderPass::_Execute(HdRenderPassStateSharedPtr const& renderPassState,
 
         // Forward convergence state to the render buffers...
         rb->SetConverged(_converged);
-
-        if (aovBindings[aov].aovName == HdAovTokens->color) {
-            rb->Blit(HdFormatFloat32Vec4,
-                _interactiveContext->framebuffer.w,
-                _interactiveContext->framebuffer.h,
-                reinterpret_cast<uint8_t*>(
-                   _interactiveContext->framebuffer.color.data()));
-        } else if (aovBindings[aov].aovName == HdAovTokens->depth) {
-            rb->Blit(HdFormatFloat32,
-                _interactiveContext->framebuffer.w,
-                _interactiveContext->framebuffer.h,
-                reinterpret_cast<uint8_t*>(
-                    _interactiveContext->framebuffer.depth.data()));
-        } else if (aovBindings[aov].aovName == HdAovTokens->primId) {
-            rb->Blit(HdFormatInt32,
-                _interactiveContext->framebuffer.w,
-                _interactiveContext->framebuffer.h,
-                reinterpret_cast<uint8_t*>(
-                    _interactiveContext->framebuffer.primId.data()));
-        } else if (aovBindings[aov].aovName == HdAovTokens->instanceId) {
-            rb->Blit(HdFormatInt32,
-                _interactiveContext->framebuffer.w,
-                _interactiveContext->framebuffer.h,
-                reinterpret_cast<uint8_t*>(
-                    _interactiveContext->framebuffer.instanceId.data()));
-        } else if (aovBindings[aov].aovName == HdAovTokens->elementId) {
-            rb->Blit(HdFormatInt32,
-                _interactiveContext->framebuffer.w,
-                _interactiveContext->framebuffer.h,
-                reinterpret_cast<uint8_t*>(
-                    _interactiveContext->framebuffer.elementId.data()));
-        }
+        rb->Blit(_interactiveContext->framebuffer.aovs[aov].format,
+                 _interactiveContext->framebuffer.w,
+                 _interactiveContext->framebuffer.h,
+                 reinterpret_cast<uint8_t*>(
+                     _interactiveContext->
+                     framebuffer.aovs[aov].pixels.data()));
     }
     _interactiveContext->framebuffer.mutex.unlock();
 }

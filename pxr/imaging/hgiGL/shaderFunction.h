@@ -40,13 +40,16 @@ class HgiGLShaderFunction final : public HgiShaderFunction
 {
 public:
     HGIGL_API
-    virtual ~HgiGLShaderFunction();
+    ~HgiGLShaderFunction() override;
 
     HGIGL_API
     bool IsValid() const override;
 
     HGIGL_API
     std::string const& GetCompileErrors() override;
+
+    HGIGL_API
+    uint64_t GetRawResource() const override;
 
     /// Returns the gl resource id of the shader.
     HGIGL_API

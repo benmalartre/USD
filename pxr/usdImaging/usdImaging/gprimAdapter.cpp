@@ -272,7 +272,7 @@ UsdImagingGprimAdapter::UpdateForTime(UsdPrim const& prim,
                                    instancerContext) const
 {
     UsdImagingValueCache* valueCache = _GetValueCache();
-    HdPrimvarDescriptorVector& primvars = valueCache->GetPrimvars(cachePath);
+    HdPrimvarDescriptorVector& vPrimvars = valueCache->GetPrimvars(cachePath);
 
     if (requestedBits & HdChangeTracker::DirtyPoints) {
 
@@ -280,7 +280,7 @@ UsdImagingGprimAdapter::UpdateForTime(UsdPrim const& prim,
 
         // Expose points as a primvar.
         _MergePrimvar(
-            &primvars,
+            &vPrimvars,
             HdTokens->points,
             HdInterpolationVertex,
             HdPrimvarRoleTokens->point);
@@ -294,7 +294,7 @@ UsdImagingGprimAdapter::UpdateForTime(UsdPrim const& prim,
             pointBased.GetVelocitiesAttr().Get(&velocities, time)) {
             // Expose velocities as a primvar.
             _MergePrimvar(
-                &primvars,
+                &vPrimvars,
                 HdTokens->velocities,
                 HdInterpolationVertex,
                 HdPrimvarRoleTokens->vector);
@@ -310,7 +310,7 @@ UsdImagingGprimAdapter::UpdateForTime(UsdPrim const& prim,
             pointBased.GetAccelerationsAttr().Get(&accelerations, time)) {
             // Expose accelerations as a primvar.
             _MergePrimvar(
-                &primvars,
+                &vPrimvars,
                 HdTokens->accelerations,
                 HdInterpolationVertex,
                 HdPrimvarRoleTokens->vector);
@@ -344,7 +344,7 @@ UsdImagingGprimAdapter::UpdateForTime(UsdPrim const& prim,
         if (GetColor(prim, time, &colorInterp, &color)) {
             valueCache->GetColor(cachePath) = color;
             _MergePrimvar(
-                &primvars,
+                &vPrimvars,
                 HdTokens->displayColor,
                 _UsdToHdInterpolation(colorInterp),
                 HdPrimvarRoleTokens->color);
@@ -361,7 +361,7 @@ UsdImagingGprimAdapter::UpdateForTime(UsdPrim const& prim,
         if (GetOpacity(prim, time, &opacityInterp, &opacity)) {
             valueCache->GetOpacity(cachePath) = opacity;
             _MergePrimvar(
-                &primvars,
+                &vPrimvars,
                 HdTokens->displayOpacity,
                 _UsdToHdInterpolation(opacityInterp));
         } else {
@@ -439,9 +439,10 @@ UsdImagingGprimAdapter::ProcessPropertyChange(UsdPrim const& prim,
                                       SdfPath const& cachePath, 
                                       TfToken const& propertyName)
 {
-    if(propertyName == UsdGeomTokens->visibility 
-          || propertyName == UsdGeomTokens->purpose)
+    if (propertyName == UsdGeomTokens->visibility)
         return HdChangeTracker::DirtyVisibility;
+    else if (propertyName == UsdGeomTokens->purpose)
+        return HdChangeTracker::DirtyRenderTag;
 
     else if (UsdGeomXformable::IsTransformationAffectedByAttrNamed(propertyName))
         return HdChangeTracker::DirtyTransform;
@@ -459,20 +460,11 @@ UsdImagingGprimAdapter::ProcessPropertyChange(UsdPrim const& prim,
         return HdChangeTracker::DirtyMaterialId;
     }
     
-    // Is the property a primvar?
-    static std::string primvarsNS = "primvars:";
-    if (TfStringStartsWith(propertyName.GetString(), primvarsNS)) {
-        TfToken primvarName = TfToken(
-            propertyName.GetString().substr(primvarsNS.size()));
-
-        if (!_IsBuiltinPrimvar(primvarName)) {
-            if (_PrimvarChangeRequiresResync(
-                    prim, cachePath, propertyName, primvarName)) {
-                return HdChangeTracker::AllDirty;
-            } else {
-                return HdChangeTracker::DirtyPrimvar;
-            }
-        }
+    // Note: This doesn't handle "built-in" attributes that are treated as
+    // primvars. That responsibility falls on the child adapter.
+    if (UsdGeomPrimvar::IsPrimvarRelatedPropertyName(propertyName)) {
+        return UsdImagingPrimAdapter::_ProcessPrefixedPrimvarPropertyChange(
+                prim, cachePath, propertyName);
     }
 
     return HdChangeTracker::AllDirty;

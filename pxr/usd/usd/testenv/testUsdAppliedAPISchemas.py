@@ -25,7 +25,7 @@
 import os, unittest
 from pxr import Plug, Sdf, Usd, Vt, Tf
 
-class TestUsdSchemaRegistry(unittest.TestCase):
+class TestUsdAppliedAPISchemas(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         pr = Plug.Registry()
@@ -72,6 +72,8 @@ class TestUsdSchemaRegistry(unittest.TestCase):
         self.assertTrue(singleApplyAPIDef)
         self.assertEqual(singleApplyAPIDef.GetPropertyNames(), [
             "single:bool_attr", "single:token_attr", "single:relationship"])
+        self.assertEqual(singleApplyAPIDef.GetDocumentation(),
+            "Test single apply API schema")
 
         # Find the prim definition for the test multi apply schema. It has
         # some properties defined. Note that the properties in the multi apply
@@ -81,6 +83,8 @@ class TestUsdSchemaRegistry(unittest.TestCase):
         self.assertTrue(multiApplyAPIDef)
         self.assertEqual(multiApplyAPIDef.GetPropertyNames(), [
             "bool_attr", "token_attr", "relationship"])
+        self.assertEqual(multiApplyAPIDef.GetDocumentation(),
+            "Test multi-apply API schema")
 
         # Find the prim definition for the concrete prim type with fallback
         # API schemas. You can query its API schemas and it will have properties
@@ -99,6 +103,8 @@ class TestUsdSchemaRegistry(unittest.TestCase):
             "single:token_attr", 
             "testAttr", 
             "testRel"])
+        # Note that prim def documentation does not come from the fallback API
+        # schemas.
         self.assertEqual(primDef.GetDocumentation(), 
                          "Test with fallback API schemas")
 
@@ -176,6 +182,9 @@ class TestUsdSchemaRegistry(unittest.TestCase):
         untypedPrim = stage.DefinePrim("/Untyped")
         self.assertEqual(untypedPrim.GetTypeName(), '')
         self.assertEqual(untypedPrim.GetAppliedSchemas(), [])
+        self.assertEqual(untypedPrim.GetPrimTypeInfo().GetTypeName(), '')
+        self.assertEqual(untypedPrim.GetPrimTypeInfo().GetAppliedAPISchemas(), 
+                         [])
         self.assertEqual(untypedPrim.GetPropertyNames(), [])
 
         # Add an api schema to the prim's metadata.
@@ -186,6 +195,9 @@ class TestUsdSchemaRegistry(unittest.TestCase):
         # Prim still has no type but does have applied schemas
         self.assertEqual(untypedPrim.GetTypeName(), '')
         self.assertEqual(untypedPrim.GetAppliedSchemas(), ["TestSingleApplyAPI"])
+        self.assertEqual(untypedPrim.GetPrimTypeInfo().GetTypeName(), '')
+        self.assertEqual(untypedPrim.GetPrimTypeInfo().GetAppliedAPISchemas(), 
+                         ["TestSingleApplyAPI"])
         self.assertTrue(untypedPrim.HasAPI(
             Tf.Type(Usd.SchemaBase).FindDerivedByName("TestSingleApplyAPI")))
 
@@ -195,6 +207,17 @@ class TestUsdSchemaRegistry(unittest.TestCase):
             "single:bool_attr", "single:relationship", "single:token_attr"])
         self.assertEqual(untypedPrim.GetAttribute("single:token_attr").Get(), 
                          "bar")
+
+        # Applied schemas are unable to define fallback metadata values for 
+        # prims. Just verifying that no fallback exists for "hidden" here as
+        # a contrast to the other cases below where this metadata fallback will
+        # be defined.
+        self.assertFalse("hidden" in untypedPrim.GetAllMetadata())
+        self.assertIsNone(untypedPrim.GetMetadata("hidden"))
+        self.assertFalse(untypedPrim.HasAuthoredMetadata("hidden"))
+
+        # Untyped prim still has no documentation even with API schemas applied.
+        self.assertIsNone(untypedPrim.GetMetadata("documentation"))
 
     def test_TypedPrimOnStage(self):
         """
@@ -208,6 +231,10 @@ class TestUsdSchemaRegistry(unittest.TestCase):
         typedPrim = stage.DefinePrim("/TypedPrim", "TestTypedSchema")
         self.assertEqual(typedPrim.GetTypeName(), 'TestTypedSchema')
         self.assertEqual(typedPrim.GetAppliedSchemas(), [])
+        self.assertEqual(typedPrim.GetPrimTypeInfo().GetTypeName(), 
+                         'TestTypedSchema')
+        self.assertEqual(typedPrim.GetPrimTypeInfo().GetAppliedAPISchemas(), [])
+
         self.assertEqual(typedPrim.GetPropertyNames(), ["testAttr", "testRel"])
 
         # Add an api schemas to the prim's metadata.
@@ -220,6 +247,11 @@ class TestUsdSchemaRegistry(unittest.TestCase):
         self.assertEqual(typedPrim.GetTypeName(), 'TestTypedSchema')
         self.assertEqual(typedPrim.GetAppliedSchemas(), 
                          ["TestSingleApplyAPI", "TestMultiApplyAPI:garply"])
+        self.assertEqual(typedPrim.GetPrimTypeInfo().GetTypeName(), 
+                         'TestTypedSchema')
+        self.assertEqual(typedPrim.GetPrimTypeInfo().GetAppliedAPISchemas(),
+                         ["TestSingleApplyAPI", "TestMultiApplyAPI:garply"])
+
         self.assertTrue(typedPrim.HasAPI(
             Tf.Type(Usd.SchemaBase).FindDerivedByName("TestSingleApplyAPI")))
         self.assertTrue(typedPrim.HasAPI(
@@ -250,6 +282,19 @@ class TestUsdSchemaRegistry(unittest.TestCase):
         self.assertEqual(attr.GetResolveInfo().GetSource(), 
                          Usd.ResolveInfoSourceFallback)
 
+        # Metadata "hidden" has a fallback value defined in TestTypedSchema. It
+        # will be returned by GetMetadata and GetAllMetadata but will return 
+        # false for queries about whether it's authored
+        self.assertEqual(typedPrim.GetAllMetadata()["hidden"], True)
+        self.assertEqual(typedPrim.GetMetadata("hidden"), True)
+        self.assertFalse(typedPrim.HasAuthoredMetadata("hidden"))
+        self.assertFalse("hidden" in typedPrim.GetAllAuthoredMetadata())
+
+        # Documentation metadata comes from prim type definition even with API
+        # schemas applied.
+        self.assertEqual(typedPrim.GetMetadata("documentation"), 
+                         "Testing typed schema")
+
     def test_TypedPrimsOnStageWithFallback(self):
         """
         Tests the fallback properties of typed prims on a stage when new API
@@ -264,6 +309,13 @@ class TestUsdSchemaRegistry(unittest.TestCase):
         self.assertEqual(typedPrim.GetTypeName(), 'TestWithFallbackAppliedSchema')
         self.assertEqual(typedPrim.GetAppliedSchemas(), 
                          ["TestMultiApplyAPI:fallback", "TestSingleApplyAPI"])
+        self.assertEqual(typedPrim.GetPrimTypeInfo().GetTypeName(), 
+                         'TestWithFallbackAppliedSchema')
+        # Note that prim type info does NOT contain the fallback applied API
+        # schemas from the concrete type's prim definition as these are not part
+        # of the type identity.
+        self.assertEqual(typedPrim.GetPrimTypeInfo().GetAppliedAPISchemas(), [])
+
         self.assertTrue(typedPrim.HasAPI(
             Tf.Type(Usd.SchemaBase).FindDerivedByName("TestSingleApplyAPI")))
         self.assertTrue(typedPrim.HasAPI(
@@ -285,13 +337,21 @@ class TestUsdSchemaRegistry(unittest.TestCase):
 
         # Prim has the same type and now has both its original API schemas and
         # the new one. Note that the new schema was added using an explicit 
-        # list op but was still appended to the original list. Fallback API 
+        # list op but was still prepended to the original list. Fallback API 
         # schemas cannot be deleted and any authored API schemas will always be
-        # appended to the fallbacks.
+        # prepended to the fallbacks.
         self.assertEqual(typedPrim.GetTypeName(), 'TestWithFallbackAppliedSchema')
         self.assertEqual(typedPrim.GetAppliedSchemas(), 
-            ["TestMultiApplyAPI:fallback", "TestSingleApplyAPI", 
-             "TestMultiApplyAPI:garply"])
+            ["TestMultiApplyAPI:garply", 
+             "TestMultiApplyAPI:fallback", "TestSingleApplyAPI"])
+        self.assertEqual(typedPrim.GetPrimTypeInfo().GetTypeName(), 
+                         'TestWithFallbackAppliedSchema')
+        # Note that prim type info does NOT contain the fallback applied API
+        # schemas from the concrete type's prim definition as these are not part
+        # of the type identity.
+        self.assertEqual(typedPrim.GetPrimTypeInfo().GetAppliedAPISchemas(), 
+                         ["TestMultiApplyAPI:garply"])
+
         self.assertTrue(typedPrim.HasAPI(
             Tf.Type(Usd.SchemaBase).FindDerivedByName("TestSingleApplyAPI")))
         self.assertTrue(typedPrim.HasAPI(
@@ -321,17 +381,31 @@ class TestUsdSchemaRegistry(unittest.TestCase):
         self.assertEqual(attr.Get(), True)
         self.assertEqual(attr.GetResolveInfo().GetSource(), 
                          Usd.ResolveInfoSourceFallback)
-        # Property fallback actually comes from TestTypedSchema as the typed
-        # schema overrides this property from its fallback API schema.
+        # Property fallback actually comes from TestWithFallbackAppliedSchema as
+        # the typed schema overrides this property from its fallback API schema.
         attr = typedPrim.GetAttribute("multi:fallback:bool_attr")
         self.assertEqual(attr.Get(), False)
         self.assertEqual(attr.GetResolveInfo().GetSource(), 
                          Usd.ResolveInfoSourceFallback)
-        # Property fallback comes from TestTypedSchema
+        # Property fallback comes from TestWithFallbackAppliedSchema
         attr = typedPrim.GetAttribute("testAttr")
         self.assertEqual(attr.Get(), "foo")
         self.assertEqual(attr.GetResolveInfo().GetSource(), 
                          Usd.ResolveInfoSourceFallback)
+
+        # Metadata "hidden" has a fallback value defined in 
+        # TestWithFallbackAppliedSchema. It will be returned by GetMetadata and 
+        # GetAllMetadata but will return false for queries about whether it's 
+        # authored
+        self.assertEqual(typedPrim.GetAllMetadata()["hidden"], False)
+        self.assertEqual(typedPrim.GetMetadata("hidden"), False)
+        self.assertFalse(typedPrim.HasAuthoredMetadata("hidden"))
+        self.assertFalse("hidden" in typedPrim.GetAllAuthoredMetadata())
+
+        # Documentation metadata comes from prim type definition even with API
+        # schemas applied.
+        self.assertEqual(typedPrim.GetMetadata("documentation"), 
+                         "Test with fallback API schemas")
 
     def test_TypedPrimsOnStageWithFallbackReapply(self):
         """
@@ -347,6 +421,13 @@ class TestUsdSchemaRegistry(unittest.TestCase):
         self.assertEqual(typedPrim.GetTypeName(), 'TestWithFallbackAppliedSchema')
         self.assertEqual(typedPrim.GetAppliedSchemas(), 
                          ["TestMultiApplyAPI:fallback", "TestSingleApplyAPI"])
+        self.assertEqual(typedPrim.GetPrimTypeInfo().GetTypeName(), 
+                         'TestWithFallbackAppliedSchema')
+        # Note that prim type info does NOT contain the fallback applied API
+        # schemas from the concrete type's prim definition as these are not part
+        # of the type identity.
+        self.assertEqual(typedPrim.GetPrimTypeInfo().GetAppliedAPISchemas(), [])
+
         self.assertTrue(typedPrim.HasAPI(
             Tf.Type(Usd.SchemaBase).FindDerivedByName("TestSingleApplyAPI")))
         self.assertTrue(typedPrim.HasAPI(
@@ -389,6 +470,14 @@ class TestUsdSchemaRegistry(unittest.TestCase):
         self.assertEqual(typedPrim.GetAppliedSchemas(), 
             ["TestMultiApplyAPI:fallback", "TestSingleApplyAPI", 
              "TestMultiApplyAPI:fallback", "TestSingleApplyAPI"])
+        self.assertEqual(typedPrim.GetPrimTypeInfo().GetTypeName(), 
+                         'TestWithFallbackAppliedSchema')
+        # Note that prim type info does NOT contain the fallback applied API
+        # schemas from the concrete type's prim definition as these are not part
+        # of the type identity.
+        self.assertEqual(typedPrim.GetPrimTypeInfo().GetAppliedAPISchemas(), 
+                         ["TestMultiApplyAPI:fallback", "TestSingleApplyAPI"])
+
         self.assertTrue(typedPrim.HasAPI(
             Tf.Type(Usd.SchemaBase).FindDerivedByName("TestSingleApplyAPI")))
         self.assertTrue(typedPrim.HasAPI(
@@ -425,6 +514,18 @@ class TestUsdSchemaRegistry(unittest.TestCase):
         self.assertEqual(attr.Get(), "foo")
         self.assertEqual(attr.GetResolveInfo().GetSource(), 
                          Usd.ResolveInfoSourceFallback)
+
+        # Prim metadata is unchanged from the case above as there is still
+        # no way for applied API schemas to impart prim metadata defaults.
+        self.assertEqual(typedPrim.GetAllMetadata()["hidden"], False)
+        self.assertEqual(typedPrim.GetMetadata("hidden"), False)
+        self.assertFalse(typedPrim.HasAuthoredMetadata("hidden"))
+        self.assertFalse("hidden" in typedPrim.GetAllAuthoredMetadata())
+
+        # Documentation metadata comes from prim type definition even with API
+        # schemas applied.
+        self.assertEqual(typedPrim.GetMetadata("documentation"), 
+                         "Test with fallback API schemas")
 
 if __name__ == "__main__":
     unittest.main()

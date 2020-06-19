@@ -31,16 +31,16 @@
 #include "pxr/imaging/hd/rprimCollection.h"
 #include "pxr/imaging/hd/task.h"
 
-#include <boost/shared_ptr.hpp>
+#include <memory>
 
 PXR_NAMESPACE_OPEN_SCOPE
 
 class HdRenderIndex;
 class HdSceneDelegate;
 
-typedef boost::shared_ptr<class HdDirtyList> HdDirtyListSharedPtr;
-typedef boost::shared_ptr<class HdRenderPassState> HdRenderPassStateSharedPtr;
-typedef boost::shared_ptr<class HdRenderPass> HdRenderPassSharedPtr;
+using HdDirtyListSharedPtr = std::shared_ptr<class HdDirtyList>;
+using HdRenderPassSharedPtr = std::shared_ptr<class HdRenderPass>;
+using HdRenderPassStateSharedPtr = std::shared_ptr<class HdRenderPassState>;
 
 /// \class HdRenderPass
 ///
@@ -68,7 +68,8 @@ typedef boost::shared_ptr<class HdRenderPass> HdRenderPassSharedPtr;
 /// Rendering backends are expected to specialize this abstract class, and
 /// return the specialized object via HdRenderDelegate::CreateRenderPass
 ///
-class HdRenderPass : boost::noncopyable {
+class HdRenderPass 
+{
 public:
     HD_API
     HdRenderPass(HdRenderIndex *index, HdRprimCollection const& collection);
@@ -139,6 +140,11 @@ protected:
     virtual void _Prepare(TfTokenVector const &renderTags) {}
 
 private:
+
+    // Don't allow copies
+    HdRenderPass(const HdRenderPass &) = delete;
+    HdRenderPass &operator=(const HdRenderPass &) = delete;
+
     // ---------------------------------------------------------------------- //
     // \name Change Tracking State
     // ---------------------------------------------------------------------- //

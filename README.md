@@ -10,9 +10,10 @@ For more details, please visit the web site [here](http://openusd.org).
 Build Status
 ------------
 
-|       | master | dev |
-| ----- | ------ | --- |
-| Linux/macOS | [![Build Status](https://travis-ci.com/PixarAnimationStudios/USD.svg?branch=master)](https://travis-ci.com/PixarAnimationStudios/USD) | [![Build Status](https://travis-ci.com/PixarAnimationStudios/USD.svg?branch=dev)](https://travis-ci.com/PixarAnimationStudios/USD) |
+|         |   Linux   |  Windows  |   macOS   |
+|:-------:|:---------:|:---------:|:---------:|
+|   dev   | [![Build Status](https://dev.azure.com/PixarAnimationStudios/USD/_apis/build/status/PixarAnimationStudios.USD?branchName=dev&amp;jobName=Linux)](https://dev.azure.com/PixarAnimationStudios/USD/_build/latest?definitionId=2&branchName=dev) | [![Build Status](https://dev.azure.com/PixarAnimationStudios/USD/_apis/build/status/PixarAnimationStudios.USD?branchName=dev&amp;jobName=Windows)](https://dev.azure.com/PixarAnimationStudios/USD/_build/latest?definitionId=2&branchName=dev) | [![Build Status](https://dev.azure.com/PixarAnimationStudios/USD/_apis/build/status/PixarAnimationStudios.USD?branchName=dev&amp;jobName=macOS)](https://dev.azure.com/PixarAnimationStudios/USD/_build/latest?definitionId=2&branchName=dev) |
+|  master | [![Build Status](https://dev.azure.com/PixarAnimationStudios/USD/_apis/build/status/PixarAnimationStudios.USD?branchName=master&amp;jobName=Linux)](https://dev.azure.com/PixarAnimationStudios/USD/_build/latest?definitionId=2&branchName=master) | [![Build Status](https://dev.azure.com/PixarAnimationStudios/USD/_apis/build/status/PixarAnimationStudios.USD?branchName=master&amp;jobName=Windows)](https://dev.azure.com/PixarAnimationStudios/USD/_build/latest?definitionId=2&branchName=master) | [![Build Status](https://dev.azure.com/PixarAnimationStudios/USD/_apis/build/status/PixarAnimationStudios.USD?branchName=master&amp;jobName=macOS)](https://dev.azure.com/PixarAnimationStudios/USD/_build/latest?definitionId=2&branchName=master) |
 
 Additional Documentation
 ------------------------
@@ -79,7 +80,7 @@ The following dependencies are optional:
 
 The following dependencies are required:
 
- - [PySide](http://wiki.qt.io/PySide) or [PySide2](http://wiki.qt.io/PySide2) (experimental)
+ - [PySide](http://wiki.qt.io/PySide) or [PySide2](http://wiki.qt.io/PySide2)
  - [PyOpenGL](https://pypi.python.org/pypi/PyOpenGL/)
 
 Getting and Building the Code
@@ -109,7 +110,7 @@ additional documentation for running cmake directly.
 - Optional (Can be ignored by passing `--no-python` as an argument to `build_usd.py`)
     - Python (required for [bindings and tests](BUILDING.md#python)) 
     - PyOpenGL (required for [usdview](BUILDING.md#usd-imaging))
-    - PySide or PySide2 (experimental) (required for [usdview](BUILDING.md#usd-imaging))
+    - PySide or PySide2 (required for [usdview](BUILDING.md#usd-imaging))
 
 #### 2. Download the USD source code
 

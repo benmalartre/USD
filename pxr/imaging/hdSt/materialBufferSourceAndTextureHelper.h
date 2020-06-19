@@ -27,44 +27,30 @@
 #include "pxr/pxr.h"
 #include "pxr/imaging/hdSt/api.h"
 #include "pxr/imaging/hd/bufferSource.h"
-#include "pxr/imaging/hd/materialParam.h"
+#include "pxr/imaging/hdSt/materialParam.h"
 #include "pxr/imaging/hdSt/shaderCode.h"
 
 PXR_NAMESPACE_OPEN_SCOPE
 
-class HdSceneDelegate;
-
 /// HdSt_MaterialBufferSourceAndTextureHelper
 ///
-/// A helper to generate the buffer sources and texture descriptors
-/// from material params.
+/// A helper for the old texture system to add texture resources to
+/// the texture descriptors and buffer specs and sources for bindless
+/// textures. This class will be deleted once the new texture system is
+/// fully functional.
 ///
 struct HdSt_MaterialBufferSourceAndTextureHelper
 {
-    /// Process material param of type HdMaterialParam::ParamTypePrimvar
-    void ProcessPrimvarMaterialParam(
-        HdMaterialParam const &param);
-
-    /// Process material param of type HdMaterialParam::ParamTypeFallback
-    /// using given value.
-    void ProcessFallbackMaterialParam(
-        HdMaterialParam const &param,
-        VtValue const &fallbackValue);
-
-    /// Process material param of type HdMaterialParam::ParamTypeTexture
+    /// Process material param of type HdSt_MaterialParam::ParamTypeTexture
     /// given the texture requested by the param.
-    ///
-    /// isPtex is set to true if texture request by param is ptex.
+    static
     void ProcessTextureMaterialParam(
-        HdMaterialParam const &param,
+        TfToken const &name,
+        SdfPath const &texturePrim,
         HdStTextureResourceHandleSharedPtr const &handle,
-        bool * isPtex = nullptr);
-
-    /// The buffer sources created by the above methods.
-    HdBufferSourceVector sources;
-
-    /// The texture descriptors created by the above methods.
-    HdStShaderCode::TextureDescriptorVector textures;
+        HdBufferSpecVector * specs,
+        HdBufferSourceSharedPtrVector * sources,
+        HdStShaderCode::TextureDescriptorVector * textureDescriptors);
 };
 
 PXR_NAMESPACE_CLOSE_SCOPE

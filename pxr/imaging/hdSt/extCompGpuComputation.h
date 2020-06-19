@@ -34,18 +34,20 @@
 #include "pxr/base/tf/token.h"
 #include "pxr/base/vt/value.h"
 
+#include <memory>
 #include <vector>
 
 PXR_NAMESPACE_OPEN_SCOPE
 
 class HdSceneDelegate;
 class HdExtComputation;
-typedef boost::shared_ptr<class HdStGLSLProgram> HdStGLSLProgramSharedPtr;
-typedef std::vector<struct HdExtComputationPrimvarDescriptor>
-                          HdExtComputationPrimvarDescriptorVector;
+using HdStGLSLProgramSharedPtr= std::shared_ptr<class HdStGLSLProgram>;
+using HdExtComputationPrimvarDescriptorVector =
+    std::vector<struct HdExtComputationPrimvarDescriptor>;
 
-typedef boost::shared_ptr<class HdStExtCompGpuComputation>
-                                HdStExtCompGpuComputationSharedPtr;
+using HdStExtCompGpuComputationSharedPtr = 
+    std::shared_ptr<class HdStExtCompGpuComputation>;
+
 
 /// \class HdStExtCompGpuComputation
 /// A Computation that represents a GPU implementation of a ExtComputation.
@@ -205,10 +207,10 @@ void HdSt_GetExtComputationPrimvarsComputations(
     HdSceneDelegate *sceneDelegate,
     HdExtComputationPrimvarDescriptorVector const& allCompPrimvars,
     HdDirtyBits dirtyBits,
-    HdBufferSourceVector *sources,
-    HdBufferSourceVector *reserveOnlySources,
-    HdBufferSourceVector *separateComputationSources,
-    HdComputationVector *computations);
+    HdBufferSourceSharedPtrVector *sources,
+    HdBufferSourceSharedPtrVector *reserveOnlySources,
+    HdBufferSourceSharedPtrVector *separateComputationSources,
+    HdComputationSharedPtrVector *computations);
 
 PXR_NAMESPACE_CLOSE_SCOPE
 

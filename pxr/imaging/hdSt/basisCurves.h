@@ -35,21 +35,20 @@
 #include "pxr/usd/sdf/path.h"
 #include "pxr/base/vt/array.h"
 
-#include <boost/shared_ptr.hpp>
+#include <memory>
 
 PXR_NAMESPACE_OPEN_SCOPE
 
 class HdStDrawItem;
-typedef boost::shared_ptr<class HdResourceRegistry> HdResourceRegistrySharedPtr;
-typedef boost::shared_ptr<class HdSt_BasisCurvesTopology>
-                                              HdSt_BasisCurvesTopologySharedPtr;
+using HdSt_BasisCurvesTopologySharedPtr =
+    std::shared_ptr<class HdSt_BasisCurvesTopology>;
 
 /// \class HdStBasisCurves
 ///
 /// A collection of curves using a particular basis.
 ///
-/// Render mode is dependent on both the HdBasisCurvesGeomStyle, refinement level,
-/// and the authored primvars.
+/// Render mode is dependent on both the HdBasisCurvesGeomStyle, refinement 
+/// level, and the authored primvars.
 ///
 /// If style is set to HdBasisCurvesGeomStyleWire, the curves will always draw
 /// as infinitely thin wires.  Cubic curves will be refined if complexity is

@@ -49,11 +49,7 @@ HdSt_Subdivision::RefinesToTriangles(TfToken const &scheme)
 bool
 HdSt_Subdivision::RefinesToBSplinePatches(TfToken const &scheme)
 {
-    if (scheme == PxOsdOpenSubdivTokens->catmark ||
-        scheme == PxOsdOpenSubdivTokens->catmullClark) {
-        return true;
-    }
-    return false;
+    return scheme == PxOsdOpenSubdivTokens->catmullClark;
 }
 
 bool
@@ -140,7 +136,7 @@ HdSt_OsdIndexComputation::HasChainedBuffer() const
 }
 
 /*virtual*/
-HdBufferSourceVector
+HdBufferSourceSharedPtrVector
 HdSt_OsdIndexComputation::GetChainedBuffers() const
 {
     return { _primitiveBuffer, _edgeIndicesBuffer };

@@ -35,17 +35,16 @@
 #include "pxr/base/tf/singleton.h"
 #include "pxr/base/tf/token.h"
 
-#include <boost/noncopyable.hpp>
-#include <boost/shared_ptr.hpp>
 #include "pxr/base/tf/hashmap.h"
 
+#include <memory>
 #include <mutex>
 
 PXR_NAMESPACE_OPEN_SCOPE
 
 
 class SdfPath;
-typedef boost::shared_ptr<class HdResourceRegistry> HdResourceRegistrySharedPtr;
+using HdResourceRegistrySharedPtr = std::shared_ptr<class HdResourceRegistry>;
 
 // XXX: it would be nice to move this into Trace or use the existing Trace
 // counter mechanism, however we are restricted to TraceLite in the rocks.
@@ -94,7 +93,8 @@ typedef boost::shared_ptr<class HdResourceRegistry> HdResourceRegistrySharedPtr;
 ///
 /// Performance counter monitoring.
 ///
-class HdPerfLog : public boost::noncopyable {
+class HdPerfLog
+{
 public:
     HD_API
     static HdPerfLog& GetInstance() {
@@ -189,6 +189,11 @@ public:
     std::vector<HdResourceRegistrySharedPtr> const& GetResourceRegistryVector();
 
 private:
+     
+    // Don't allow copies
+    HdPerfLog(const HdPerfLog &) = delete;
+    HdPerfLog &operator=(const HdPerfLog &) = delete;
+
     friend class TfSingleton<HdPerfLog>;
     HD_API HdPerfLog();
     HD_API ~HdPerfLog();

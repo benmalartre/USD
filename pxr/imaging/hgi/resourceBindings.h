@@ -29,6 +29,7 @@
 #include "pxr/imaging/hgi/buffer.h"
 #include "pxr/imaging/hgi/enums.h"
 #include "pxr/imaging/hgi/handle.h"
+#include "pxr/imaging/hgi/sampler.h"
 #include "pxr/imaging/hgi/texture.h"
 #include "pxr/imaging/hgi/types.h"
 
@@ -39,79 +40,12 @@
 PXR_NAMESPACE_OPEN_SCOPE
 
 
-/// \struct HgiVertexAttributeDesc
-///
-/// Describes one attribute of a vertex.
-///
-/// <ul>
-/// <li>format:
-///   Format of the vertex attribute.</li>
-/// <li>offset:
-///    The byte offset of the attribute in vertex buffer</li>
-/// <li>shaderBindLocation:
-///    The location of the attribute in the shader. layout(location = X)</li>
-/// </ul>
-///
-struct HgiVertexAttributeDesc
-{
-    HGI_API
-    HgiVertexAttributeDesc();
 
-    HgiFormat format;
-    uint32_t offset;
-    uint32_t shaderBindLocation;
-};
-typedef std::vector<HgiVertexAttributeDesc> HgiVertexAttributeDescVector;
-
-HGI_API
-bool operator==(
-    const HgiVertexAttributeDesc& lhs,
-    const HgiVertexAttributeDesc& rhs);
-
-HGI_API
-inline bool operator!=(
-    const HgiVertexAttributeDesc& lhs,
-    const HgiVertexAttributeDesc& rhs);
-
-
-/// \struct HgiVertexBufferDesc
-///
-/// Describes the attributes of a vertex buffer.
-///
-/// <ul>
-/// <li>bindingIndex:
-///    Binding location for this vertex buffer.</li>
-/// <li>vertexAttributes:
-///   List of vertex attributes (in vertex buffer).</li>
-/// <li>vertexStride:
-///   The byte size of a vertex (distance between two vertices).</li>
-/// </ul>
-///
-struct HgiVertexBufferDesc
-{
-    HGI_API
-    HgiVertexBufferDesc();
-
-    uint32_t bindingIndex;
-    HgiVertexAttributeDescVector vertexAttributes;
-    uint32_t vertexStride;
-};
-typedef std::vector<HgiVertexBufferDesc> HgiVertexBufferDescVector;
-
-HGI_API
-bool operator==(
-    const HgiVertexBufferDesc& lhs,
-    const HgiVertexBufferDesc& rhs);
-
-HGI_API
-inline bool operator!=(
-    const HgiVertexBufferDesc& lhs,
-    const HgiVertexBufferDesc& rhs);
 
 
 /// \struct HgiBufferBindDesc
 ///
-/// Describes the binding information of one buffer (or array of buffers).
+/// Describes the binding information of a buffer (or array of buffers).
 ///
 /// <ul>
 /// <li>buffers:
@@ -144,7 +78,7 @@ struct HgiBufferBindDesc
     uint32_t bindingIndex;
     HgiShaderStage stageUsage;
 };
-typedef std::vector<HgiBufferBindDesc> HgiBufferBindDescVector;
+using HgiBufferBindDescVector = std::vector<HgiBufferBindDesc>;
 
 HGI_API
 bool operator==(
@@ -156,10 +90,9 @@ inline bool operator!=(
     const HgiBufferBindDesc& lhs,
     const HgiBufferBindDesc& rhs);
 
-
 /// \struct HgiTextureBindDesc
 ///
-/// Describes the binding information of one texture.
+/// Describes the binding information of a texture (or array of textures).
 ///
 /// <ul>
 /// <li>textures:
@@ -167,13 +100,16 @@ inline bool operator!=(
 ///   If there are more than one texture, the textures will be put in an
 ///   array-of-textures (not texture-array). Please note that different
 ///   platforms have varying limits to max textures in an array.</li>
+/// <li>samplers:
+///   (optional) The sampler(s) to be bound for each texture in `textures`.
+///   If empty a default sampler (clamp_to_edge, linear) should be used. </li>
 /// <li>resourceType:
 ///    The type of the texture(s) that is to be bound.
 ///    All textures in the array must have the same type.</li>
 /// <li>bindingIndex:
 ///    Binding location for the texture</li>
 /// <li>stageUsage:
-///    What shader stage(s) the buffer will be used in.</li>
+///    What shader stage(s) the texture will be used in.</li>
 /// </ul>
 ///
 struct HgiTextureBindDesc
@@ -182,11 +118,12 @@ struct HgiTextureBindDesc
     HgiTextureBindDesc();
 
     HgiTextureHandleVector textures;
+    HgiSamplerHandleVector samplers;
     HgiBindResourceType resourceType;
     uint32_t bindingIndex;
     HgiShaderStage stageUsage;
 };
-typedef std::vector<HgiTextureBindDesc> HgiTextureBindDescVector;
+using HgiTextureBindDescVector = std::vector<HgiTextureBindDesc>;
 
 HGI_API
 bool operator==(
@@ -209,9 +146,6 @@ bool operator!=(
 ///   The buffers to be bound (E.g. uniform or shader storage).</li>
 /// <li>textures:
 ///   The textures to be bound.</li>
-/// <li>vertexBuffers:
-///   Description of the vertex buffers (per-vertex attributes).
-///   The actual VBOs are bound via GraphicsEncoder.</li>
 /// </ul>
 ///
 struct HgiResourceBindingsDesc
@@ -223,7 +157,6 @@ struct HgiResourceBindingsDesc
     HgiPipelineType pipelineType;
     HgiBufferBindDescVector buffers;
     HgiTextureBindDescVector textures;
-    HgiVertexBufferDescVector vertexBuffers;
 };
 
 HGI_API
@@ -241,7 +174,7 @@ bool operator!=(
 /// \class HgiResourceBindings
 ///
 /// Represents a collection of buffers, texture and vertex attributes that will
-/// be used by an encoder (and pipeline).
+/// be used by an cmds object (and pipeline).
 ///
 class HgiResourceBindings
 {
@@ -267,8 +200,8 @@ private:
 
 /// Explicitly instantiate and define ResourceBindings handle
 template class HgiHandle<class HgiResourceBindings>;
-typedef HgiHandle<class HgiResourceBindings> HgiResourceBindingsHandle;
-typedef std::vector<HgiResourceBindingsHandle> HgiResourceBindingsHandleVector;
+using HgiResourceBindingsHandle = HgiHandle<class HgiResourceBindings>;
+using HgiResourceBindingsHandleVector = std::vector<HgiResourceBindingsHandle>;
 
 
 PXR_NAMESPACE_CLOSE_SCOPE

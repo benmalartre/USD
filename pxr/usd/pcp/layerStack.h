@@ -34,7 +34,7 @@
 #include "pxr/usd/sdf/layerTree.h"
 #include "pxr/base/tf/declarePtrs.h"
 
-#include <boost/noncopyable.hpp>
+#include <tbb/spin_mutex.h>
 #include <iosfwd>
 #include <memory>
 #include <string>
@@ -62,7 +62,10 @@ class PcpLifeboat;
 ///
 /// PcpLayerStacks are constructed and managed by a Pcp_LayerStackRegistry.
 ///
-class PcpLayerStack : public TfRefBase, public TfWeakBase, boost::noncopyable {
+class PcpLayerStack : public TfRefBase, public TfWeakBase {
+    PcpLayerStack(const PcpLayerStack&) = delete;
+    PcpLayerStack& operator=(const PcpLayerStack&) = delete;
+
 public:
     // See Pcp_LayerStackRegistry for creating layer stacks.
     PCP_API
@@ -119,6 +122,11 @@ public:
     bool HasLayer(const SdfLayerHandle& layer) const;
     PCP_API
     bool HasLayer(const SdfLayerRefPtr& layer) const;
+
+    /// Return the time codes per second value of the layer stack. This is 
+    /// usually the same as the computed time codes per second of the root layer
+    /// but may be computed from the session layer when its present.
+    double GetTimeCodesPerSecond() const { return _timeCodesPerSecond; }
 
     /// Returns relocation source-to-target mapping for this layer stack.
     ///
@@ -212,6 +220,7 @@ private:
     SdfLayerTreeHandle _BuildLayerStack(
         const SdfLayerHandle & layer,
         const SdfLayerOffset & offset,
+        double layerTcps,
         const ArResolverContext & pathResolverContext,
         const SdfLayer::FileFormatArguments & layerArgs,
         const std::string & sessionOwner,
@@ -244,6 +253,10 @@ private:
     /// Each map function contains a time offset that should be applied
     /// to its corresponding layer.
     std::vector<PcpMapFunction> _mapFunctions;
+
+    /// Stores the computed time codes per second value of the layer stack which
+    /// has some special logic when a session layer is present. 
+    double _timeCodesPerSecond;
 
     /// The tree structure of the layer stack.
     /// Stored separately because this is needed only occasionally.
@@ -284,9 +297,10 @@ private:
     /// the current value of relocations given out by
     /// GetExpressionForRelocatesAtPath().  This map is used to update
     /// those values when relocations change.
-    typedef std::map<SdfPath, PcpMapExpression::VariableRefPtr,
+    typedef std::map<SdfPath, PcpMapExpression::VariableUniquePtr,
             SdfPath::FastLessThan> _RelocatesVarMap;
     _RelocatesVarMap _relocatesVariables;
+    tbb::spin_mutex _relocatesVariablesMutex;
 
     /// List of all prim spec paths where relocations were found.
     SdfPathVector _relocatesPrimPaths;
@@ -318,6 +332,21 @@ Pcp_ComputeRelocationsForLayerStack(
 // may affect the computation of those asset paths.
 bool
 Pcp_NeedToRecomputeDueToAssetPathChange(const PcpLayerStackPtr& layerStack);
+
+// Returns true if the \p layerStack should be recomputed because 
+// \p changedLayer has had changes that would cause the layer stack to have
+// a different computed overall time codes per second value.
+bool
+Pcp_NeedToRecomputeLayerStackTimeCodesPerSecond(
+    const PcpLayerStackPtr& layerStack, const SdfLayerHandle &changedLayer);
+
+/// Returns true when the environment variable has been set to disable the 
+/// behavior where differing time codes per second metadata in layers sublayered
+/// or referenced by another layer are used to apply a layer offset scale to the
+/// map function.
+PCP_API
+bool
+PcpIsTimeScalingForLayerTimeCodesPerSecondDisabled();
 
 PXR_NAMESPACE_CLOSE_SCOPE
 

@@ -1,9 +1,11 @@
 set(PXR_PREFIX pxr/imaging)
 set(PXR_PACKAGE hdSt)
 
-if (NOT ${PXR_ENABLE_GL_SUPPORT})
+# XXX We tmp check for PXR_ENABLE_GL_SUPPORT since Storm currently still only
+# runs on OpenGL. Once Storm uses only Hgi, remove GL_SUPPORT check.
+if (NOT ${PXR_BUILD_GPU_SUPPORT} OR NOT ${PXR_ENABLE_GL_SUPPORT})
     message(STATUS
-        "Skipping ${PXR_PACKAGE} because PXR_ENABLE_GL_SUPPORT is OFF")
+        "Skipping ${PXR_PACKAGE} because PXR_BUILD_GPU_SUPPORT is OFF")
     return()
 endif()
 
@@ -47,6 +49,7 @@ pxr_library(hdSt
         drawTargetAttachmentDesc
         drawTargetAttachmentDescArray
         drawTargetRenderPassState
+        dynamicUvTextureObject
         extComputation
         extCompGpuComputation
         extCompGpuComputationBufferSource
@@ -54,7 +57,6 @@ pxr_library(hdSt
         extCompGpuPrimvarBufferSource
         fallbackLightingShader
         field
-        fieldResource
         flatNormals
         geometricShader
         glConversions
@@ -79,14 +81,23 @@ pxr_library(hdSt
         renderPass
         renderPassShader
         renderPassState
-        resourceBinder
         resourceGL
         resourceRegistry
         rprimUtils
+        samplerObject
+        samplerObjectRegistry
         shaderCode
+        simpleLightingShader
         smoothNormals
+        subtextureIdentifier
         surfaceShader
         texture
+        textureBinder
+        textureHandle
+        textureHandleRegistry
+        textureIdentifier
+        textureObject
+        textureObjectRegistry
         textureResource
         textureResourceHandle
         tokens
@@ -110,10 +121,12 @@ pxr_library(hdSt
         immediateDrawBatch
         indirectDrawBatch
         materialBufferSourceAndTextureHelper
+        materialParam
         meshShaderKey
         meshTopology 
         pointsShaderKey
         quadrangulate
+        resourceBinder
         shaderKey
         subdivision
         subdivision3
@@ -146,6 +159,7 @@ pxr_library(hdSt
         shaders/ptexTexture.glslfx
         shaders/renderPass.glslfx
         shaders/renderPassShader.glslfx
+        shaders/simpleLightingShader.glslfx
         shaders/terminals.glslfx
         shaders/visibility.glslfx
         shaders/volume.glslfx

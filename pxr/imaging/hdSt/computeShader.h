@@ -37,13 +37,11 @@
 #include "pxr/base/vt/value.h"
 #include "pxr/base/tf/token.h"
 
-#include <boost/shared_ptr.hpp>
-
 #include <vector>
 
 PXR_NAMESPACE_OPEN_SCOPE
 
-typedef boost::shared_ptr<class HdStComputeShader> HdStComputeShaderSharedPtr;
+using HdStComputeShaderSharedPtr = std::shared_ptr<class HdStComputeShader>;
 
 /// \class HdStComputeShader
 ///
@@ -67,7 +65,7 @@ public:
     HDST_API
     virtual std::string GetSource(TfToken const &shaderStageKey) const;
     HDST_API
-    virtual HdMaterialParamVector const& GetParams() const;
+    virtual HdSt_MaterialParamVector const& GetParams() const;
     HDST_API
     virtual HdBufferArrayRangeSharedPtr const& GetShaderData() const;
     HDST_API
@@ -101,7 +99,7 @@ private:
     std::string _computeSource;
 
     // Shader Parameters
-    HdMaterialParamVector _params;
+    HdSt_MaterialParamVector _params;
     HdBufferSpecVector _paramSpec;
     HdBufferArrayRangeSharedPtr _paramArray;
 

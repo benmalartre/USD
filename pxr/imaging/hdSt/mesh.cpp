@@ -195,7 +195,7 @@ HdStMesh::_PopulateTopology(HdSceneDelegate *sceneDelegate,
 
     SdfPath const& id = GetId();
     HdStResourceRegistrySharedPtr const& resourceRegistry = 
-        boost::static_pointer_cast<HdStResourceRegistry>(
+        std::static_pointer_cast<HdStResourceRegistry>(
         sceneDelegate->GetRenderIndex().GetResourceRegistry());
 
     // note: there's a potential optimization if _topology is already registered
@@ -384,8 +384,7 @@ HdStMesh::_PopulateTopology(HdSceneDelegate *sceneDelegate,
                 // create triangle indices, primitiveParam and edgeIndices
                 source = _topology->GetTriangleIndexBuilderComputation(GetId());
             }
-            HdBufferSourceVector sources;
-            sources.push_back(source);
+            HdBufferSourceSharedPtrVector sources = { source };
 
             // initialize buffer array
             //   * indices
@@ -406,7 +405,7 @@ HdStMesh::_PopulateTopology(HdSceneDelegate *sceneDelegate,
                     HdTokens->topology, bufferSpecs, usageHint);
 
             // add sources to update queue
-            resourceRegistry->AddSources(range, sources);
+            resourceRegistry->AddSources(range, std::move(sources));
 
             // save new range to registry
             rangeInstance.SetValue(range);
@@ -484,7 +483,7 @@ HdStMesh::_PopulateAdjacency(HdStResourceRegistrySharedPtr const &resourceRegist
 
 static HdBufferSourceSharedPtr
 _QuadrangulatePrimvar(HdBufferSourceSharedPtr const &source,
-                      HdComputationVector *computations,
+                      HdComputationSharedPtrVector *computations,
                       HdSt_MeshTopologySharedPtr const &topology,
                       SdfPath const &id,
                       HdStResourceRegistrySharedPtr const &resourceRegistry)
@@ -556,7 +555,7 @@ _TriangulateFaceVaryingPrimvar(HdBufferSourceSharedPtr const &source,
 static HdBufferSourceSharedPtr
 _RefinePrimvar(HdBufferSourceSharedPtr const &source,
                bool varying,
-               HdComputationVector *computations,
+               HdComputationSharedPtrVector *computations,
                HdSt_MeshTopologySharedPtr const &topology)
 {
     if (!TF_VERIFY(computations)) return source;
@@ -595,7 +594,7 @@ HdStMesh::_PopulateVertexPrimvars(HdSceneDelegate *sceneDelegate,
     HdRenderIndex &renderIndex = sceneDelegate->GetRenderIndex();
 
     HdStResourceRegistrySharedPtr const &resourceRegistry =
-        boost::static_pointer_cast<HdStResourceRegistry>(
+        std::static_pointer_cast<HdStResourceRegistry>(
         renderIndex.GetResourceRegistry());
 
     // The "points" attribute is expected to be in this list.
@@ -617,10 +616,10 @@ HdStMesh::_PopulateVertexPrimvars(HdSceneDelegate *sceneDelegate,
         sceneDelegate->GetExtComputationPrimvarDescriptors(id,
             HdInterpolationVertex);
 
-    HdBufferSourceVector sources;
-    HdBufferSourceVector reserveOnlySources;
-    HdBufferSourceVector separateComputationSources;
-    HdComputationVector computations;
+    HdBufferSourceSharedPtrVector sources;
+    HdBufferSourceSharedPtrVector reserveOnlySources;
+    HdBufferSourceSharedPtrVector separateComputationSources;
+    HdComputationSharedPtrVector computations;
     sources.reserve(primvars.size());
 
     int numPoints = _topology ? _topology->GetNumPoints() : 0;
@@ -749,7 +748,7 @@ HdStMesh::_PopulateVertexPrimvars(HdSceneDelegate *sceneDelegate,
                 // If the primvar has more data than needed, we issue a warning,
                 // but don't skip the primvar update. Truncate the buffer to
                 // the expected length.
-                boost::static_pointer_cast<HdVtBufferSource>(source)
+                std::static_pointer_cast<HdVtBufferSource>(source)
                     ->Truncate(numPoints);
             }
 
@@ -915,7 +914,7 @@ HdStMesh::_PopulateVertexPrimvars(HdSceneDelegate *sceneDelegate,
     HdBufferSpec::GetBufferSpecs(reserveOnlySources, &bufferSpecs);
     HdBufferSpec::GetBufferSpecs(computations, &bufferSpecs);
 
-    HdBufferSourceVector allSources(sources);
+    HdBufferSourceSharedPtrVector allSources(sources);
     for (HdBufferSourceSharedPtr& src : reserveOnlySources) {
         allSources.emplace_back(src);
     }
@@ -1073,7 +1072,7 @@ HdStMesh::_PopulateVertexPrimvars(HdSceneDelegate *sceneDelegate,
     if (!sources.empty()) {
         // add sources to update queue
         resourceRegistry->AddSources(drawItem->GetVertexPrimvarRange(),
-                                     sources);
+                                     std::move(sources));
     }
     if (!computations.empty()) {
         // add gpu computations to queue.
@@ -1105,10 +1104,10 @@ HdStMesh::_PopulateFaceVaryingPrimvars(HdSceneDelegate *sceneDelegate,
     if (primvars.empty()) return;
 
     HdStResourceRegistrySharedPtr const& resourceRegistry = 
-        boost::static_pointer_cast<HdStResourceRegistry>(
+        std::static_pointer_cast<HdStResourceRegistry>(
         sceneDelegate->GetRenderIndex().GetResourceRegistry());
 
-    HdBufferSourceVector sources;
+    HdBufferSourceSharedPtrVector sources;
     sources.reserve(primvars.size());
 
     int refineLevel = _GetRefineLevelForDesc(desc);
@@ -1196,7 +1195,7 @@ HdStMesh::_PopulateFaceVaryingPrimvars(HdSceneDelegate *sceneDelegate,
 
     if (!sources.empty()) {
         resourceRegistry->AddSources(
-            drawItem->GetFaceVaryingPrimvarRange(), sources);
+            drawItem->GetFaceVaryingPrimvarRange(), std::move(sources));
     }
 }
 
@@ -1212,14 +1211,14 @@ HdStMesh::_PopulateElementPrimvars(HdSceneDelegate *sceneDelegate,
 
     SdfPath const& id = GetId();
     HdStResourceRegistrySharedPtr const& resourceRegistry = 
-        boost::static_pointer_cast<HdStResourceRegistry>(
+        std::static_pointer_cast<HdStResourceRegistry>(
         sceneDelegate->GetRenderIndex().GetResourceRegistry());
 
     HdPrimvarDescriptorVector primvars =
         HdStGetPrimvarDescriptors(this, drawItem, sceneDelegate,
                                   HdInterpolationUniform);
 
-    HdBufferSourceVector sources;
+    HdBufferSourceSharedPtrVector sources;
     sources.reserve(primvars.size());
 
     int numFaces = _topology ? _topology->GetNumFaces() : 0;
@@ -1250,7 +1249,7 @@ HdStMesh::_PopulateElementPrimvars(HdSceneDelegate *sceneDelegate,
         }
     }
 
-    HdComputationVector computations;
+    HdComputationSharedPtrVector computations;
 
     if (requireFlatNormals && (*dirtyBits & DirtyFlatNormals))
     {
@@ -1336,7 +1335,7 @@ HdStMesh::_PopulateElementPrimvars(HdSceneDelegate *sceneDelegate,
 
     if (!sources.empty()) {
         resourceRegistry->AddSources(
-            drawItem->GetElementPrimvarRange(), sources);
+            drawItem->GetElementPrimvarRange(), std::move(sources));
     }
     if (!computations.empty()) {
         // add gpu computations to queue.
@@ -1365,7 +1364,7 @@ HdStMesh::_GetPointsDataTypeFromBar(HdStDrawItem *drawItem) const
             drawItem->GetVertexPrimvarRange()) {
         if (bar->IsValid()) {
             HdStBufferArrayRangeGLSharedPtr bar_ =
-                boost::static_pointer_cast<HdStBufferArrayRangeGL>
+                std::static_pointer_cast<HdStBufferArrayRangeGL>
                 (bar);
             HdStBufferResourceGLSharedPtr pointsResource =
                 bar_->GetResource(HdTokens->points);
@@ -1530,7 +1529,7 @@ HdStMesh::_UpdateDrawItem(HdSceneDelegate *sceneDelegate,
     SdfPath const& id = GetId();
 
     HdStResourceRegistrySharedPtr const& resourceRegistry = 
-        boost::static_pointer_cast<HdStResourceRegistry>(
+        std::static_pointer_cast<HdStResourceRegistry>(
         sceneDelegate->GetRenderIndex().GetResourceRegistry());
 
     /* VISIBILITY */
@@ -1783,7 +1782,7 @@ HdStMesh::_UpdateDrawItemGeometricShader(HdSceneDelegate *sceneDelegate,
                                  discardIfNotRolloverSelected);
 
     HdStResourceRegistrySharedPtr resourceRegistry =
-        boost::static_pointer_cast<HdStResourceRegistry>(
+        std::static_pointer_cast<HdStResourceRegistry>(
             renderIndex.GetResourceRegistry());
 
     HdSt_GeometricShaderSharedPtr geomShader =
@@ -1898,7 +1897,7 @@ HdStMesh::_InitRepr(TfToken const &reprToken, HdDirtyBits *dirtyBits)
     bool isNew = it == _reprs.end();
     if (isNew) {
         // add new repr
-        _reprs.emplace_back(reprToken, boost::make_shared<HdRepr>());
+        _reprs.emplace_back(reprToken, std::make_shared<HdRepr>());
         HdReprSharedPtr &repr = _reprs.back().second;
 
         // set dirty bit to say we need to sync a new repr (buffer array
@@ -1915,9 +1914,10 @@ HdStMesh::_InitRepr(TfToken const &reprToken, HdDirtyBits *dirtyBits)
             if (numDrawItems == 0) continue;
 
             for (size_t itemId = 0; itemId < numDrawItems; itemId++) {
-                HdDrawItem *drawItem = new HdStDrawItem(&_sharedData);
-                repr->AddDrawItem(drawItem);
+                HdRepr::DrawItemUniquePtr drawItem =
+                    std::make_unique<HdStDrawItem>(&_sharedData);
                 HdDrawingCoord *drawingCoord = drawItem->GetDrawingCoord();
+                repr->AddDrawItem(std::move(drawItem));
 
                 switch (desc.geomStyle) {
                 case HdMeshGeomStyleHull:

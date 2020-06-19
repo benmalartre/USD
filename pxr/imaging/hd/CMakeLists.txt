@@ -55,11 +55,11 @@ pxr_library(hd
         instanceRegistry
         light
         material
-        materialParam
         mesh
         meshTopology
         meshUtil
         perfLog
+        pluginRenderDelegateUniqueHandle
         points
         primGather
         primTypeIndex
@@ -69,6 +69,7 @@ pxr_library(hd
         renderPass
         renderPassState
         rendererPlugin
+        rendererPluginHandle
         rendererPluginRegistry
         renderThread
         repr

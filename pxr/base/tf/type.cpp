@@ -42,6 +42,7 @@
 // XXX: This include is a hack to avoid build errors due to
 // incompatible macro definitions in pyport.h on macOS.
 #include <locale>
+#include "pxr/base/tf/cxxCast.h"
 #include "pxr/base/tf/pyLock.h"
 #include "pxr/base/tf/pyObjWrapper.h"
 #include "pxr/base/tf/pyObjectFinder.h"
@@ -530,7 +531,13 @@ TfType::_FindByTypeid(const std::type_info &typeInfo)
     ScopedLock readLock(r.GetMutex(), /*write=*/false);
     TfType::_TypeInfo *info = r.FindByTypeid(typeInfo, WriteUpgrader(readLock));
 
-    return info ? info->canonicalTfType : GetUnknownType();
+    if (ARCH_LIKELY(info)) {
+        return info->canonicalTfType;
+    }
+    // It's possible that this type is only declared and not yet defined.  In
+    // that case we will fail to find it by type_info, so attempt to find the
+    // type by name instead.
+    return FindByName(GetCanonicalTypeName(typeInfo));
 }
 
 #ifdef PXR_PYTHON_SUPPORT_ENABLED
@@ -1150,7 +1157,24 @@ TfType::_ExecuteDefinitionCallback() const
 string
 TfType::GetCanonicalTypeName(const std::type_info &t)
 {
-    return ArchGetDemangled(t);
+    TfAutoMallocTag2 tag("Tf", "TfType::GetCanonicalTypeName");
+
+    using LookupMap =
+        TfHashMap<std::type_index, std::string, std::hash<std::type_index>>;
+    static LookupMap lookupMap;
+
+    static RWMutex mutex;
+    ScopedLock lock(mutex, /* write = */ false);
+
+    const std::type_index typeIndex(t);
+    const LookupMap &map = lookupMap;
+    const LookupMap::const_iterator iter = map.find(typeIndex);
+    if (iter != lookupMap.end()) {
+        return iter->second;
+    }
+
+    lock.upgrade_to_writer();
+    return lookupMap.insert({typeIndex, ArchGetDemangled(t)}).first->second;
 }
 
 void

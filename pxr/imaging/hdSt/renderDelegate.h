@@ -27,14 +27,15 @@
 #include "pxr/imaging/hdSt/api.h"
 #include "pxr/imaging/hd/renderDelegate.h"
 
+#include <memory>
 #include <mutex>
 
 PXR_NAMESPACE_OPEN_SCOPE
 
 class Hgi;
 
-typedef boost::shared_ptr<class HdStResourceRegistry>
-    HdStResourceRegistrySharedPtr;
+using HdStResourceRegistrySharedPtr = 
+    std::shared_ptr<class HdStResourceRegistry>;
 
 ///
 /// HdStRenderDelegate
@@ -139,7 +140,6 @@ public:
 private:
     static const TfTokenVector SUPPORTED_RPRIM_TYPES;
     static const TfTokenVector SUPPORTED_SPRIM_TYPES;
-    static const TfTokenVector SUPPORTED_BPRIM_TYPES;
 
     /// Resource registry used in this render delegate
     static std::mutex _mutexResourceRegistry;

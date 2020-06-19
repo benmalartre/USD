@@ -21,11 +21,13 @@
 # KIND, either express or implied. See the Apache License for the specific
 # language governing permissions and limitations under the Apache License.
 #
-from qt import QtCore, QtGui, QtWidgets
+from __future__ import print_function
+
+from .qt import QtCore, QtGui, QtWidgets
 import os, time, sys, platform, math
 from pxr import Ar, Tf, Sdf, Kind, Usd, UsdGeom, UsdShade
-from customAttributes import CustomAttribute
-from constantGroup import ConstantGroup
+from .customAttributes import CustomAttribute
+from .constantGroup import ConstantGroup
 
 DEBUG_CLIPPING = "USDVIEWQ_DEBUG_CLIPPING"
 
@@ -207,33 +209,55 @@ def ColorizeLabelText(text, substring, r, g, b):
 
 def PrintWarning(title, description):
     msg = sys.stderr
-    print >> msg, "------------------------------------------------------------"
-    print >> msg, "WARNING: %s" % title
-    print >> msg, description
-    print >> msg, "------------------------------------------------------------"
+    print("------------------------------------------------------------", file=msg)
+    print("WARNING: %s" % title, file=msg)
+    print(description, file=msg)
+    print("------------------------------------------------------------", file=msg)
 
-def GetValueAtFrame(prop, frame):
+def GetValueAndDisplayString(prop, time):
+    """If `prop` is a timeSampled Sdf.AttributeSpec, compute a string specifying
+    how many timeSamples it possesses.  Otherwise, compute the single default
+    value, or targets for a relationship, or value at 'time' for a
+    Usd.Attribute.  Return a tuple of a parameterless function that returns the
+    resolved value at 'time', and the computed brief string for display.  We
+    return a value-producing function rather than the value itself because for
+    an Sdf.AttributeSpec with multiple timeSamples, the resolved value is
+    *all* of the timeSamples, which can be expensive to compute, and is
+    rarely needed.
+    """
+    def _ValAndStr(val): 
+        return (lambda: val, GetShortStringForValue(prop, val))
+
     if isinstance(prop, Usd.Relationship):
-        return prop.GetTargets()
+        return _ValAndStr(prop.GetTargets())
     elif isinstance(prop, (Usd.Attribute, CustomAttribute)):
-        return prop.Get(frame)
+        return _ValAndStr(prop.Get(time))
     elif isinstance(prop, Sdf.AttributeSpec):
-        if frame == Usd.TimeCode.Default():
-            return prop.default
+        if time == Usd.TimeCode.Default():
+            return _ValAndStr(prop.default)
         else:
-            numTimeSamples = -1
-            if prop.HasInfo('timeSamples'):
-                numTimeSamples = prop.layer.GetNumTimeSamplesForPath(prop.path)
-            if numTimeSamples == -1:
-                return prop.default
-            elif numTimeSamples == 1:
-                return "1 time sample"
+            numTimeSamples = prop.layer.GetNumTimeSamplesForPath(prop.path)
+            if numTimeSamples == 0:
+                return _ValAndStr(prop.default)
             else:
-                return str(numTimeSamples) + " time samples"
-    elif isinstance(prop, Sdf.RelationshipSpec):
-        return prop.targetPathList
+                def _GetAllTimeSamples(attrSpec):
+                    l = attrSpec.layer
+                    p = attrSpec.path
+                    ordinates = l.ListTimeSamplesForPath(p)
+                    return [(o, l.QueryTimeSample(p, o)) for o in ordinates]
 
-    return val
+                if numTimeSamples == 1:
+                    valStr = "1 time sample"
+                else:
+                    valStr = str(numTimeSamples) + " time samples"
+                    
+                return (lambda prop=prop: _GetAllTimeSamples(prop), valStr)
+
+    elif isinstance(prop, Sdf.RelationshipSpec):
+        return _ValAndStr(prop.targetPathList)
+    
+    return (lambda: None, "unrecognized property type")
+
 
 def GetShortStringForValue(prop, val):
     if isinstance(prop, Usd.Relationship):
@@ -248,7 +272,7 @@ def GetShortStringForValue(prop, val):
     if val is None:
         return ''
     
-    from scalarTypes import GetScalarTypeFromAttr
+    from .scalarTypes import GetScalarTypeFromAttr
     scalarType, isArray = GetScalarTypeFromAttr(prop)
     result = ''
     if isArray and not isinstance(val, Sdf.ValueBlock):
@@ -362,7 +386,7 @@ def _AddSubLayers(layer, layerOffset, prefix, parentLayer, layers):
             addedPrefix = "     "
             _AddSubLayers(subLayer, offset, addedPrefix + prefix, layer, layers)
         else:
-            print "Could not find layer " + l
+            print("Could not find layer " + l)
 
 def GetRootLayerStackInfo(layer):
     layers = []
@@ -404,7 +428,7 @@ class Timer(object):
         self.interval = self._end - self._start
 
     def PrintTime(self, action):
-        print "Time to %s: %2.3fs" % (action, self.interval)
+        print("Time to %s: %2.3fs" % (action, self.interval))
 
 
 class BusyContext(object):
@@ -531,8 +555,8 @@ def GetAssetCreationTime(primStack, assetIdentifier):
         definingFile = definingLayer.realPath
     else:
         definingFile = primStack[-1].layer.realPath
-        print "Warning: Could not find expected asset-defining layer for %s" %\
-            assetIdentifier
+        print("Warning: Could not find expected asset-defining layer for %s" %
+            assetIdentifier)
 
     if Ar.IsPackageRelativePath(definingFile):
         definingFile = Ar.SplitPackageRelativePathOuter(definingFile)[0]
@@ -573,12 +597,12 @@ def DumpMallocTags(stage, contextStr):
         statsFile.close()
         reportName = statsFile.name
         callTree.Report(reportName)
-        print "Memory consumption of %s for %s is %d Mb" % (contextStr,
+        print("Memory consumption of %s for %s is %d Mb" % (contextStr,
                                                             layerName,
-                                                            memInMb)
-        print "For detailed analysis, see " + reportName
+                                                            memInMb))
+        print("For detailed analysis, see " + reportName)
     else:
-        print "Unable to accumulate memory usage since the Pxr MallocTag system was not initialized"
+        print("Unable to accumulate memory usage since the Pxr MallocTag system was not initialized")
 
 def GetInstanceIdForIndex(prim, instanceIndex, time):
     '''Attempt to find an authored Id value for the instance at index

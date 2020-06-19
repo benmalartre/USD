@@ -31,15 +31,14 @@
 #include "pxr/base/vt/value.h"
 #include "pxr/imaging/hd/bufferArray.h"
 
-#include <boost/noncopyable.hpp>
-#include <boost/shared_ptr.hpp>
+#include <memory>
 
 PXR_NAMESPACE_OPEN_SCOPE
 
 
-typedef std::vector<struct HdBufferSpec> HdBufferSpecVector;
-typedef boost::shared_ptr<class HdBufferSource> HdBufferSourceSharedPtr;
-typedef boost::shared_ptr<class HdBufferArrayRange> HdBufferArrayRangeSharedPtr;
+using HdBufferSpecVector = std::vector<struct HdBufferSpec>;
+using HdBufferArrayRangeSharedPtr = std::shared_ptr<class HdBufferArrayRange>;
+using HdBufferSourceSharedPtr = std::shared_ptr<class HdBufferSource>;
 
 /// \class HdBufferArrayRange
 ///
@@ -49,8 +48,13 @@ typedef boost::shared_ptr<class HdBufferArrayRange> HdBufferArrayRangeSharedPtr;
 /// inherited of this interface so that client (drawItem) can be agnostic about
 /// the implementation detail of aggregation.
 ///
-class HdBufferArrayRange : boost::noncopyable {
+class HdBufferArrayRange 
+{
 public:
+
+    HD_API
+    HdBufferArrayRange();
+
     /// Destructor (do nothing).
     /// The specialized range class may want to do something for garbage
     /// collection in its destructor. However, be careful not do any
@@ -119,6 +123,10 @@ public:
 protected:
     /// Returns the aggregation container to be used in IsAggregatedWith()
     virtual const void *_GetAggregation() const = 0;
+
+    // Don't allow copies
+    HdBufferArrayRange(const HdBufferArrayRange &) = delete;
+    HdBufferArrayRange &operator=(const HdBufferArrayRange &) = delete;
 
 };
 

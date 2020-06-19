@@ -23,13 +23,14 @@
 # language governing permissions and limitations under the Apache License.
 #
 
-from distutils.spawn import find_executable
+from __future__ import print_function
+
 from tempfile import mkdtemp
 from argparse import ArgumentParser
 from sys import exit, stdout 
 from os import listdir, mkdir, getcwd, chdir, rename, access, W_OK
 from os.path import abspath, basename, join, splitext, isfile, dirname, exists
-from subprocess import call, Popen, PIPE
+from subprocess import call
 from shutil import rmtree, copyfile
 from difflib import unified_diff
 
@@ -53,7 +54,7 @@ def _compareFiles(installedFiles, generatedFiles, configuration):
         exit('*** Missing files:\n' + '\n'.join(installedNames - generatedNames))
 
     diffs = {}
-    for i in xrange(0, len(installedFiles)):
+    for i in range(0, len(installedFiles)):
         installedExists = isfile(installedFiles[i])
         generatedExists = isfile(generatedFiles[i])
 
@@ -139,10 +140,10 @@ def _runBisonAndFlexCommands(configuration):
                                   + [flexFiles[index]])
     
     for index, base in enumerate(bases):
-        print 'Running bison on %s' % (base + '.yy')
+        print('Running bison on %s' % (base + '.yy'))
         call(bisonCommand(index))
 
-        print 'Running flex on %s' % (base + '.ll')
+        print('Running flex on %s' % (base + '.ll'))
         with open(flexGenSources[index], 'w') as outputFile:
             call(flexCommand(index), stdout=outputFile)
 
@@ -221,7 +222,7 @@ def _canonicalizeFiles(sourceFiles, generatedFiles):
         replacements.append((oldFileName, newFileName))
 
     for renamedFile in renamed:
-        print 'Fixing line directives in ' + basename(renamedFile)
+        print('Fixing line directives in ' + basename(renamedFile))
 
         with open(renamedFile, 'r+') as inputFile:
             data = inputFile.read()
@@ -247,9 +248,9 @@ def _parseArguments():
     parser = ArgumentParser(description='Generate Ascii File Parsers for HdPrman')
     parser.add_argument('--srcDir', required=False, default=getcwd(),
                         help='The source directory.')
-    parser.add_argument('--bison', required=False, 
+    parser.add_argument('--bison', required=True, 
                         help='The location of the bison executable to be used.')
-    parser.add_argument('--flex', required=False,                         
+    parser.add_argument('--flex', required=True,                         
                         help='The location of the flex executable to be used.')
     parser.add_argument('--validate', action='store_true',
                         help='Verify that the source files are unchanged.')
@@ -276,12 +277,6 @@ def _getConfiguration():
                BASES     : arguments.bases }
                
     # Ensure all optional arguments get properly populated
-    if not arguments.flex:
-        config[FLEX_EXE] = _getFlex(config) 
-
-    if not arguments.bison:
-        config[BISON_EXE] = _getBison(config)
-
     if not arguments.bases:
         allFiles = listdir(arguments.srcDir)
         validExts = ['.yy', '.ll']
@@ -298,85 +293,11 @@ def _getConfiguration():
     return config
 
 # -----------------------------------------------------------------------------
-# Build system info. 
-# This is needed for discerning which flex/bison to use.
-# This works in the context of either a SCons build configuration or a CMake 
-# build configuration.
-# -----------------------------------------------------------------------------
-SCONS = 0
-CMAKE = 1
-
-def _determineBuildSystem(configuration):
-    srcDir = configuration[SRC_DIR]
-    if isfile(join(srcDir, 'SConscript')):
-        return SCONS
-    elif isfile(join(srcDir, 'CMakeLists.txt')):
-        return CMAKE
-    else:
-        exit('*** Unable to determine build system.')
-
-def _getSconsBuildEnvSetting(environmentVariable, configuration):
-    command = [find_executable('scons'), '-u', 
-               '-Qq', '--echo=' + environmentVariable]
-    line, _ = Popen(command, stdout=PIPE).communicate()
-    _, envSettingValue = line.strip().split(' = ')
-
-    if not envSettingValue:
-        exit('*** Unable to determine ' + environmentVariable + 'from '
-             'SCons build system. Try supplying it through the command line '
-             'options.')
-
-    return envSettingValue
-
-
-def _getCMakeBuildEnvSetting(environmentVariable, configuration):
-    # Gather the root of our source directory, we'll need to 
-    # point CMake to it to find the cached variables.
-    srcRootDir = configuration[SRC_DIR]
-
-    foundPxr = lambda d: 'pxr' in map(basename, listdir(d))
-    while exists(srcRootDir) and (not foundPxr(srcRootDir)):
-        srcRootDir = dirname(srcRootDir)
-
-        if srcRootDir is None:
-            exit('*** Unable to find root of this source tree, '
-                 'this information is needed for obtaining build environment '
-                 'information from CMake.')
-
-    command = [find_executable('cmake'), '-LA', '-N', srcRootDir]
-    output, _ = Popen(command, stdout=PIPE).communicate()
-    line = filter(lambda o: environmentVariable in o, output.split('\n'))[0]
-    _, envSettingValue = line.strip().split('=')
-
-    if not envSettingValue:
-        exit('*** Unable to determine ' + environmentVariable + 'from '
-             'CMake build system. Try supplying it through the command line '
-             'options.')
-
-    return envSettingValue
-
-def _getFlex(configuration):
-    buildSystem = _determineBuildSystem(configuration)    
-
-    if buildSystem == SCONS:
-        return _getSconsBuildEnvSetting('LEX', configuration)
-    elif buildSystem == CMAKE:
-        return _getCMakeBuildEnvSetting('FLEX_EXECUTABLE', configuration)
-
-def _getBison(configuration):
-    buildSystem = _determineBuildSystem(configuration)    
-
-    if buildSystem == SCONS:
-        return _getSconsBuildEnvSetting('YACC', configuration)
-    elif buildSystem == CMAKE:
-        return _getCMakeBuildEnvSetting('BISON_EXECUTABLE', configuration) 
-
-# -----------------------------------------------------------------------------
 
 def _printSection(sectionInfo):
-    print '+-------------------------------------------------+'
-    print sectionInfo
-    print '+-------------------------------------------------+'
+    print('+-------------------------------------------------+')
+    print(sectionInfo)
+    print('+-------------------------------------------------+')
 
 if __name__ == '__main__':
     configuration = _getConfiguration()

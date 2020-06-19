@@ -53,7 +53,6 @@
 #include "pxr/base/tf/envSetting.h"
 #include "pxr/base/tf/mallocTag.h"
 
-#include <boost/functional/hash.hpp>
 #include <algorithm>
 #include <functional>
 #include <iostream>
@@ -200,8 +199,8 @@ PcpPrimIndex::GetNodeRange(PcpRangeType rangeType) const
     const std::pair<size_t, size_t> range = 
         _graph->GetNodeIndexesForRange(rangeType);
     return PcpNodeRange(
-        PcpNodeIterator(boost::get_pointer(_graph), range.first),
-        PcpNodeIterator(boost::get_pointer(_graph), range.second));
+        PcpNodeIterator(get_pointer(_graph), range.first),
+        PcpNodeIterator(get_pointer(_graph), range.second));
 }
 
 PcpPrimRange 
@@ -1898,6 +1897,23 @@ _EvalRefOrPayloadArcs(PcpNodeRef node,
                 layer, SdfLayerHandle(), pathResolverContext );
             layerStack = indexer->inputs.cache->ComputeLayerStack( 
                 layerStackIdentifier, &indexer->outputs->allErrors);
+
+            if (!PcpIsTimeScalingForLayerTimeCodesPerSecondDisabled()) {
+                // If the referenced or payloaded layer has a different TCPS
+                // than the source layer that introduces it, we apply the time
+                // scale between these TCPS values to the layer offset.
+                // Note that if the introducing layer is a layer stack sublayer,
+                // any TCPS scaling from the layer stack will already have been
+                // applied to the layer offset for the reference/payload.
+                const double srcTimeCodesPerSecond = 
+                    srcLayer->GetTimeCodesPerSecond();
+                const double destTimeCodesPerSecond =
+                    layerStack->GetTimeCodesPerSecond();
+                if (srcTimeCodesPerSecond != destTimeCodesPerSecond) {
+                    layerOffset.SetScale(layerOffset.GetScale() * 
+                        srcTimeCodesPerSecond / destTimeCodesPerSecond);
+                }
+            }
         }
 
         bool directNodeShouldContributeSpecs = true;

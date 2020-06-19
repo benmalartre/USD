@@ -25,7 +25,6 @@
 #include "pxr/imaging/hdSt/renderDelegate.h"
 
 #include "pxr/imaging/hdSt/basisCurves.h"
-#include "pxr/imaging/hd/camera.h"
 #include "pxr/imaging/hdSt/drawTarget.h"
 #include "pxr/imaging/hdSt/extComputation.h"
 #include "pxr/imaging/hdSt/field.h"
@@ -44,6 +43,8 @@
 #include "pxr/imaging/hdSt/resourceRegistry.h"
 #include "pxr/imaging/hdSt/volume.h"
 
+#include "pxr/imaging/hd/aov.h"
+#include "pxr/imaging/hd/camera.h"
 #include "pxr/imaging/hd/driver.h"
 #include "pxr/imaging/hd/extComputation.h"
 #include "pxr/imaging/hd/perfLog.h"
@@ -66,13 +67,6 @@ PXR_NAMESPACE_OPEN_SCOPE
 TF_DEFINE_ENV_SETTING(HD_ENABLE_GPU_TINY_PRIM_CULLING, false,
                       "Enable tiny prim culling");
 
-// This token is repeated from usdVolImaging which we cannot access from here.
-// Should we even instantiate bprims of different types for OpenVDB vs Field3d?
-TF_DEFINE_PRIVATE_TOKENS(
-    _tokens,
-    (openvdbAsset)
-);
-
 const TfTokenVector HdStRenderDelegate::SUPPORTED_RPRIM_TYPES =
 {
     HdPrimTypeTokens->mesh,
@@ -91,13 +85,6 @@ const TfTokenVector HdStRenderDelegate::SUPPORTED_SPRIM_TYPES =
     HdPrimTypeTokens->rectLight,
     HdPrimTypeTokens->simpleLight,
     HdPrimTypeTokens->sphereLight
-};
-
-const TfTokenVector HdStRenderDelegate::SUPPORTED_BPRIM_TYPES =
-{
-    HdPrimTypeTokens->texture,
-    _tokens->openvdbAsset,
-    HdPrimTypeTokens->renderBuffer
 };
 
 std::mutex HdStRenderDelegate::_mutexResourceRegistry;
@@ -126,7 +113,7 @@ HdStRenderDelegate::_Initialize()
     std::lock_guard<std::mutex> guard(_mutexResourceRegistry);
     
     if (_counterResourceRegistry.fetch_add(1) == 0) {
-        _resourceRegistry.reset( new HdStResourceRegistry() );
+        _resourceRegistry = std::make_shared<HdStResourceRegistry>();
         HdPerfLog::GetInstance().AddResourceRegistry(_resourceRegistry);
     }
 
@@ -193,6 +180,11 @@ HdStRenderDelegate::SetDrivers(HdDriverVector const& drivers)
             break;
         }
     }
+    
+    if (_resourceRegistry) {
+        _resourceRegistry->SetHgi(_hgi);
+    }
+
     TF_VERIFY(_hgi, "HdSt requires Hgi HdDriver");
 }
 
@@ -208,10 +200,26 @@ HdStRenderDelegate::GetSupportedSprimTypes() const
     return SUPPORTED_SPRIM_TYPES;
 }
 
+static
+TfTokenVector
+_ComputeSupportedBprimTypes()
+{
+    TfTokenVector result;
+    result.push_back(HdPrimTypeTokens->texture);
+    result.push_back(HdPrimTypeTokens->renderBuffer);
+
+    for (const TfToken &primType : HdStField::GetSupportedBprimTypes()) {
+        result.push_back(primType);
+    }
+
+    return result;
+}
+
 const TfTokenVector &
 HdStRenderDelegate::GetSupportedBprimTypes() const
 {
-    return SUPPORTED_BPRIM_TYPES;
+    static const TfTokenVector result = _ComputeSupportedBprimTypes();
+    return result;
 }
 
 HdRenderParam *
@@ -236,7 +244,7 @@ HdStRenderDelegate::GetDefaultAovDescriptor(TfToken const& name) const
             GlfContextCaps::GetInstance().floatingPointBuffersEnabled ?
             HdFormatFloat16Vec4 : HdFormatUNorm8Vec4;
         return HdAovDescriptor(colorFormat,colorDepthMSAA, VtValue(GfVec4f(0)));
-    } else if (name == HdAovTokens->depth) {
+    } else if (HdAovHasDepthSemantic(name)) {
         return HdAovDescriptor(HdFormatFloat32, colorDepthMSAA, VtValue(1.0f));
     }
 
@@ -253,7 +261,7 @@ HdStRenderDelegate::CreateRenderPass(HdRenderIndex *index,
 HdRenderPassStateSharedPtr
 HdStRenderDelegate::CreateRenderPassState() const
 {
-    return boost::make_shared<HdStRenderPassState>();
+    return std::make_shared<HdStRenderPassState>();
 }
 
 HdInstancer *
@@ -355,7 +363,7 @@ HdStRenderDelegate::CreateBprim(TfToken const& typeId,
 {
     if (typeId == HdPrimTypeTokens->texture) {
         return new HdStTexture(bprimId);
-    } else if (typeId == _tokens->openvdbAsset) {
+    } else if (HdStField::IsSupportedBprimType(typeId)) {
         return new HdStField(bprimId, typeId);
     } else if (typeId == HdPrimTypeTokens->renderBuffer) {
         return new HdStRenderBuffer(_hgi, bprimId);
@@ -371,7 +379,7 @@ HdStRenderDelegate::CreateFallbackBprim(TfToken const& typeId)
 {
     if (typeId == HdPrimTypeTokens->texture) {
         return new HdStTexture(SdfPath::EmptyPath());
-    } else if (typeId == _tokens->openvdbAsset) {
+    } else if (HdStField::IsSupportedBprimType(typeId)) {
         return new HdStField(SdfPath::EmptyPath(), typeId);
     } else if (typeId == HdPrimTypeTokens->renderBuffer) {
         return new HdStRenderBuffer(_hgi, SdfPath::EmptyPath());

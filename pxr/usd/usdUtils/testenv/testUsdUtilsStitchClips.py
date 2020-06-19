@@ -22,6 +22,8 @@
 # KIND, either express or implied. See the Apache License for the specific
 # language governing permissions and limitations under the Apache License.
 
+from __future__ import print_function
+
 from pxr import Sdf, Tf, UsdUtils, Vt, Gf
 import unittest
 
@@ -99,11 +101,11 @@ class TestUsdUtilsStitchClips(unittest.TestCase):
                            for i in self.layerFileNames]
 
         UsdUtils.StitchClips(rootLayer, localLayerNames, self.clipPath)
-        assetPaths = (
-            rootLayer.GetPrimAtPath(self.clipPath).GetInfo('clipAssetPaths'))
+        prim = rootLayer.GetPrimAtPath(self.clipPath)
+        assetPaths = prim.GetInfo('clips')['default']['assetPaths']
 
         # ensure all paths are relative
-        import itertools
+        self.assertEqual(len(assetPaths), 32)
         self.assertTrue(not any([os.path.isabs(i.path) for i in assetPaths]))
 
     # This test ensures that we are grabbing our frame data from
@@ -132,7 +134,7 @@ class TestUsdUtilsStitchClips(unittest.TestCase):
         try:
             UsdUtils.StitchClips(rootLayer, self.layerFileNames, clipPath)
         except Tf.ErrorException as tfError:
-            print "Caught expected exception %s" %tfError
+            print("Caught expected exception %s" %tfError)
         else:
             self.assertTrue(False, "Failed to raise runtime error on unwritable file." )
         finally:

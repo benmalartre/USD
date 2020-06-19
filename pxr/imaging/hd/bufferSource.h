@@ -32,19 +32,17 @@
 #include "pxr/base/tf/token.h"
 
 #include <atomic>
+#include <memory>
 #include <vector>
-#include <boost/noncopyable.hpp>
-#include <boost/shared_ptr.hpp>
-#include <boost/weak_ptr.hpp>
+
 
 PXR_NAMESPACE_OPEN_SCOPE
 
-
 class HdBufferSource;
-typedef boost::shared_ptr<HdBufferSource> HdBufferSourceSharedPtr;
-typedef boost::shared_ptr<HdBufferSource const> HdBufferSourceConstSharedPtr;
-typedef std::vector<HdBufferSourceSharedPtr> HdBufferSourceVector;
-typedef boost::weak_ptr<HdBufferSource> HdBufferSourceWeakPtr;
+using HdBufferSourceSharedPtr = std::shared_ptr<HdBufferSource>;
+using HdBufferSourceConstSharedPtr = std::shared_ptr<HdBufferSource const>;
+using HdBufferSourceSharedPtrVector = std::vector<HdBufferSourceSharedPtr>;
+using HdBufferSourceWeakPtr = std::weak_ptr<HdBufferSource>;
 
 /// \class HdBufferSource
 ///
@@ -54,7 +52,8 @@ typedef boost::weak_ptr<HdBufferSource> HdBufferSourceWeakPtr;
 /// resource registry with the buffer array range that specifies the
 /// destination resource.
 ///
-class HdBufferSource : public boost::noncopyable {
+class HdBufferSource 
+{
 public:
     HdBufferSource() : _state(UNRESOLVED) { }
 
@@ -133,7 +132,7 @@ public:
 
     /// Returns the vector of chained buffers.
     HD_API
-    virtual HdBufferSourceVector GetChainedBuffers() const;
+    virtual HdBufferSourceSharedPtrVector GetChainedBuffers() const;
 
     /// @}
 
@@ -195,6 +194,10 @@ protected:
     virtual bool _CheckValid() const = 0;
 
 private:
+    // Don't allow copies
+    HdBufferSource(const HdBufferSource &) = delete;
+    HdBufferSource &operator=(const HdBufferSource &) = delete;
+
     enum State { UNRESOLVED=0, BEING_RESOLVED, RESOLVED,  RESOLVE_ERROR};
     std::atomic<State> _state;
 };

@@ -23,7 +23,7 @@
 # language governing permissions and limitations under the Apache License.
 
 import os, unittest
-from pxr import Plug, Usd, Vt, Tf
+from pxr import Plug, Usd, Sdf, Vt, Tf
 
 class TestUsdSchemaRegistry(unittest.TestCase):
     @classmethod
@@ -37,8 +37,19 @@ class TestUsdSchemaRegistry(unittest.TestCase):
     
     def test_PrimMetadata(self):
         primDef = Usd.SchemaRegistry().FindConcretePrimDefinition(
-            "TestUsdSchemaRegistryMetadataTest")
+            "MetadataTest")
         self.assertTrue(primDef)
+
+        self.assertEqual(set(primDef.ListMetadataFields()), 
+            set(["typeName", "testCustomMetadata", "hidden", "documentation"]))
+        self.assertEqual(primDef.GetMetadata("typeName"), "MetadataTest")
+        self.assertEqual(primDef.GetMetadata("documentation"),
+                         "Testing documentation metadata")
+        self.assertEqual(primDef.GetMetadata("hidden"), True)
+        self.assertEqual(primDef.GetMetadata("testCustomMetadata"), "garply")
+
+        self.assertEqual(primDef.GetDocumentation(),
+                         "Testing documentation metadata")
 
         primSpec = primDef.GetSchemaPrimSpec()
         self.assertEqual(primSpec.GetInfo("documentation"),
@@ -48,9 +59,31 @@ class TestUsdSchemaRegistry(unittest.TestCase):
 
     def test_AttributeMetadata(self):
         primDef = Usd.SchemaRegistry().FindConcretePrimDefinition(
-            "TestUsdSchemaRegistryMetadataTest")
+            "MetadataTest")
+
+        self.assertEqual(set(primDef.ListPropertyMetadataFields("testAttr")), 
+            set(["allowedTokens", "default", "displayGroup", "displayName", 
+                 "documentation", "hidden", "testCustomMetadata", "typeName"]))
+        self.assertEqual(primDef.GetPropertyMetadata("testAttr", "typeName"),
+                         "string")
+        self.assertEqual(primDef.GetPropertyMetadata("testAttr", "allowedTokens"),
+                         Vt.TokenArray(["bar", "baz"]))
+        self.assertEqual(primDef.GetPropertyMetadata("testAttr", "displayGroup"), 
+                         "Display Group")
+        self.assertEqual(primDef.GetPropertyMetadata("testAttr", "displayName"), 
+                         "Display Name")
+        self.assertEqual(primDef.GetPropertyMetadata("testAttr", "documentation"),
+                         "Testing documentation metadata")
+        self.assertEqual(primDef.GetPropertyMetadata("testAttr", "hidden"), 
+                         True)
+        self.assertEqual(primDef.GetPropertyMetadata("testAttr", "testCustomMetadata"), 
+                         "garply")
+        self.assertEqual(primDef.GetPropertyMetadata("testAttr", "default"), 
+                         "foo")
 
         self.assertEqual(primDef.GetAttributeFallbackValue("testAttr"), "foo")
+        self.assertEqual(primDef.GetPropertyDocumentation("testAttr"),
+                         "Testing documentation metadata")
 
         attrDef = primDef.GetSchemaAttributeSpec("testAttr")
         self.assertTrue(attrDef)
@@ -66,9 +99,27 @@ class TestUsdSchemaRegistry(unittest.TestCase):
 
     def test_RelationshipMetadata(self):
         primDef = Usd.SchemaRegistry().FindConcretePrimDefinition(
-            "TestUsdSchemaRegistryMetadataTest")
+            "MetadataTest")
+
+        self.assertEqual(set(primDef.ListPropertyMetadataFields("testRel")), 
+            set(["displayGroup", "displayName", "documentation", "hidden", 
+                 "testCustomMetadata", "variability"]))
+        self.assertEqual(primDef.GetPropertyMetadata("testRel", "displayGroup"), 
+                         "Display Group")
+        self.assertEqual(primDef.GetPropertyMetadata("testRel", "displayName"), 
+                         "Display Name")
+        self.assertEqual(primDef.GetPropertyMetadata("testRel", "documentation"),
+                         "Testing documentation metadata")
+        self.assertEqual(primDef.GetPropertyMetadata("testRel", "hidden"), 
+                         True)
+        self.assertEqual(primDef.GetPropertyMetadata("testRel", "testCustomMetadata"), 
+                         "garply")
+        self.assertEqual(primDef.GetPropertyMetadata("testRel", "variability"), 
+                         Sdf.VariabilityUniform)
 
         self.assertIsNone(primDef.GetAttributeFallbackValue("testRel"))
+        self.assertEqual(primDef.GetPropertyDocumentation("testRel"),
+                         "Testing documentation metadata")
 
         relDef = primDef.GetSchemaRelationshipSpec("testRel")
         self.assertTrue(relDef)
@@ -81,17 +132,80 @@ class TestUsdSchemaRegistry(unittest.TestCase):
         self.assertEqual(relDef.GetInfo("testCustomMetadata"), "garply")
 
     def test_GetUsdSchemaTypeName(self):
+        testType = Tf.Type.FindByName("TestUsdSchemaRegistryMetadataTest")
         modelAPI = Tf.Type.FindByName("UsdModelAPI")
-        clipsAPI = Tf.Type.FindByName("UsdClipsAPI")
         collectionAPI = Tf.Type.FindByName("UsdCollectionAPI")
 
-        self.assertEqual(Usd.SchemaRegistry().GetSchemaTypeName(modelAPI),
-                         "ModelAPI")
-        self.assertEqual(Usd.SchemaRegistry().GetSchemaTypeName(clipsAPI),
-                         "ClipsAPI")
-        self.assertEqual(Usd.SchemaRegistry().GetSchemaTypeName(collectionAPI),
-                         "CollectionAPI")
-        
+        # Test getting a schema type name from a TfType for a concrete typed
+        # schema. 
+        self.assertEqual(
+            Usd.SchemaRegistry.GetSchemaTypeName(testType), 
+            "MetadataTest")
+        self.assertEqual(
+            Usd.SchemaRegistry.GetConcreteSchemaTypeName(testType),
+            "MetadataTest")
+        self.assertEqual(
+            Usd.SchemaRegistry.GetAPISchemaTypeName(testType), 
+            "")
+
+        # Test the reverse of getting the TfType for concrete typed schema name.
+        self.assertEqual(
+            Usd.SchemaRegistry.GetTypeFromSchemaTypeName("MetadataTest"),
+            testType)
+        self.assertEqual(
+            Usd.SchemaRegistry.GetConcreteTypeFromSchemaTypeName("MetadataTest"),
+            testType)
+        self.assertEqual(
+            Usd.SchemaRegistry.GetAPITypeFromSchemaTypeName("MetadataTest"), 
+            Tf.Type.Unknown)
+
+        # Test getting a schema type name from a TfType for an applied API
+        # schema.
+        self.assertEqual(
+            Usd.SchemaRegistry.GetSchemaTypeName(collectionAPI),
+            "CollectionAPI")
+        self.assertEqual(
+            Usd.SchemaRegistry.GetConcreteSchemaTypeName(collectionAPI),
+            "")
+        self.assertEqual(
+            Usd.SchemaRegistry.GetAPISchemaTypeName(collectionAPI), 
+            "CollectionAPI")
+
+        # Test the reverse of getting the TfType for an applied API schema name.
+        self.assertEqual(
+            Usd.SchemaRegistry.GetTypeFromSchemaTypeName("CollectionAPI"),
+            collectionAPI)
+        self.assertEqual(
+            Usd.SchemaRegistry.GetConcreteTypeFromSchemaTypeName("CollectionAPI"),
+            Tf.Type.Unknown)
+        self.assertEqual(
+            Usd.SchemaRegistry.GetAPITypeFromSchemaTypeName("CollectionAPI"), 
+            collectionAPI)
+
+        # Test getting a schema type name from a TfType for a non-apply API
+        # schema. This is the same API as for applied API schemas but may change
+        # in the future?
+        self.assertEqual(
+            Usd.SchemaRegistry.GetSchemaTypeName(modelAPI),
+            "ModelAPI")
+        self.assertEqual(
+            Usd.SchemaRegistry.GetConcreteSchemaTypeName(modelAPI),
+            "")
+        self.assertEqual(
+            Usd.SchemaRegistry.GetAPISchemaTypeName(modelAPI), 
+            "ModelAPI")
+
+        # Test the reverse of getting the TfType for a non-apply API schema name
+        self.assertEqual(
+            Usd.SchemaRegistry.GetTypeFromSchemaTypeName("ModelAPI"),
+            modelAPI)
+        self.assertEqual(
+            Usd.SchemaRegistry.GetConcreteTypeFromSchemaTypeName("ModelAPI"),
+            Tf.Type.Unknown)
+        self.assertEqual(
+            Usd.SchemaRegistry.GetAPITypeFromSchemaTypeName("ModelAPI"), 
+            modelAPI)
+
         # A valid type without an associated schema prim definition returns an
         # empty type name.
         self.assertTrue(Tf.Type(Usd.Typed))        

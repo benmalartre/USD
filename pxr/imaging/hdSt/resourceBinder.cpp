@@ -31,6 +31,8 @@
 #include "pxr/imaging/hdSt/resourceGL.h"
 #include "pxr/imaging/hdSt/shaderCode.h"
 #include "pxr/imaging/hdSt/drawItem.h"
+#include "pxr/imaging/hdSt/materialParam.h"
+#include "pxr/imaging/hdSt/textureBinder.h"
 #include "pxr/imaging/hd/bufferSpec.h"
 #include "pxr/imaging/hd/enums.h"
 #include "pxr/imaging/hd/tokens.h"
@@ -41,6 +43,8 @@
 
 PXR_NAMESPACE_OPEN_SCOPE
 
+TF_DEFINE_PUBLIC_TOKENS(HdSt_ResourceBindingSuffixTokens,
+                        HDST_RESOURCE_BINDING_SUFFIX_TOKENS);
 
 TF_DEFINE_PRIVATE_TOKENS(
     _tokens,
@@ -124,11 +128,36 @@ namespace {
             return HdGetComponentCount(type);
         }
     }
+
+    // Modify datatype if swizzle is specified
+    static HdType _AdjustHdType(HdType type, std::string const &swizzle) {
+        size_t numChannels = swizzle.size();
+        if (numChannels == 4) {
+            return HdTypeFloatVec4;
+        } else if (numChannels == 3) {
+            return HdTypeFloatVec3;
+        } else if (numChannels == 2) {
+            return HdTypeFloatVec2;
+        } else if (numChannels == 1) {
+            return HdTypeFloat;
+        }
+        
+        return type;
+    }
 }
 
 HdSt_ResourceBinder::HdSt_ResourceBinder()
     : _numReservedTextureUnits(0)
 {
+}
+
+static
+TfToken
+_ConcatLayout(const TfToken &token)
+{
+    return TfToken(
+        token.GetString()
+        + HdSt_ResourceBindingSuffixTokens->layout.GetString());
 }
 
 void
@@ -180,7 +209,7 @@ HdSt_ResourceBinder::ResolveBindings(HdStDrawItem const *drawItem,
     // binding assignments
     BindingLocator locator;
     // XXX: Skip lighting context texture and UBO bindings.
-    // See HdxSimpleLightingShader::BindResources
+    // See HdStSimpleLightingShader::BindResources
     locator.textureUnit = 5;
     locator.uboLocation = 4;
 
@@ -190,6 +219,7 @@ HdSt_ResourceBinder::ResolveBindings(HdStDrawItem const *drawItem,
     int shaderFallbackLocation = 0;
     int shaderPrimvarRedirectLocation = 0;
     int shaderFieldRedirectLocation = 0;
+    int shaderTransform2dLocation = 0;
 
     // clear all
     _bindingMap.clear();
@@ -203,7 +233,7 @@ HdSt_ResourceBinder::ResolveBindings(HdStDrawItem const *drawItem,
         drawItem->GetConstantPrimvarRange()) {
 
         HdStBufferArrayRangeGLSharedPtr constantBar =
-            boost::static_pointer_cast<HdStBufferArrayRangeGL>(constantBar_);
+            std::static_pointer_cast<HdStBufferArrayRangeGL>(constantBar_);
 
         MetaData::StructBlock sblock(_tokens->constantPrimvars);
         TF_FOR_ALL (it, constantBar->GetResources()) {
@@ -237,7 +267,7 @@ HdSt_ResourceBinder::ResolveBindings(HdStDrawItem const *drawItem,
             drawItem->GetInstancePrimvarRange(i)) {
 
             HdStBufferArrayRangeGLSharedPtr instanceBar =
-                boost::static_pointer_cast<HdStBufferArrayRangeGL>(instanceBar_);
+                std::static_pointer_cast<HdStBufferArrayRangeGL>(instanceBar_);
 
             TF_FOR_ALL (it, instanceBar->GetResources()) {
                 TfToken const& name = it->first;
@@ -265,7 +295,7 @@ HdSt_ResourceBinder::ResolveBindings(HdStDrawItem const *drawItem,
         drawItem->GetVertexPrimvarRange()) {
 
         HdStBufferArrayRangeGLSharedPtr vertexBar =
-            boost::static_pointer_cast<HdStBufferArrayRangeGL>(vertexBar_);
+            std::static_pointer_cast<HdStBufferArrayRangeGL>(vertexBar_);
 
         TF_FOR_ALL (it, vertexBar->GetResources()) {
             TfToken const& name = it->first;
@@ -292,7 +322,7 @@ HdSt_ResourceBinder::ResolveBindings(HdStDrawItem const *drawItem,
         drawItem->GetTopologyRange()) {
 
         HdStBufferArrayRangeGLSharedPtr topologyBar =
-            boost::static_pointer_cast<HdStBufferArrayRangeGL>(topologyBar_);
+            std::static_pointer_cast<HdStBufferArrayRangeGL>(topologyBar_);
 
         TF_FOR_ALL (it, topologyBar->GetResources()) {
             // Don't need to sanitize the name, since topology resources are
@@ -341,7 +371,7 @@ HdSt_ResourceBinder::ResolveBindings(HdStDrawItem const *drawItem,
         drawItem->GetTopologyVisibilityRange()) {
 
         HdStBufferArrayRangeGLSharedPtr topVisBar =
-            boost::static_pointer_cast<HdStBufferArrayRangeGL>(topVisBar_);
+            std::static_pointer_cast<HdStBufferArrayRangeGL>(topVisBar_);
 
         MetaData::StructBlock sblock(_tokens->topologyVisibility);
         TF_FOR_ALL (it, topVisBar->GetResources()) {
@@ -368,7 +398,7 @@ HdSt_ResourceBinder::ResolveBindings(HdStDrawItem const *drawItem,
         drawItem->GetElementPrimvarRange()) {
 
         HdStBufferArrayRangeGLSharedPtr elementBar =
-            boost::static_pointer_cast<HdStBufferArrayRangeGL>(elementBar_);
+            std::static_pointer_cast<HdStBufferArrayRangeGL>(elementBar_);
 
         TF_FOR_ALL (it, elementBar->GetResources()) {
             TfToken const& name = it->first;
@@ -390,7 +420,7 @@ HdSt_ResourceBinder::ResolveBindings(HdStDrawItem const *drawItem,
         drawItem->GetFaceVaryingPrimvarRange()) {
 
         HdStBufferArrayRangeGLSharedPtr fvarBar =
-            boost::static_pointer_cast<HdStBufferArrayRangeGL>(fvarBar_);
+            std::static_pointer_cast<HdStBufferArrayRangeGL>(fvarBar_);
 
         TF_FOR_ALL (it, fvarBar->GetResources()) {
             TfToken const& name = it->first;
@@ -460,7 +490,7 @@ HdSt_ResourceBinder::ResolveBindings(HdStDrawItem const *drawItem,
         drawItem->GetInstanceIndexRange()) {
 
         HdStBufferArrayRangeGLSharedPtr instanceIndexBar =
-            boost::static_pointer_cast<HdStBufferArrayRangeGL>(
+            std::static_pointer_cast<HdStBufferArrayRangeGL>(
                                                         instanceIndexBar_);
 
         HdStBufferResourceGLSharedPtr instanceIndices
@@ -509,14 +539,13 @@ HdSt_ResourceBinder::ResolveBindings(HdStDrawItem const *drawItem,
     }
 
     // shader parameter bindings
-
     TF_FOR_ALL(shader, shaders) {
 
         // uniform block
         HdBufferArrayRangeSharedPtr const &shaderBar_ = 
                                                 (*shader)->GetShaderData();
         HdStBufferArrayRangeGLSharedPtr shaderBar =
-            boost::static_pointer_cast<HdStBufferArrayRangeGL> (shaderBar_);
+            std::static_pointer_cast<HdStBufferArrayRangeGL> (shaderBar_);
         if (shaderBar) {
             HdBinding shaderParamBinding =
                 locator.GetBinding(structBufferBindingType, 
@@ -549,15 +578,19 @@ HdSt_ResourceBinder::ResolveBindings(HdStDrawItem const *drawItem,
             }
         }
 
-        HdMaterialParamVector params = (*shader)->GetParams();
+        HdSt_MaterialParamVector params = (*shader)->GetParams();
         // for primvar and texture accessors
-        for (HdMaterialParam const& param : params) {
+        for (HdSt_MaterialParam const& param : params) {
+            const bool isMaterialShader =
+                ((*shader) == drawItem->GetMaterialShader());
+
             // renderpass texture should be bindfull (for now)
-            bool bindless = useBindlessForTexture && 
-                                ((*shader) == drawItem->GetMaterialShader());
+            const bool bindless = useBindlessForTexture && isMaterialShader;
+            std::string const& glSwizzle = param.swizzle;                    
             HdTupleType valueType = param.GetTupleType();
             TfToken glType =
-                HdStGLConversions::GetGLSLTypename(valueType.type);
+                HdStGLConversions::GetGLSLTypename(_AdjustHdType(valueType.type,
+                                                                 glSwizzle));
             TfToken const& name = param.name;
             TfToken glName =  HdStGLConversions::GetGLSLIdentifier(name);
 
@@ -581,7 +614,8 @@ HdSt_ResourceBinder::ResolveBindings(HdStDrawItem const *drawItem,
                     metaDataOut->shaderParameterBinding[texelBinding] =
                         MetaData::ShaderParameterAccessor(
                             /*name=*/glName,
-                            /*type=*/glType);
+                            /*type=*/glType,
+                            /*swizzle=*/glSwizzle);
                     _bindingMap[name] = texelBinding; // used for non-bindless
 
                     HdBinding layoutBinding = bindless
@@ -591,8 +625,7 @@ HdSt_ResourceBinder::ResolveBindings(HdStDrawItem const *drawItem,
                                     locator.uniformLocation++,
                                     locator.textureUnit++);
 
-                    TfToken glLayoutName = TfToken(std::string(
-                                                glName.GetText()) + "_layout");
+                    const TfToken glLayoutName(_ConcatLayout(glName));
                     metaDataOut->shaderParameterBinding[layoutBinding] =
                         MetaData::ShaderParameterAccessor(
                             /*name=*/glLayoutName,
@@ -600,8 +633,7 @@ HdSt_ResourceBinder::ResolveBindings(HdStDrawItem const *drawItem,
                                 HdType::HdTypeInt32));
 
                     // Layout for Ptex
-                    TfToken layoutName = TfToken(std::string(
-                                                name.GetText()) + "_layout");
+                    const TfToken layoutName(_ConcatLayout(name));
                     // used for non-bindless
                     _bindingMap[layoutName] = layoutBinding; 
                 } else if (param.textureType == HdTextureType::Udim) {
@@ -617,14 +649,14 @@ HdSt_ResourceBinder::ResolveBindings(HdStDrawItem const *drawItem,
                         MetaData::ShaderParameterAccessor(
                             /*name=*/param.name,
                             /*type=*/glType,
+                            /*swizzle=*/glSwizzle,
                             /*inPrimvars=*/param.samplerCoords);
                     // used for non-bindless
                     _bindingMap[param.name] = textureBinding;
 
                     // Layout for UDIM
-                    TfToken layoutName =
-                        TfToken(std::string(param.name.GetText())
-                        + "_layout");
+                    const TfToken layoutName(_ConcatLayout(param.name));
+
                     HdBinding layoutBinding = bindless
                         ? HdBinding(HdBinding::BINDLESS_TEXTURE_UDIM_LAYOUT,
                             bindlessTextureLocation++)
@@ -653,14 +685,16 @@ HdSt_ResourceBinder::ResolveBindings(HdStDrawItem const *drawItem,
                         MetaData::ShaderParameterAccessor(
                             /*name=*/glName,
                             /*type=*/glType,
-                            /*inPrimvars=*/param.samplerCoords);
+                            /*swizzle=*/glSwizzle,
+                            /*inPrimvars=*/param.samplerCoords,
+                            /*processTextureFallbackValue=*/isMaterialShader);
                     _bindingMap[name] = textureBinding; // used for non-bindless
-                } else if (param.textureType == HdTextureType::Uvw) {
+                } else if (param.textureType == HdTextureType::Field) {
                     // 3d texture
                     HdBinding textureBinding = bindless
-                        ? HdBinding(HdBinding::BINDLESS_TEXTURE_3D,
+                        ? HdBinding(HdBinding::BINDLESS_TEXTURE_FIELD,
                                     bindlessTextureLocation++)
-                        : HdBinding(HdBinding::TEXTURE_3D,
+                        : HdBinding(HdBinding::TEXTURE_FIELD,
                                     locator.uniformLocation++,
                                     locator.textureUnit++);
 
@@ -668,40 +702,40 @@ HdSt_ResourceBinder::ResolveBindings(HdStDrawItem const *drawItem,
                         MetaData::ShaderParameterAccessor(
                             /*name=*/glName,
                             /*type=*/glType,
-                            /*inPrimvars=*/param.samplerCoords);
+                            /*swizzle=*/glSwizzle,
+                            /*inPrimvars=*/param.samplerCoords,
+                            /*processTextureFallbackValue=*/isMaterialShader);
                     _bindingMap[name] = textureBinding; // used for non-bindless
                 }
-            } else if (param.IsPrimvar()) {
+            } else if (param.IsPrimvarRedirect() || param.IsFieldRedirect()) {
                 TfTokenVector const& samplePrimvars = param.samplerCoords;
                 TfTokenVector glNames;
                 glNames.reserve(samplePrimvars.size());
                 for (auto const& pv : samplePrimvars) {
                     glNames.push_back(HdStGLConversions::GetGLSLIdentifier(pv));
                 }
+
+                HdBinding binding = param.IsPrimvarRedirect()
+                    ? HdBinding(HdBinding::PRIMVAR_REDIRECT,
+                                shaderPrimvarRedirectLocation++)
+                    : HdBinding(HdBinding::FIELD_REDIRECT,
+                                shaderFieldRedirectLocation++);
                 
-                metaDataOut->shaderParameterBinding[
-                            HdBinding(HdBinding::PRIMVAR_REDIRECT,
-                                        shaderPrimvarRedirectLocation++)]
+                metaDataOut->shaderParameterBinding[binding]
                     = MetaData::ShaderParameterAccessor(
                     /*name=*/glName,
                     /*type=*/glType,
+                    /*swizzle=*/glSwizzle,
                     /*inPrimvars=*/glNames);
-            } else if (param.IsFieldRedirect()) {
-                TfToken glFieldName;
-                /* We store the field name in sampler coordinates.
-                   There should only ever be one field name */
-                TfTokenVector const& fieldNames = param.samplerCoords;
-                if (!fieldNames.empty()) {
-                    glFieldName = 
-                        HdStGLConversions::GetGLSLIdentifier(fieldNames[0]);
-                }
-                
-                metaDataOut->fieldRedirectBinding[
-                            HdBinding(HdBinding::FIELD_REDIRECT,
-                                        shaderFieldRedirectLocation++)]
-                    = MetaData::FieldRedirectAccessor(
+            } else if (param.IsTransform2d()) {
+                HdBinding binding = HdBinding(HdBinding::TRANSFORM_2D,
+                                              shaderTransform2dLocation++);
+                metaDataOut->shaderParameterBinding[binding] =
+                    MetaData::ShaderParameterAccessor(
                         /*name=*/glName,
-                        /*fieldName=*/glFieldName);
+                        /*type=*/glType,
+                        /*swizzle=*/glSwizzle,
+                        /*inPrimvars=*/param.samplerCoords);            
             } else if (param.IsAdditionalPrimvar()) {
                 // Additional primvars is used so certain primvars survive
                 // primvar filtering. We can ignore them here, because primvars
@@ -724,7 +758,7 @@ HdSt_ResourceBinder::ResolveBindings(HdStDrawItem const *drawItem,
 
             HdBufferArrayRangeSharedPtr bar_ = it->GetBar();
             HdStBufferArrayRangeGLSharedPtr bar =
-                boost::static_pointer_cast<HdStBufferArrayRangeGL> (bar_);
+                std::static_pointer_cast<HdStBufferArrayRangeGL> (bar_);
 
             for (auto const& nameRes : bar->GetResources()) {
                 HdTupleType valueType = nameRes.second->GetTupleType();
@@ -747,7 +781,7 @@ HdSt_ResourceBinder::ResolveBindings(HdStDrawItem const *drawItem,
 
                 HdBufferArrayRangeSharedPtr bar_ = it->GetBar();
                 HdStBufferArrayRangeGLSharedPtr bar =
-                    boost::static_pointer_cast<HdStBufferArrayRangeGL> (bar_);
+                    std::static_pointer_cast<HdStBufferArrayRangeGL> (bar_);
 
                 for (auto const& nameRes : bar->GetResources()) {
                     HdBinding binding = locator.GetBinding(it->GetBindingType(), nameRes.first);
@@ -948,7 +982,7 @@ HdSt_ResourceBinder::BindBuffer(TfToken const &name,
         }
         break;
     case HdBinding::TEXTURE_2D:
-    case HdBinding::TEXTURE_3D:
+    case HdBinding::TEXTURE_FIELD:
         // nothing
         break;
     default:
@@ -1022,7 +1056,7 @@ HdSt_ResourceBinder::UnbindBuffer(TfToken const &name,
         }
         break;
     case HdBinding::TEXTURE_2D:
-    case HdBinding::TEXTURE_3D:
+    case HdBinding::TEXTURE_FIELD:
         // nothing
         break;
     default:
@@ -1108,9 +1142,9 @@ HdSt_ResourceBinder::BindShaderResources(HdStShaderCode const *shader) const
         HdBinding::Type type = binding.GetType();
 
         if (type == HdBinding::TEXTURE_2D ||
-            type == HdBinding::TEXTURE_3D) {
+            type == HdBinding::TEXTURE_FIELD) {
         } else if (type == HdBinding::BINDLESS_TEXTURE_2D
-                || type == HdBinding::BINDLESS_TEXTURE_3D
+                || type == HdBinding::BINDLESS_TEXTURE_FIELD
                 || type == HdBinding::BINDLESS_TEXTURE_PTEX_TEXEL
                 || type == HdBinding::BINDLESS_TEXTURE_PTEX_LAYOUT) {
             // nothing? or make it resident?? but it only binds the first one.
@@ -1134,9 +1168,9 @@ HdSt_ResourceBinder::UnbindShaderResources(HdStShaderCode const *shader) const
         HdBinding::Type type = binding.GetType();
 
         if (type == HdBinding::TEXTURE_2D ||
-            type == HdBinding::TEXTURE_3D) {
+            type == HdBinding::TEXTURE_FIELD) {
         } else if (type == HdBinding::BINDLESS_TEXTURE_2D
-                || type == HdBinding::BINDLESS_TEXTURE_3D
+                || type == HdBinding::BINDLESS_TEXTURE_FIELD
                 || type == HdBinding::BINDLESS_TEXTURE_PTEX_TEXEL
                    || type == HdBinding::BINDLESS_TEXTURE_PTEX_LAYOUT) {
 //            if (glIsTextureHandleResidentARB(it->handle)) {
@@ -1165,19 +1199,19 @@ HdSt_ResourceBinder::Bind(HdBindingRequest const& req) const
     } else if (req.IsResource()) {
         HdBufferResourceSharedPtr res_ = req.GetResource();
         HdStBufferResourceGLSharedPtr res =
-            boost::static_pointer_cast<HdStBufferResourceGL> (res_);
+            std::static_pointer_cast<HdStBufferResourceGL> (res_);
 
         BindBuffer(req.GetName(), res, req.GetByteOffset());
     } else if (req.IsInterleavedBufferArray()) {
         // note: interleaved buffer needs only 1 binding
         HdBufferArrayRangeSharedPtr bar_ = req.GetBar();
         HdStBufferArrayRangeGLSharedPtr bar =
-            boost::static_pointer_cast<HdStBufferArrayRangeGL> (bar_);
+            std::static_pointer_cast<HdStBufferArrayRangeGL> (bar_);
         BindBuffer(req.GetName(), bar->GetResource(), req.GetByteOffset());
     } else if (req.IsBufferArray()) {
         HdBufferArrayRangeSharedPtr bar_ = req.GetBar();
         HdStBufferArrayRangeGLSharedPtr bar =
-            boost::static_pointer_cast<HdStBufferArrayRangeGL> (bar_);
+            std::static_pointer_cast<HdStBufferArrayRangeGL> (bar_);
         BindBufferArray(bar);
     }
 }
@@ -1190,20 +1224,20 @@ HdSt_ResourceBinder::Unbind(HdBindingRequest const& req) const
     } else if (req.IsResource()) {
         HdBufferResourceSharedPtr res_ = req.GetResource();
         HdStBufferResourceGLSharedPtr res =
-            boost::static_pointer_cast<HdStBufferResourceGL> (res_);
+            std::static_pointer_cast<HdStBufferResourceGL> (res_);
 
         UnbindBuffer(req.GetName(), res);
     } else if (req.IsInterleavedBufferArray()) {
         // note: interleaved buffer needs only 1 binding
         HdBufferArrayRangeSharedPtr bar_ = req.GetBar();
         HdStBufferArrayRangeGLSharedPtr bar =
-            boost::static_pointer_cast<HdStBufferArrayRangeGL> (bar_);
+            std::static_pointer_cast<HdStBufferArrayRangeGL> (bar_);
 
         UnbindBuffer(req.GetName(), bar->GetResource());
     } else if (req.IsBufferArray()) {
         HdBufferArrayRangeSharedPtr bar_ = req.GetBar();
         HdStBufferArrayRangeGLSharedPtr bar =
-            boost::static_pointer_cast<HdStBufferArrayRangeGL> (bar_);
+            std::static_pointer_cast<HdStBufferArrayRangeGL> (bar_);
 
         UnbindBufferArray(bar);
     }
@@ -1367,7 +1401,7 @@ HdSt_ResourceBinder::IntrospectBindings(HdStResourceGL const & programResource)
             // HdCodeGen::_GenerateShaderParameters
             if (type == HdBinding::TEXTURE_2D) {
                 textureName = "sampler2d_" + name;
-            } else if (type == HdBinding::TEXTURE_3D) {
+            } else if (type == HdBinding::TEXTURE_FIELD) {
                 textureName = "sampler3d_" + name;
             } else if (type == HdBinding::TEXTURE_PTEX_TEXEL) {
                 textureName = "sampler2darray_" + name;
@@ -1503,6 +1537,7 @@ HdSt_ResourceBinder::MetaData::ComputeHash() const
         ShaderParameterAccessor const &entry = it->second;
         boost::hash_combine(hash, entry.name.Hash());
         boost::hash_combine(hash, entry.dataType);
+        boost::hash_combine(hash, entry.swizzle);
     }
 
     return hash;

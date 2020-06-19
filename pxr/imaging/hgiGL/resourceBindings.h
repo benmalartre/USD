@@ -43,22 +43,22 @@ class HgiGLResourceBindings final : public HgiResourceBindings
 {
 public:
     HGIGL_API
-    HgiGLResourceBindings(HgiResourceBindingsDesc const& desc);
-
-    HGIGL_API
-    virtual ~HgiGLResourceBindings();
+    ~HgiGLResourceBindings() override;
 
     /// Binds the resources to GPU.
     HGIGL_API
     void BindResources();
 
+protected:
+    friend class HgiGL;
+
+    HGIGL_API
+    HgiGLResourceBindings(HgiResourceBindingsDesc const& desc);
+
 private:
     HgiGLResourceBindings() = delete;
     HgiGLResourceBindings & operator=(const HgiGLResourceBindings&) = delete;
     HgiGLResourceBindings(const HgiGLResourceBindings&) = delete;
-
-private:
-    uint32_t _vao;
 };
 
 

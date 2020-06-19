@@ -83,7 +83,9 @@ HdStSimpleTextureResource::~HdStSimpleTextureResource()
         if (!glDeleteSamplers) { // GL initialization guard for headless unit test
             return;
         }
-        glDeleteSamplers(1, &_sampler);
+        if (_sampler) {
+            glDeleteSamplers(1, &_sampler);
+        }
     }
 }
 
@@ -152,7 +154,7 @@ GLuint HdStSimpleTextureResource::GetTexelsSamplerId()
         glGenSamplers(1, &_sampler);
         glSamplerParameteri(_sampler, GL_TEXTURE_WRAP_S, fwrapS);
         glSamplerParameteri(_sampler, GL_TEXTURE_WRAP_T, fwrapT);
-        if (_textureType == HdTextureType::Uvw) {
+        if (_textureType == HdTextureType::Field) {
             glSamplerParameteri(_sampler, GL_TEXTURE_WRAP_R, fwrapR);
         }
         glSamplerParameteri(_sampler, GL_TEXTURE_MIN_FILTER, fminFilter);

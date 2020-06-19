@@ -25,14 +25,21 @@
 
 #include "pxr/imaging/hgi/handle.h"
 #include "pxr/imaging/hgiGL/hgi.h"
+#include "pxr/imaging/hgiGL/blitCmds.h"
 #include "pxr/imaging/hgiGL/buffer.h"
 #include "pxr/imaging/hgiGL/conversions.h"
+#include "pxr/imaging/hgiGL/device.h"
 #include "pxr/imaging/hgiGL/diagnostic.h"
+#include "pxr/imaging/hgiGL/graphicsCmds.h"
 #include "pxr/imaging/hgiGL/pipeline.h"
 #include "pxr/imaging/hgiGL/resourceBindings.h"
+#include "pxr/imaging/hgiGL/scopedStateHolder.h"
+#include "pxr/imaging/hgiGL/sampler.h"
 #include "pxr/imaging/hgiGL/shaderFunction.h"
 #include "pxr/imaging/hgiGL/shaderProgram.h"
 #include "pxr/imaging/hgiGL/texture.h"
+
+#include "pxr/base/trace/trace.h"
 
 #include "pxr/base/tf/envSetting.h"
 #include "pxr/base/tf/registryManager.h"
@@ -52,6 +59,7 @@ TF_REGISTRY_FUNCTION(TfType)
 
 
 HgiGL::HgiGL()
+    : _device(nullptr)
 {
     static std::once_flag versionOnce;
     std::call_once(versionOnce, [](){
@@ -64,23 +72,75 @@ HgiGL::HgiGL()
         }
     });
 
-    HgiGLSetupGL4Debug();
+    // Create "primary device" (note there is only one for GL)
+    _device = new HgiGLDevice();
 }
 
 HgiGL::~HgiGL()
 {
+    delete _device;
 }
 
-HgiImmediateCommandBuffer&
-HgiGL::GetImmediateCommandBuffer()
+HgiGLDevice*
+HgiGL::GetPrimaryDevice() const
 {
-    return _immediateCommandBuffer;
+    return _device;
+}
+
+void
+HgiGL::SubmitCmds(HgiCmds* cmds)
+{
+    TRACE_FUNCTION();
+
+    if (!cmds) {
+        return;
+    }
+
+    // Capture OpenGL state before executing the 'ops' and restore it when this
+    // function ends. We do this defensively during hgi transition to make sure
+    // non-hgi code that directly manipulates global opengl state continues to
+    // work. Our end goal is that we always set a HgiPipeline instead, but for
+    // that to work we need to first complete the transition to Hgi.
+    HgiGL_ScopedStateHolder openglStateGuard;
+
+    if (HgiGLGraphicsCmds* gw = dynamic_cast<HgiGLGraphicsCmds*>(cmds)) {
+        gw->EndRecording();
+        _device->SubmitOps(gw->GetOps());
+    } else if (HgiGLBlitCmds* bw = dynamic_cast<HgiGLBlitCmds*>(cmds)) {
+        _device->SubmitOps(bw->GetOps());
+    }
+}
+
+HgiGraphicsCmdsUniquePtr
+HgiGL::CreateGraphicsCmds(
+    HgiGraphicsCmdsDesc const& desc)
+{
+    HgiGLGraphicsCmds* cmds(new HgiGLGraphicsCmds(_device, desc));
+    return HgiGraphicsCmdsUniquePtr(cmds);
+}
+
+HgiBlitCmdsUniquePtr
+HgiGL::CreateBlitCmds()
+{
+    return HgiBlitCmdsUniquePtr(new HgiGLBlitCmds());
 }
 
 HgiTextureHandle
 HgiGL::CreateTexture(HgiTextureDesc const & desc)
 {
     return HgiTextureHandle(new HgiGLTexture(desc), GetUniqueId());
+}
+
+HgiSamplerHandle
+HgiGL::CreateSampler(HgiSamplerDesc const & desc)
+{
+    return HgiSamplerHandle(new HgiGLSampler(desc), GetUniqueId());
+}
+
+void
+HgiGL::DestroySampler(HgiSamplerHandle* smpHandle)
+{
+    DestroyObject(smpHandle);
 }
 
 void
@@ -148,6 +208,11 @@ void
 HgiGL::DestroyPipeline(HgiPipelineHandle* pipeHandle)
 {
     DestroyObject(pipeHandle);
+}
+
+TfToken const&
+HgiGL::GetAPIName() const {
+    return HgiTokens->OpenGL;
 }
 
 PXR_NAMESPACE_CLOSE_SCOPE

@@ -96,7 +96,9 @@ private:
 
 static void CameraAndLightTest()
 {
-    std::unique_ptr<Hgi> hgi(Hgi::GetPlatformDefaultHgi());
+    // Hgi and HdDriver should be constructed before HdEngine to ensure they
+    // are destructed last. Hgi may be used during engine/delegate destruction.
+    HgiUniquePtr hgi = Hgi::CreatePlatformDefaultHgi();
     HdDriver driver{HgiTokens->renderDriver, VtValue(hgi.get())};
 
     HdStRenderDelegate renderDelegate;
@@ -116,8 +118,8 @@ static void CameraAndLightTest()
         new HdSt_RenderPass(index.get(), collection));
     HdEngine engine;
 
-    HdTaskSharedPtr drawTask = boost::make_shared<Hd_TestTask>(renderPass,
-                                                               renderPassState);
+    HdTaskSharedPtr drawTask = std::make_shared<Hd_TestTask>(renderPass,
+                                                             renderPassState);
     HdTaskSharedPtrVector tasks = { drawTask };
 
     GfMatrix4d tx(1.0f);

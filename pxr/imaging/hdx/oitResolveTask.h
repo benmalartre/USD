@@ -29,19 +29,18 @@
 #include "pxr/imaging/hdx/version.h"
 #include "pxr/imaging/hd/task.h"
 
-#include <boost/shared_ptr.hpp>
+#include <memory>
 
 PXR_NAMESPACE_OPEN_SCOPE
 
 
 class HdSceneDelegate;
 
-typedef boost::shared_ptr<class HdStRenderPassState>
-    HdStRenderPassStateSharedPtr;
-typedef boost::shared_ptr<class HdRenderPass>
-    HdRenderPassSharedPtr;
-typedef boost::shared_ptr<class HdStRenderPassShader>
-    HdStRenderPassShaderSharedPtr;
+using HdStRenderPassStateSharedPtr = std::shared_ptr<class HdStRenderPassState>;
+
+using HdRenderPassSharedPtr = std::shared_ptr<class HdRenderPass>;
+using HdStRenderPassShaderSharedPtr =
+    std::shared_ptr<class HdStRenderPassShader>;
 
 /// \class HdxOitResolveTask
 ///

@@ -28,6 +28,7 @@
 
 #include "pxr/pxr.h"
 #include "pxr/usdImaging/usdImaging/api.h"
+#include "pxr/usdImaging/usdImaging/version.h"
 #include "pxr/usdImaging/usdImaging/collectionCache.h"
 #include "pxr/usdImaging/usdImaging/valueCache.h"
 #include "pxr/usdImaging/usdImaging/inheritedCache.h"
@@ -58,9 +59,9 @@
 #include "pxr/base/tf/declarePtrs.h"
 #include "pxr/base/tf/hashmap.h"
 #include "pxr/base/tf/hashset.h"
+#include "pxr/base/tf/denseHashSet.h"
 
 #include <boost/container/flat_map.hpp>
-#include <boost/scoped_ptr.hpp>
 #include <tbb/spin_rw_mutex.h>
 #include <map>
 #include <string>
@@ -76,7 +77,8 @@ class UsdImagingIndexProxy;
 class UsdImagingInstancerContext;
 
 typedef boost::container::flat_map<SdfPath, bool> PickabilityMap;
-typedef boost::shared_ptr<UsdImagingPrimAdapter> UsdImagingPrimAdapterSharedPtr;
+
+using UsdImagingPrimAdapterSharedPtr = std::shared_ptr<UsdImagingPrimAdapter>;
 
 /// \class UsdImagingDelegate
 ///
@@ -233,9 +235,19 @@ public:
     USDIMAGING_API
     void ClearPickabilityMap();
 
-    /// Sets display guides rendering
+    /// Sets display of prims with purpose "render"
     USDIMAGING_API
-    void SetDisplayGuides(bool displayGuides);
+    void SetDisplayRender(const bool displayRender);
+    bool GetDisplayRender() const { return _displayRender; }
+
+    /// Sets display of prims with purpose "proxy"
+    USDIMAGING_API
+    void SetDisplayProxy(const bool displayProxy);
+    bool GetDisplayProxy() const { return _displayProxy; }
+
+    /// Sets display of prims with purpose "guide"
+    USDIMAGING_API
+    void SetDisplayGuides(const bool displayGuides);
     bool GetDisplayGuides() const { return _displayGuides; }
 
     /// Returns whether draw modes are enabled.
@@ -251,6 +263,20 @@ public:
     /// the application.
     USDIMAGING_API
     void SetWindowPolicy(CameraUtilConformWindowPolicy policy);
+
+    /// Sets display of unloaded prims as bounding boxes.
+    /// Unloaded prims will need to satisfy one of the following set of
+    /// conditions in order to see them:
+    ///   1. The prim is a UsdGeomBoundable with an authored 'extent' attribute.
+    ///   2. The prim is a UsdPrim.IsModel() and has an authored 'extentsHint'
+    ///      attribute (see UsdGeomModelAPI::GetExtentsHint).
+    /// Effective only for delegates that support draw modes (see
+    /// GetUsdDrawModesEnabled()).
+    USDIMAGING_API
+    void SetDisplayUnloadedPrimsWithBounds(bool displayUnloaded);
+    bool GetDisplayUnloadedPrimsWithBounds() const {
+        return _displayUnloadedPrimsWithBounds;
+    }
 
     /// Setup for the shutter open and close to be used for motion sampling.
     USDIMAGING_API
@@ -361,74 +387,21 @@ public:
     virtual HdVolumeFieldDescriptorVector
     GetVolumeFieldDescriptors(SdfPath const &volumeId) override;
 
-    // Instance path resolution
+    // Picking path resolution
+    // Resolves a \p rprimId and \p instanceIndex back to the original USD
+    // gprim and instance index.  For point-instanced prims, \p instanceContext
+    // returns extra information about which instance this is of which level of
+    // point-instancer.  For example:
+    //   /World/PI instances /World/PI/proto/PI
+    //   /World/PI/proto/PI instances /World/PI/proto/PI/proto/Gprim
+    //   instancerContext = [/World/PI, 0], [/World/PI/proto/PI, 1] means that
+    //   this instance represents "protoIndex = 0" of /World/PI, etc.
 
-    /// Resolves a \p protoRprimId and \p protoIndex back to original
-    /// instancer path by backtracking nested instancer hierarchy.
-    ///
-    /// The "original instancer" is defined as the rprim corresponding to the
-    /// top-level instanceable reference prim or top-level PointInstancer prim.
-    /// It will be an empty path if the given protoRprimId is not
-    /// instanced.
-    ///
-    /// If the instancer instances heterogeneously, the instance index of the
-    /// prototype rprim doesn't match the instance index in the instancer.
-    ///
-    /// For example, if we have:
-    ///
-    ///     instancer {
-    ///         prototypes = [ A, B, A, B, B ]
-    ///     }
-    ///
-    /// ...then the indices would be:
-    ///
-    ///        protoIndex          instancerIndex
-    ///     A: [0, 1]              [0, 2]
-    ///     B: [0, 1, 2]           [1, 3, 5]
-    ///
-    /// To track this mapping, the \p instancerIndex is returned which
-    /// corresponds to the given protoIndex. ALL_INSTANCES may be returned
-    /// if \p protoRprimId isn't instanced.
-    ///
-    /// Also, note if there are nested instancers, the returned path will
-    /// be the top-level instancer, and the \p instancerIndex will be for
-    /// that top-level instancer. This can lead to situations where, contrary
-    /// to the previous scenario, the instancerIndex has fewer possible values
-    /// than the \p protoIndex:
-    ///
-    /// For example, if we have:
-    ///
-    ///     instancerBottom {
-    ///         prototypes = [ A, A, B ]
-    ///     }
-    ///     instancerTop {
-    ///         prototypes = [ instancerBottom, instancerBottom ]
-    ///     }
-    ///
-    /// ...then the indices might be:
-    ///
-    ///        protoIndex          instancerIndex  (for instancerTop)
-    ///     A: [0, 1, 2, 3]        [0, 0, 1, 1]
-    ///     B: [0, 1]              [0, 1]
-    ///
-    /// because \p instancerIndex are indices for instancerTop, which only has
-    /// two possible indices.
-    ///
-    /// If \p masterCachePath is not NULL, and the input rprim is an instance
-    /// resulting from an instanceable reference (and not from a
-    /// PointInstancer), then it will be set to the cache path of the
-    /// corresponding instance master prim. Otherwise, it will be set to null.
-    ///
-    /// If \p instanceContext is not NULL, it is populated with the list of 
-    /// instance roots that must be traversed to get to the rprim. If this
-    /// list is non-empty, the last prim is always the forwarded rprim.
-    static constexpr int ALL_INSTANCES = -1;
     USDIMAGING_API
-    virtual SdfPath GetPathForInstanceIndex(const SdfPath &protoRprimId,
-                                            int protoIndex,
-                                            int *instancerIndex,
-                                            SdfPath *masterCachePath=NULL,
-                                            SdfPathVector *instanceContext=NULL) override;
+    virtual SdfPath
+    GetScenePrimPath(SdfPath const& rprimId,
+                     int instanceIndex,
+                     HdInstancerContext *instancerContext = nullptr) override;
 
     // ExtComputation support
     USDIMAGING_API
@@ -504,6 +477,7 @@ public:
     /// Populate HdxSelection for given \p path (root) and \p instanceIndex.
     /// If indexPath is an instancer and instanceIndex is ALL_INSTANCES (-1),
     /// all instances will be selected.
+    static constexpr int ALL_INSTANCES = -1;
     USDIMAGING_API
     bool PopulateSelection(HdSelection::HighlightMode const& highlightMode,
                            const SdfPath &usdPath,
@@ -624,19 +598,20 @@ private:
     // ---------------------------------------------------------------------- //
 
     // Usd Prim Type to Adapter lookup table.
-    typedef boost::shared_ptr<UsdImagingPrimAdapter> _AdapterSharedPtr;
-    typedef TfHashMap<TfToken, 
-                         _AdapterSharedPtr, TfToken::HashFunctor> _AdapterMap;
+    typedef TfHashMap<TfToken, UsdImagingPrimAdapterSharedPtr, 
+                TfToken::HashFunctor> _AdapterMap;
     _AdapterMap _adapterMap;
 
     // Per-Hydra-Primitive tracking data
     struct _HdPrimInfo {
-        _AdapterSharedPtr adapter;          // The adapter to use for the prim
+        UsdImagingPrimAdapterSharedPtr adapter; // The adapter to use for the 
+                                                // prim
         UsdPrim           usdPrim;          // Reference to the Usd prim
         HdDirtyBits       timeVaryingBits;  // Dirty Bits to set when
                                             // time changes
         HdDirtyBits       dirtyBits;        // Current dirty state of the prim.
-        SdfPathVector     extraDependencies;// Dependencies that aren't usdPrim.
+        TfDenseHashSet<SdfPath, SdfPath::Hash>
+                          extraDependencies;// Dependencies that aren't usdPrim.
     };
 
     typedef TfHashMap<SdfPath, _HdPrimInfo, SdfPath::Hash> _HdPrimInfoMap;
@@ -650,8 +625,7 @@ private:
     _DependencyMap _dependencyInfo;
 
     void _GatherDependencies(SdfPath const& subtree,
-                             SdfPathVector *affectedCachePaths,
-                             SdfPathVector *affectedUsdPaths = nullptr);
+                             SdfPathVector *affectedCachePaths);
 
     // SdfPath::ReplacePrefix() is used frequently to convert between
     // cache path and Hydra render index path and is a performance bottleneck.
@@ -662,12 +636,21 @@ private:
 
     // Only use this method when we think no existing adapter has been
     // established. For example, during initial Population.
-    _AdapterSharedPtr const& _AdapterLookup(UsdPrim const& prim, 
-                                            bool ignoreInstancing = false);
-    _AdapterSharedPtr const& _AdapterLookup(TfToken const& adapterKey);
+    UsdImagingPrimAdapterSharedPtr const& _AdapterLookup(
+                                                UsdPrim const& prim, 
+                                                bool ignoreInstancing = false);
+    UsdImagingPrimAdapterSharedPtr const& _AdapterLookup(
+                                                TfToken const& adapterKey);
 
     // Obtain the prim tracking data for the given cache path.
     _HdPrimInfo *_GetHdPrimInfo(const SdfPath &cachePath);
+
+    Usd_PrimFlagsConjunction _GetDisplayPredicate() const;
+
+    // Mark render tags dirty for all prims.
+    // This is done in response to toggling the purpose-based display settings.
+    void _MarkRenderTagsDirty();
+
 
     typedef TfHashSet<SdfPath, SdfPath::Hash> _InstancerSet;
 
@@ -706,6 +689,10 @@ private:
     HdReprSelector _reprFallback;
     HdCullStyle _cullStyleFallback;
 
+    // Cache of which prims are time-varying.
+    SdfPathVector _timeVaryingPrimCache;
+    bool _timeVaryingPrimCacheValid;
+
     // Change processing
     TfNotice::Key _objectsChangedNoticeKey;
     SdfPathVector _usdPathsToResync;
@@ -731,7 +718,9 @@ private:
     // Pickability
     PickabilityMap _pickablesMap;
 
-    // Display guides rendering
+    // Purpose-based rendering toggles
+    bool _displayRender;
+    bool _displayProxy;
     bool _displayGuides;
     bool _enableUsdDrawModes;
 
@@ -744,6 +733,9 @@ private:
 
     // Enable HdCoordSys tracking
     const bool _coordSysEnabled;
+
+    // Display unloaded prims with Bounds adapter
+    bool _displayUnloadedPrimsWithBounds;
 
     UsdImagingDelegate() = delete;
     UsdImagingDelegate(UsdImagingDelegate const &) = delete;

@@ -264,46 +264,14 @@ SdfLayer::_WaitForInitializationAndCheckIfSuccessful()
     return _initializationWasSuccessful.get();
 }
 
-static SdfFileFormatConstPtr
-_GetFileFormatByExtension(
-    const std::string &path, const SdfLayer::FileFormatArguments &args)
-{
-    // Find a file format that can handle this extension and the
-    // specified target (if any).
-    const std::string* targets = 
-        TfMapLookupPtr(args, SdfFileFormatTokens->TargetArg);
-    if (targets) {
-        for (std::string& target : TfStringTokenize(*targets, ",")) {
-            target = TfStringTrim(target);
-            if (target.empty()) {
-                continue;
-            }
-
-            if (const SdfFileFormatConstPtr format = 
-                SdfFileFormat::FindByExtension(path, target)) {
-                return format;
-            }
-        }
-        return TfNullPtr;
-    }
-
-    return SdfFileFormat::FindByExtension(path);
-}
-
 SdfLayerRefPtr
 SdfLayer::CreateAnonymous(
     const string& tag, const FileFormatArguments& args)
 {
-    // XXX: 
-    // It would be nice to use the _GetFileFormatForPath helper function 
-    // below but that function expects a layer identifier and the 
-    // tag is supposed to be just a helpful debugging aid; the fact that
-    // one can specify an underlying layer file format by specifying an
-    // extension was unintended.
     SdfFileFormatConstPtr fileFormat;
     string suffix = TfStringGetSuffix(tag);
     if (!suffix.empty()) {
-        fileFormat = _GetFileFormatByExtension(suffix, args);
+        fileFormat = SdfFileFormat::FindByExtension(suffix, args);
     }
 
     if (!fileFormat) {
@@ -402,14 +370,6 @@ SdfLayer::CreateNew(
     return _CreateNew(fileFormat, identifier, realPath, ArAssetInfo(), args);
 }
 
-static inline SdfFileFormatConstPtr
-_GetFileFormatForPath(const std::string &filePath,
-                      const SdfLayer::FileFormatArguments &args)
-{
-    // Determine which file extension to use.
-    return _GetFileFormatByExtension(filePath, args);
-}
-
 SdfLayerRefPtr
 SdfLayer::_CreateNew(
     SdfFileFormatConstPtr fileFormat,
@@ -453,7 +413,7 @@ SdfLayer::_CreateNew(
     // If not explicitly supplied one, try to determine the fileFormat 
     // based on the local path suffix,
     if (!fileFormat) {
-        fileFormat = _GetFileFormatForPath(localPath, args);
+        fileFormat = SdfFileFormat::FindByExtension(localPath, args);
         // XXX: This should be a coding error, not a failed verify.
         if (!TF_VERIFY(fileFormat))
             return TfNullPtr;
@@ -703,7 +663,7 @@ SdfLayer::_ComputeInfoToFindOrOpenLayer(
         }
     }
 
-    info->fileFormat = _GetFileFormatForPath(
+    info->fileFormat = SdfFileFormat::FindByExtension(
         resolvedLayerPath.empty() ? layerPath : resolvedLayerPath, layerArgs);
     info->fileFormatArgs.swap(_CanonicalizeFileFormatArguments(
         layerPath, info->fileFormat, layerArgs));
@@ -1314,12 +1274,12 @@ SdfLayer::_PrimSetTimeSample(const SdfPath& path, double time,
                              const T& value,
                              bool useDelegate)
 {
-    SdfChangeBlock block;
-
     if (useDelegate && TF_VERIFY(_stateDelegate)) {
         _stateDelegate->SetTimeSample(path, time, value);
         return;
     }
+
+    SdfChangeBlock block;
 
     // TODO(USD):optimization: Analyze the affected time interval.
     Sdf_ChangeManager::Get().DidChangeAttributeTimeSamples(_self, path);
@@ -1571,7 +1531,22 @@ SdfLayer::SetTimeCodesPerSecond( double newVal )
 double
 SdfLayer::GetTimeCodesPerSecond() const
 {
-    return _GetValue<double>(SdfFieldKeys->TimeCodesPerSecond);
+    // If there is an authored value for timeCodesPerSecond, return that.
+    VtValue value;
+    if (HasField(
+            SdfPath::AbsoluteRootPath(),
+            SdfFieldKeys->TimeCodesPerSecond,
+            &value)) {
+        return value.Get<double>();
+    }
+
+    // Otherwise return framesPerSecond as a dynamic fallback.  This allows
+    // layers to lock framesPerSecond and timeCodesPerSecond together by
+    // specifying only framesPerSecond.
+    //
+    // If neither field has an authored value, this will return 24, which is the
+    // final fallback value for both fields.
+    return GetFramesPerSecond();
 }
 
 bool
@@ -3636,9 +3611,6 @@ SdfLayer::_PrimSetField(const SdfPath& path,
                         const VtValue *oldValuePtr,
                         bool useDelegate)
 {
-    // Send notification when leaving the change block.
-    SdfChangeBlock block;
-
     if (useDelegate && TF_VERIFY(_stateDelegate)) {
         _stateDelegate->SetField(path, fieldName, value, oldValuePtr);
         return;
@@ -3647,6 +3619,9 @@ SdfLayer::_PrimSetField(const SdfPath& path,
     const VtValue& oldValue =
         oldValuePtr ? *oldValuePtr : GetField(path, fieldName);
     const VtValue& newValue = _GetVtValue(value);
+
+    // Send notification when leaving the change block.
+    SdfChangeBlock block;
 
     Sdf_ChangeManager::Get().DidChangeField(
         _self, path, fieldName, oldValue, newValue);
@@ -3766,14 +3741,14 @@ SdfLayer::_PrimSetFieldDictValueByKey(const SdfPath& path,
                                       const VtValue *oldValuePtr,
                                       bool useDelegate)
 {
-    // Send notification when leaving the change block.
-    SdfChangeBlock block;
-
     if (useDelegate && TF_VERIFY(_stateDelegate)) {
         _stateDelegate->SetFieldDictValueByKey(
             path, fieldName, keyPath, value, oldValuePtr);
         return;
     }
+
+    // Send notification when leaving the change block.
+    SdfChangeBlock block;
 
     // This can't only use oldValuePtr currently, since we need the entire
     // dictionary, not just they key being set.  If we augment change
@@ -3853,13 +3828,12 @@ void
 SdfLayer::_PrimMoveSpec(const SdfPath& oldPath, const SdfPath& newPath,
                         bool useDelegate)
 {
-    SdfChangeBlock block;
-
     if (useDelegate && TF_VERIFY(_stateDelegate)) {
         _stateDelegate->MoveSpec(oldPath, newPath);
         return;
     }
 
+    SdfChangeBlock block;
 
     Sdf_ChangeManager::Get().DidMoveSpec(_self, oldPath, newPath);
 
@@ -4016,12 +3990,12 @@ _EraseSpecAtPath(SdfAbstractData* data, const SdfPath& path)
 void
 SdfLayer::_PrimDeleteSpec(const SdfPath &path, bool inert, bool useDelegate)
 {
-    SdfChangeBlock block;
-
     if (useDelegate && TF_VERIFY(_stateDelegate)) {
         _stateDelegate->DeleteSpec(path, inert);
         return;
     }
+
+    SdfChangeBlock block;
 
     Sdf_ChangeManager::Get().DidRemoveSpec(_self, path, inert);
 
@@ -4035,13 +4009,13 @@ SdfLayer::_PrimCreateSpec(const SdfPath &path,
                           SdfSpecType specType, bool inert,
                           bool useDelegate)
 {
-    SdfChangeBlock block;
-    
     if (useDelegate && TF_VERIFY(_stateDelegate)) {
         _stateDelegate->CreateSpec(path, specType, inert);
         return;
     }
 
+    SdfChangeBlock block;
+    
     Sdf_ChangeManager::Get().DidAddSpec(_self, path, inert);
 
     _data->CreateSpec(path, specType);

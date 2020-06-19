@@ -21,8 +21,6 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-#include <vector>
-
 #include "pxr/base/tf/diagnostic.h"
 
 #include "pxr/imaging/hgiGL/conversions.h"
@@ -37,34 +35,59 @@ PXR_NAMESPACE_OPEN_SCOPE
 HgiGLPipeline::HgiGLPipeline(
     HgiPipelineDesc const& desc)
     : HgiPipeline(desc)
-    , _descriptor(desc)
-    , _restoreFramebuffer(0)
-    , _restoreVao(0)
-    , _restoreDepthTest(false)
-    , _restoreDepthWriteMask(false)
-    , _restoreStencilWriteMask(false)
-    , _restoreDepthFunc(0)
-    , _restoreViewport{0,0,0,0}
-    , _restoreblendEnabled(false)
-    , _restoreColorOp(0)
-    , _restoreAlphaOp(0)
-    , _restoreAlphaToCoverage(false)
+    , _vao()
 {
+    glCreateVertexArrays(1, &_vao);
+
+    if (!_descriptor.debugName.empty()) {
+        glObjectLabel(GL_VERTEX_ARRAY, _vao, -1, _descriptor.debugName.c_str());
+    }
+
+    // Configure the vertex buffers in the vertex array object.
+    for (HgiVertexBufferDesc const& vbo : _descriptor.vertexBuffers) {
+
+        HgiVertexAttributeDescVector const& vas = vbo.vertexAttributes;
+
+        // Describe each vertex attribute in the vertex buffer
+        for (size_t loc=0; loc<vas.size(); loc++) {
+            HgiVertexAttributeDesc const& va = vas[loc];
+
+            uint32_t idx = va.shaderBindLocation;
+            glEnableVertexArrayAttrib(_vao, idx);
+            glVertexArrayAttribBinding(_vao, idx, vbo.bindingIndex);
+            glVertexArrayAttribFormat(
+                _vao,
+                idx,
+                HgiGetComponentCount(va.format),
+                HgiGLConversions::GetFormatType(va.format),
+                GL_FALSE,
+                va.offset);
+        }
+    }
+
+    HGIGL_POST_PENDING_GL_ERRORS();
 }
 
 HgiGLPipeline::~HgiGLPipeline()
 {
+    glBindVertexArray(0);
+    glDeleteVertexArrays(1, &_vao);
+    HGIGL_POST_PENDING_GL_ERRORS();
 }
 
 void
 HgiGLPipeline::BindPipeline()
 {
+    glBindVertexArray(_vao);
+
     //
     // Depth Stencil State
     //
     if (_descriptor.depthState.depthTestEnabled) {
         glEnable(GL_DEPTH_TEST);
-        TF_CODING_ERROR("Missing implementation: glDepthFunc(...)");
+        GLenum depthFn = HgiGLConversions::GetDepthCompareFunction(
+            _descriptor.depthState.depthCompareFn);
+        glDepthFunc(depthFn);
     } else {
         glDisable(GL_DEPTH_TEST);
     }
@@ -113,6 +136,12 @@ HgiGLPipeline::BindPipeline()
         glLineWidth(_descriptor.rasterizationState.lineWidth);
     }
 
+    if (_descriptor.rasterizationState.rasterizerEnabled) {
+        glDisable(GL_RASTERIZER_DISCARD);
+    } else {
+        glEnable(GL_RASTERIZER_DISCARD);
+    }
+
     //
     // Shader program
     //
@@ -125,63 +154,5 @@ HgiGLPipeline::BindPipeline()
     HGIGL_POST_PENDING_GL_ERRORS();
 }
 
-void
-HgiGLPipeline::CaptureOpenGlState()
-{
-    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &_restoreFramebuffer);
-    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &_restoreVao);
-    glGetBooleanv(GL_DEPTH_TEST, &_restoreDepthTest);
-    glGetBooleanv(GL_DEPTH_WRITEMASK, &_restoreDepthWriteMask);
-    glGetBooleanv(GL_STENCIL_WRITEMASK, &_restoreStencilWriteMask);
-    glGetIntegerv(GL_DEPTH_FUNC, &_restoreDepthFunc);
-    glGetIntegerv(GL_VIEWPORT, _restoreViewport);
-    glGetBooleanv(GL_BLEND, &_restoreblendEnabled);
-    glGetIntegerv(GL_BLEND_EQUATION_RGB, &_restoreColorOp);
-    glGetIntegerv(GL_BLEND_EQUATION_ALPHA, &_restoreAlphaOp);
-    glGetIntegerv(GL_BLEND_SRC_RGB, &_restoreColorSrcFnOp);
-    glGetIntegerv(GL_BLEND_SRC_ALPHA, &_restoreAlphaSrcFnOp);
-    glGetIntegerv(GL_BLEND_DST_RGB, &_restoreColorDstFnOp);
-    glGetIntegerv(GL_BLEND_DST_ALPHA, &_restoreAlphaDstFnOp);
-    glGetBooleanv(GL_SAMPLE_ALPHA_TO_COVERAGE, &_restoreAlphaToCoverage);
-
-    HGIGL_POST_PENDING_GL_ERRORS();
-}
-
-void
-HgiGLPipeline::RestoreOpenGlState()
-{
-    if (_restoreAlphaToCoverage) {
-        glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
-    } else {
-        glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
-    }
-
-    glBlendFuncSeparate(_restoreColorSrcFnOp, _restoreColorDstFnOp, 
-                        _restoreAlphaSrcFnOp, _restoreAlphaDstFnOp);
-    glBlendEquationSeparate(_restoreColorOp, _restoreAlphaOp);
-
-    if (_restoreblendEnabled) {
-        glEnable(GL_BLEND);
-    } else {
-        glDisable(GL_BLEND);
-    }
-
-    glViewport(_restoreViewport[0], _restoreViewport[1],
-               _restoreViewport[2], _restoreViewport[3]);
-    glDepthFunc(_restoreDepthFunc);
-    glDepthMask(_restoreDepthWriteMask);
-    glStencilMask(_restoreStencilWriteMask);
-
-    if (_restoreDepthTest) {
-        glEnable(GL_DEPTH_TEST);
-    } else {
-        glDisable(GL_DEPTH_TEST);
-    }
-
-    glBindVertexArray(_restoreVao);
-    glBindFramebuffer(GL_FRAMEBUFFER, _restoreFramebuffer);
-
-    HGIGL_POST_PENDING_GL_ERRORS();
-}
 
 PXR_NAMESPACE_CLOSE_SCOPE

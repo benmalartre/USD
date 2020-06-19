@@ -30,14 +30,13 @@
 #include "pxr/imaging/hd/rprimCollection.h"
 #include "pxr/imaging/hd/types.h"
 
-#include <boost/shared_ptr.hpp>
+#include <memory>
 
 PXR_NAMESPACE_OPEN_SCOPE
 
 class HdRenderIndex;
 
-typedef boost::shared_ptr<class HdDirtyList> HdDirtyListSharedPtr;
-typedef boost::weak_ptr<class HdDirtyList> HdDirtyListPtr;
+using HdDirtyListSharedPtr = std::shared_ptr<class HdDirtyList>;
 
 /// \class HdDirtyList
 ///
@@ -115,7 +114,7 @@ public:
     /// Therefore, it is expected that GetDirtyRprims is called only once
     /// per render index sync.
     HD_API
-    SdfPathVector const& GetDirtyRprims(const TfTokenVector &renderTags);
+    SdfPathVector const& GetDirtyRprims();
 
     /// Update the tracking state for this HdDirtyList with the new collection,
     /// if the update cannot be applied, return false.
@@ -123,9 +122,6 @@ public:
     bool ApplyEdit(HdRprimCollection const& newCollection);
 
 private:
-    void _BuildDirtyList(const TfTokenVector& renderTags,
-                         HdDirtyBits mask);
-
     HdRprimCollection _collection;
     SdfPathVector _dirtyIds;
     HdRenderIndex &_renderIndex;

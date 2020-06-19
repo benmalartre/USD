@@ -22,12 +22,25 @@
 # KIND, either express or implied. See the Apache License for the specific
 # language governing permissions and limitations under the Apache License.
 
+from __future__ import print_function
+
 import sys, os, unittest
 from pxr import Sdf, Usd, Tf, Plug
 
 allFormats = ['usd' + x for x in 'ac']
 
 class TestUsdMetadata(unittest.TestCase):
+    def _ComparePaths(self, pathOne, pathTwo):
+        # Use normcase here to handle differences in path casing on
+        # Windows. This will alo reverse slashes on windows, so we get 
+        # a consistent cross platform comparison.
+        self.assertEqual(os.path.normcase(pathOne), os.path.normcase(pathTwo))
+
+    def _ComparePathLists(self, listOne, listTwo):
+        self.assertEqual(len(listOne), len(listTwo))
+        for i in range(len(listOne)):
+            self._ComparePaths(listOne[i], listTwo[i])
+
     def test_Hidden(self):
         for fmt in allFormats:
             stage = Usd.Stage.CreateInMemory('TestHidden.'+fmt)
@@ -95,6 +108,21 @@ class TestUsdMetadata(unittest.TestCase):
             self.assertEqual(rel.IsHidden(), True)
             self.assertEqual(rel.GetMetadata("hidden"), True)
 
+    def test_PrimTypeName(self):
+        for fmt in allFormats:
+            stage = Usd.Stage.CreateInMemory('TestListAndHas.'+fmt)
+
+            primWithType = stage.DefinePrim("/PrimWithType", "DummyType")
+            self.assertEqual(primWithType.GetTypeName(), "DummyType")
+            self.assertTrue(primWithType.HasAuthoredTypeName())
+            self.assertTrue(primWithType.HasMetadata("typeName"))
+            self.assertEqual(primWithType.GetMetadata("typeName"), "DummyType")
+
+            primWithoutType = stage.DefinePrim("/PrimWithoutType", "")
+            self.assertEqual(primWithoutType.GetTypeName(), "")
+            self.assertFalse(primWithoutType.HasAuthoredTypeName())
+            self.assertFalse(primWithoutType.HasMetadata("typeName"))
+            self.assertEqual(primWithoutType.GetMetadata("typeName"), None)
 
     def test_ListAndHas(self):
         for fmt in allFormats:
@@ -107,7 +135,7 @@ class TestUsdMetadata(unittest.TestCase):
             rel = foo.CreateRelationship("rel")
 
             # Ensure we can read the reported values
-            print "Verify GetMetadata(key) and HasMetadata(key)..."
+            print("Verify GetMetadata(key) and HasMetadata(key)...")
             def _TestGetHas(obj):
                 for key in obj.GetAllMetadata():
                     assert obj.GetMetadata(key) is not None, \
@@ -120,7 +148,7 @@ class TestUsdMetadata(unittest.TestCase):
             _TestGetHas(rel)
 
             # Ensure we can write the reported values
-            print "Verify SetMetadata(key, GetMetadata(key))..."
+            print("Verify SetMetadata(key, GetMetadata(key))...")
             def _TestSet(obj):
                 for key in obj.GetAllMetadata():
                     value = obj.GetMetadata(key)
@@ -134,7 +162,7 @@ class TestUsdMetadata(unittest.TestCase):
 
 
     def test_HasAuthored(self):
-        print "Verify HasAuthoredMetadata() behavior..."
+        print("Verify HasAuthoredMetadata() behavior...")
         for fmt in allFormats:
             stage = Usd.Stage.CreateInMemory('TestHasAuthored.'+fmt)
 
@@ -184,7 +212,7 @@ class TestUsdMetadata(unittest.TestCase):
 
 
     def test_Unregistered(self):
-        print "Verify that unregistered metadata fields cannot be authored..."
+        print("Verify that unregistered metadata fields cannot be authored...")
         for fmt in allFormats:
             stage = Usd.Stage.CreateInMemory('TestUnregistered.'+fmt)
 
@@ -201,8 +229,8 @@ class TestUsdMetadata(unittest.TestCase):
                 rel.SetMetadata("unregistered", "x")
 
     def test_CompositionData(self):
-        print "Verify that composition-related metadata does not show up"
-        print "in 'All' metadata queries, and only gets basic composition"
+        print("Verify that composition-related metadata does not show up")
+        print("in 'All' metadata queries, and only gets basic composition")
         for fmt in allFormats:
             stage = Usd.Stage.CreateInMemory('TestCompositionData'+fmt)
 
@@ -219,7 +247,7 @@ class TestUsdMetadata(unittest.TestCase):
             self.assertFalse('references' in apex.GetAllMetadata())
 
     def test_Documentation(self):
-        print "Test documentation metadata and explicit API..."
+        print("Test documentation metadata and explicit API...")
         for fmt in allFormats:
             stage = Usd.Stage.CreateInMemory('TestDocumentation.'+fmt)
             stageRoot = stage.GetPseudoRoot()
@@ -248,7 +276,7 @@ class TestUsdMetadata(unittest.TestCase):
                 self.assertEqual(obj.GetMetadata("documentation"), None)
 
     def test_DisplayName(self):
-        print "Test display name metadata and explicit API..."
+        print("Test display name metadata and explicit API...")
         for fmt in allFormats:
             stage = Usd.Stage.CreateInMemory('TestDisplayName.'+fmt)
             stageRoot = stage.GetPseudoRoot()
@@ -277,7 +305,7 @@ class TestUsdMetadata(unittest.TestCase):
                 self.assertEqual(prop.GetMetadata("displayName"), None)
 
     def test_DisplayGroup(self):
-        print "Test display group metadata and explicit API..."
+        print("Test display group metadata and explicit API...")
         for fmt in allFormats:
             stage = Usd.Stage.CreateInMemory('TestDisplayGroup.'+fmt)
             stageRoot = stage.GetPseudoRoot()
@@ -314,6 +342,7 @@ class TestUsdMetadata(unittest.TestCase):
 
     def test_BasicCustomData(self):
         '''Test basic CustomData API, including by-key-path API'''
+        from pxr import Vt
 
         for fmt in allFormats:
             s = Usd.Stage.CreateInMemory('TestBasicCustomData.'+fmt)
@@ -321,6 +350,20 @@ class TestUsdMetadata(unittest.TestCase):
 
             assert not p.HasCustomData()
             assert not p.HasAuthoredCustomData()
+
+            p.SetCustomData({'a': [1,2,3,4]})
+            self.assertEqual(p.GetCustomData(),
+                             {'a': Vt.IntArray([1,2,3,4])})
+
+            p.SetCustomData({'a': ['b','c','d']})
+            self.assertEqual(p.GetCustomData(),
+                             {'a': Vt.StringArray(['b','c','d'])})
+
+            with self.assertRaises(ValueError):
+                p.SetCustomData({'foo': ['different types', 1, 'here']})
+
+            with self.assertRaises(ValueError):
+                p.SetCustomData({'empty_list': []})
 
             p.SetCustomData({'foo':'bar'})
             assert p.HasCustomData()
@@ -383,7 +426,7 @@ class TestUsdMetadata(unittest.TestCase):
            They will be recursively merged, with the typical strength
            preferences in place.'''
 
-        print "Verify composed nested dictionary behavior..."
+        print("Verify composed nested dictionary behavior...")
         for fmt in allFormats:
             s = Usd.Stage.CreateInMemory('TestComposedNestedDictionaries.'+fmt)
             a = s.DefinePrim('/A')
@@ -853,10 +896,12 @@ class TestUsdMetadata(unittest.TestCase):
             del binLayer
 
             # Now textFile and roundTripFile should match.
-            a = open(textFile.name).read()
-            b = open(roundTripFile.name).read()
+            with open(textFile.name) as f:
+                a = f.read()
+            with open(roundTripFile.name) as f:
+                b = f.read()
             if a != b:
-                print '\n'.join(difflib.unified_diff(a.split('\n'), b.split('\n')))
+                print('\n'.join(difflib.unified_diff(a.split('\n'), b.split('\n'))))
             assert a == b
 
     def test_AssetPathMetadata(self):
@@ -868,61 +913,58 @@ class TestUsdMetadata(unittest.TestCase):
         attr = prim.GetAttribute("assetPath")
         
         timeSamples = attr.GetMetadata("timeSamples")
-        self.assertEqual(os.path.normpath(timeSamples[0].resolvedPath),
-                         os.path.abspath("assetPaths/asset.usda"))
-        self.assertEqual(os.path.normpath(timeSamples[1].resolvedPath),
-                         os.path.abspath("assetPaths/asset.usda"))
+        self._ComparePaths(os.path.normpath(timeSamples[0].resolvedPath),
+                           os.path.abspath("assetPaths/asset.usda"))
+        self._ComparePaths(os.path.normpath(timeSamples[1].resolvedPath),
+                           os.path.abspath("assetPaths/asset.usda"))
         
-        self.assertEqual(
+        self._ComparePaths(
             os.path.normpath(attr.GetMetadata("default").resolvedPath), 
             os.path.abspath("assetPaths/asset.usda"))
         
         attr = s.GetPrimAtPath("/AssetPathTest").GetAttribute("assetPathArray")
-        self.assertEqual(
+        self._ComparePathLists(
             list([os.path.normpath(p.resolvedPath) 
                   for p in attr.GetMetadata("default")]),
             [os.path.abspath("assetPaths/asset.usda")])
 
         # Test prim metadata resolution
         metadataDict = prim.GetMetadata("customData")
-        self.assertEqual(
+        self._ComparePaths(
             os.path.normpath(metadataDict["assetPath"].resolvedPath),
             os.path.abspath("assetPaths/asset.usda"))
-        self.assertEqual(
+        self._ComparePathLists(
             list([os.path.normpath(p.resolvedPath) 
                   for p in metadataDict["assetPathArray"]]),
             [os.path.abspath("assetPaths/asset.usda")])
             
         metadataDict = metadataDict["subDict"]
-        self.assertEqual(
+        self._ComparePaths(
             os.path.normpath(metadataDict["assetPath"].resolvedPath),
             os.path.abspath("assetPaths/asset.usda"))
-        self.assertEqual(
+        self._ComparePathLists(
             list([os.path.normpath(p.resolvedPath) 
                   for p in metadataDict["assetPathArray"]]),
             [os.path.abspath("assetPaths/asset.usda")])
 
         # Test stage metadata resolution
         metadataDict = s.GetMetadata("customLayerData")
-        self.assertEqual(
+        self._ComparePaths(
             os.path.normpath(metadataDict["assetPath"].resolvedPath),
             os.path.abspath("assetPaths/asset.usda"))
-        self.assertEqual(
+        self._ComparePathLists(
             list([os.path.normpath(p.resolvedPath) 
                   for p in metadataDict["assetPathArray"]]),
             [os.path.abspath("assetPaths/asset.usda")])
             
         metadataDict = metadataDict["subDict"]
-        self.assertEqual(
+        self._ComparePaths(
             os.path.normpath(metadataDict["assetPath"].resolvedPath),
             os.path.abspath("assetPaths/asset.usda"))
-        self.assertEqual(
+        self._ComparePathLists(
             list([os.path.normpath(p.resolvedPath) 
                   for p in metadataDict["assetPathArray"]]),
             [os.path.abspath("assetPaths/asset.usda")])
-        
-        
-
 
     def test_TimeSamplesMetadata(self):
         '''Test timeSamples composition, with layer offsets'''
@@ -966,6 +1008,187 @@ class TestUsdMetadata(unittest.TestCase):
             self.assertEqual(
                 stronger_attr.GetMetadata('timeSamples'),
                 stronger_expectedTimeSamples)
+
+    def test_UsdStageMetadata(self):
+        for fmt in allFormats:
+            f = lambda base: base + '.' + fmt
+
+            # Create a stage with a root layer and session layer, each of which
+            # has its own sublayer.
+            rootLayer = Sdf.Layer.CreateAnonymous('root.' + fmt)
+            rootSublayer = Sdf.Layer.CreateAnonymous('root_sub.' + fmt)
+            rootLayer.subLayerPaths = [rootSublayer.identifier]
+
+            sessionLayer = Sdf.Layer.CreateAnonymous('session.' + fmt)
+            sessionSublayer = Sdf.Layer.CreateAnonymous('session_sub.' + fmt)
+            sessionLayer.subLayerPaths = [sessionSublayer.identifier]
+
+            stage = Usd.Stage.Open(rootLayer, sessionLayer)
+            self.assertTrue(stage)
+            self.assertEqual(len(stage.GetUsedLayers()), 4)
+                        
+            # Helper function for verifying the relationship between stage
+            # metadata and the pseudoroot metadata when metadata is authored 
+            # on the layer.
+            def _AssertHasAuthoredStageMetadata(key, expectedValue):
+                pr = stage.GetPseudoRoot()
+                # Both have metadata
+                self.assertTrue(stage.HasMetadata(key))
+                self.assertTrue(pr.HasMetadata(key))
+
+                # Both have authored metadata
+                self.assertTrue(stage.HasAuthoredMetadata(key))
+                self.assertTrue(pr.HasAuthoredMetadata(key))
+
+                # Both return the same expected metadata value.
+                self.assertEqual(stage.GetMetadata(key), expectedValue)
+                self.assertEqual(pr.GetMetadata(key), expectedValue)
+ 
+            # Helper function for verifying the relationship between stage
+            # metadata and the pseudoroot metadata when the metadata is NOT 
+            # authored on the layer.
+            def _AssertNotHasAuthoredStageMetadata(key, fallbackValue):
+                pr = stage.GetPseudoRoot()
+                # The stage has the metadata, but the pseudoroot does not.
+                self.assertTrue(stage.HasMetadata(key))
+                self.assertFalse(pr.HasMetadata(key))
+
+                # Neither has authored metadata.
+                self.assertFalse(stage.HasAuthoredMetadata(key))
+                self.assertFalse(pr.HasAuthoredMetadata(key))
+
+                # The stage returns the fallback metadata value, but the 
+                # pseudoroot doesn't return metadata.
+                self.assertEqual(stage.GetMetadata(key), fallbackValue)
+                self.assertIsNone(pr.GetMetadata(key))
+
+            # Helper function for verifying the relationship between stage
+            # metadata and the pseudoroot metadata by dict key when metadata 
+            # dict key is authored on the layer.
+            def _AssertHasAuthoredStageMetadataByDictKey(key, keyPath, 
+                                                         expectedValue):
+                pr = stage.GetPseudoRoot()
+                # Both have metadata dict key
+                self.assertTrue(stage.HasMetadataDictKey(key, keyPath))
+                self.assertTrue(pr.HasMetadataDictKey(key, keyPath))
+
+                # Both have authored metadata dict key
+                self.assertTrue(stage.HasAuthoredMetadataDictKey(key, keyPath))
+                self.assertTrue(pr.HasAuthoredMetadataDictKey(key, keyPath))
+
+                # Both return the same expected metadata dict key value.
+                self.assertEqual(stage.GetMetadataByDictKey(key, keyPath), 
+                                 expectedValue)
+                self.assertEqual(pr.GetMetadataByDictKey(key, keyPath), 
+                                 expectedValue)
+
+            # Helper function for verifying the relationship between stage
+            # metadata and the pseudoroot metadata by dict key when the metadata
+            # dict key is NOT authored on the layer.
+            def _AssertNotHasAuthoredStageMetadataByDictKey(key, keyPath):
+                pr = stage.GetPseudoRoot()
+                # Neither have metadata dict key
+                self.assertFalse(stage.HasMetadataDictKey(key, keyPath))
+                self.assertFalse(pr.HasMetadataDictKey(key, keyPath))
+
+                # Neither have authored metadata dict key
+                self.assertFalse(stage.HasAuthoredMetadataDictKey(key, keyPath))
+                self.assertFalse(pr.HasAuthoredMetadataDictKey(key, keyPath))
+
+                # Both return do not return values for the metadata dict key
+                self.assertIsNone(stage.GetMetadataByDictKey(key, keyPath))
+                self.assertIsNone(pr.GetMetadataByDictKey(key, keyPath))
+
+            # Nothing authored for 'timeCodesPerSecond', fallback from schema 
+            # is 24
+            _AssertNotHasAuthoredStageMetadata('timeCodesPerSecond', 24.0)
+            
+            # Authoring 'timeCodesPerSecond' on either sublayer has no effect
+            # on stage and pseudoroot metadata.
+            rootSublayer.timeCodesPerSecond = 30.0            
+            _AssertNotHasAuthoredStageMetadata('timeCodesPerSecond', 24.0)
+            sessionSublayer.timeCodesPerSecond = 30.0            
+            _AssertNotHasAuthoredStageMetadata('timeCodesPerSecond', 24.0)
+                                                
+            # Authoring 'timeCodesPerSecond' on root layer, we now have authored
+            # stage and pseudoroot metadata.
+            rootLayer.timeCodesPerSecond = 24.0
+            _AssertHasAuthoredStageMetadata('timeCodesPerSecond', 24.0)
+
+            # Authoring 'timeCodesPerSecond' on session layer overrides metadata
+            # from root layer.
+            sessionLayer.timeCodesPerSecond = 48.0
+            _AssertHasAuthoredStageMetadata('timeCodesPerSecond', 48.0)
+                        
+            # Test with dictionary valued metadata. Unauthored 'customLayerData'
+            # has a fallback empty dictionary.
+            _AssertNotHasAuthoredStageMetadata('customLayerData', {})
+
+            # Set 'customLayerData' on each layer. Dictionaries are composed
+            # over each other. Sublayers do not contribute to stage and 
+            # pseudoroot metadata so the authored stage metadata is session 
+            # layer dict composed over the root layer dict.
+            rootLayer.customLayerData = {'shared' : 1, 'root' : True}
+            rootSublayer.customLayerData = {'shared' : 2, 'root_sub' : True}
+            sessionLayer.customLayerData = {'shared' : 3, 'session' : True}
+            sessionSublayer.customLayerData = {'shared' : 4, 'session_sub' : True}
+            _AssertHasAuthoredStageMetadata('customLayerData', 
+                {'shared' : 3, 'root' : True, 'session' : True})
+            _AssertHasAuthoredStageMetadataByDictKey(
+                'customLayerData', 'shared', 3)
+            _AssertHasAuthoredStageMetadataByDictKey(
+                'customLayerData', 'root', True)
+            _AssertNotHasAuthoredStageMetadataByDictKey(
+                'customLayerData', 'root_sub')
+
+            # Test session layer muting with stage metadata.
+            # We author the 'comment' metadata on the session layer and the
+            # root sublayer. Stage and pseudoroot metadata comes from the 
+            # session layer.
+            sessionLayer.comment = 'session comment'
+            rootSublayer.comment = 'root sub'
+            _AssertHasAuthoredStageMetadata('comment', 'session comment')
+
+            self.assertEqual(stage.GetPseudoRoot().GetAllMetadata(), 
+                             {'comment' : 'session comment', 
+                              'customLayerData' : 
+                                {'shared' : 3, 'root' : True, 'session' : True}, 
+                              'timeCodesPerSecond' : 48.0})
+
+            # Mute the session layer
+            stage.MuteLayer(sessionLayer.identifier)
+            # 'timeCodesPerSecond' now comes from the root layer instead of 
+            # session
+            _AssertHasAuthoredStageMetadata('timeCodesPerSecond', 24.0)
+            # 'customLayerData' is only composed from the root layer.
+            _AssertHasAuthoredStageMetadata('customLayerData', 
+                {'shared' : 1, 'root' : True})
+            _AssertNotHasAuthoredStageMetadataByDictKey(
+                'customLayerData', 'session')
+            # There is no authored metadata for 'comment' since the session is
+            # muted and sublayers don't contribute to stage/pseudoroot metadata.
+            _AssertNotHasAuthoredStageMetadata('comment', '')
+            self.assertEqual(stage.GetPseudoRoot().GetAllMetadata(), 
+                             {'customLayerData' : 
+                                {'shared' : 1, 'root' : True}, 
+                              'timeCodesPerSecond' : 24.0})
+
+                                                                        
+            # Unmute the session layer and verify that the session layer
+            # metadata opinions returned.
+            stage.UnmuteLayer(sessionLayer.identifier)
+            _AssertHasAuthoredStageMetadata('timeCodesPerSecond', 48.0)
+            _AssertHasAuthoredStageMetadata('customLayerData', 
+                {'shared' : 3, 'root' : True, 'session' : True})
+            _AssertHasAuthoredStageMetadataByDictKey(
+                'customLayerData', 'session', True)
+            _AssertHasAuthoredStageMetadata('comment', 'session comment')
+            self.assertEqual(stage.GetPseudoRoot().GetAllMetadata(), 
+                             {'comment' : 'session comment', 
+                              'customLayerData' : 
+                                {'shared' : 3, 'root' : True, 'session' : True}, 
+                              'timeCodesPerSecond' : 48.0})
+
 
 if __name__ == '__main__':
     # Register test plugin defining list op metadata fields.

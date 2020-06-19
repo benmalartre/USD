@@ -36,6 +36,7 @@ generated that will compile and work with USD Core successfully:
         directly subLayer.
 """
 
+from __future__ import print_function
 import sys, os, re, inspect
 import keyword
 from argparse import ArgumentParser
@@ -54,11 +55,9 @@ class _Printer():
 
     def __PrintImpl(self, stream, *args):
         if len(args):
-            for arg in args[:-1]:
-                print >>stream, arg,
-            print >>stream, args[-1]
+            print(*args, file=stream)
         else:
-             print >>stream, '\n'
+            print(file=stream)
 
     def __call__(self, *args):
         if not self._quiet:
@@ -97,6 +96,12 @@ IS_PRIVATE_APPLY = "isPrivateApply"
 # Custom-data key authored on a multiple-apply API schema class prim in the 
 # schema definition, to define prefix for properties created by the API schema. 
 PROPERTY_NAMESPACE_PREFIX = "propertyNamespacePrefix"
+
+# Custom-data key authored on a concrete typed schema class prim in the schema
+# definition, to define fallbacks for the type that can be saved in root layer
+# metadata to provide fallback types to versions of Usd without the schema 
+# class type.
+FALLBACK_TYPES = "fallbackTypes"
 
 #------------------------------------------------------------------------------#
 # Parsed Objects                                                               #
@@ -434,6 +439,8 @@ class ClassInfo(object):
         self.isTyped = _IsTyped(usdPrim)
         self.isAPISchemaBase = self.cppClassName == 'UsdAPISchemaBase'
 
+        self.fallbackPrimTypes = self.customData.get(FALLBACK_TYPES)
+
         self.isApi = not self.isTyped and not self.isConcrete and \
                 not self.isAPISchemaBase
         self.apiSchemaType = self.customData.get(API_SCHEMA_TYPE, 
@@ -443,8 +450,9 @@ class ClassInfo(object):
 
         if not self.apiSchemaType == MULTIPLE_APPLY and \
             self.propertyNamespacePrefix:
-            raise Exception(errorMsg("propertyNamespacePrefix should only "
-                "be used as a metadata field on multiple-apply API schemas"))
+            raise _GetSchemaDefException("propertyNamespacePrefix should only "
+                "be used as a metadata field on multiple-apply API schemas",
+                sdfPrim.path)
 
         if self.isApi and \
            self.apiSchemaType not in API_SCHEMA_TYPE_TOKENS:
@@ -506,7 +514,12 @@ class ClassInfo(object):
                                 'isPrivateApply, only applied API schemas '
                                 'have an Apply() method generated. ',
                                 sdfPrim.path)
-         
+        
+        if self.fallbackPrimTypes and not self.isConcrete:
+            raise _GetSchemaDefException(
+                "fallbackPrimTypes can only be used as a customData field on "
+                "concrete typed schema classes", sdfPrim.path)
+
     def GetHeaderFile(self):
         return self.baseFileName + '.h'
 
@@ -816,7 +829,13 @@ def GatherTokens(classes, libName, libTokens):
     # Add tokens from all classes to the token set
     for cls in classes:
         # Add tokens from attributes to the token set
-        for attr in cls.attrs.values():
+        #
+        # We sort by name here to get a stable ordering when building up the
+        # desc string below. The sort is reversed because items are prepended
+        # to the description. Reversing this sort results in a forward sort in
+        # the doc strings.
+        for attr in sorted(cls.attrs.values(),
+                           key=lambda a: a.name.lower(), reverse=True):
 
             # Add Attribute Names to token set
             cls.tokens.add(attr.name)
@@ -850,7 +869,7 @@ def GatherTokens(classes, libName, libTokens):
             
         # Add schema tokens to token set
         schemaTokens = cls.customData.get("schemaTokens", {})
-        for token, tokenInfo in schemaTokens.iteritems():
+        for token, tokenInfo in schemaTokens.items():
             cls.tokens.add(token)
             _AddToken(tokenDict, token, tokenInfo.get("value", token),
                       _SanitizeDoc(tokenInfo.get("doc", 
@@ -865,12 +884,15 @@ def GatherTokens(classes, libName, libTokens):
                       "Property namespace prefix for the %s schema." % cls.cppClassName)
 
     # Add library-wide tokens to token set
-    for token, tokenInfo in libTokens.iteritems():
+    for token, tokenInfo in libTokens.items():
         _AddToken(tokenDict, token, tokenInfo.get("value", token), 
                   _SanitizeDoc(tokenInfo.get("doc",
                       "Special token for the %s library." % libName), ' '))
 
-    return sorted(tokenDict.values(), key=lambda token: token.id.lower())
+    # Sort the list of tokens lexicographically. This pair of keys will provide
+    # a case insensitive primary key and a case sensitive secondary key. That
+    # way we keep a stable sort for tokens that differ only in case.
+    return sorted(tokenDict.values(), key=lambda token: (token.id.lower(), token.id))
 
 
 def GenerateCode(templatePath, codeGenPath, tokenData, classes, validate,
@@ -997,8 +1019,9 @@ def GenerateCode(templatePath, codeGenPath, tokenData, classes, validate,
                           env.globals['libraryName'])
         else:
             types = info.setdefault('Types', {})
-        # remove auto-generated types.
-        for tname in types.keys():
+        # remove auto-generated types. Use a list to make a copy of keys before
+        # we mutate it.
+        for tname in list(types.keys()):
             if types[tname].get('autoGenerated', False):
                 del types[tname]
         # generate types entries.
@@ -1022,7 +1045,8 @@ def GenerateCode(templatePath, codeGenPath, tokenData, classes, validate,
             "# Edits will survive regeneration except for comments and\n"
             "# changes to types with autoGenerated=true.\n"
             % os.path.basename(os.path.splitext(sys.argv[0])[0])) + 
-                   json.dumps(info, indent=4, sort_keys=True))
+                   json.dumps(info, indent=4, sort_keys=True,
+                              separators=(', ', ': ')))
         _WriteFile(plugInfoFile, content, validate)
 
 
@@ -1089,6 +1113,7 @@ def GenerateRegistry(codeGenPath, filePath, classes, validate, env):
         Print.Err("ERROR: Could not remove GLOBAL prim.")
     allAppliedAPISchemas = []
     allMultipleApplyAPISchemaNamespaces = {}
+    allFallbackSchemaPrimTypes = {}
     for p in flatStage.GetPseudoRoot().GetAllChildren():
         # If this is an API schema, check if it's applied and record necessary
         # information.
@@ -1123,6 +1148,12 @@ def GenerateRegistry(codeGenPath, filePath, classes, validate, env):
                     "prim metadata fallbacks" % str(invalidMetadata) , 
                     p.GetPath())
 
+        if p.HasAuthoredTypeName():
+            fallbackTypes = p.GetCustomDataByKey(FALLBACK_TYPES)
+            if fallbackTypes:
+                allFallbackSchemaPrimTypes[p.GetName()] = \
+                    Vt.TokenArray(fallbackTypes)
+
         p.ClearCustomData()
         for myproperty in p.GetAuthoredProperties():
             myproperty.ClearCustomData()
@@ -1135,11 +1166,15 @@ def GenerateRegistry(codeGenPath, filePath, classes, validate, env):
     flatLayer.comment = 'WARNING: THIS FILE IS GENERATED.  DO NOT EDIT.'
 
     # Add the list of all applied and multiple-apply API schemas.
-    if len(allAppliedAPISchemas) > 0 or len(allMultipleApplyAPISchemaNamespaces) > 0:
+    if allAppliedAPISchemas or allMultipleApplyAPISchemaNamespaces:
         flatLayer.customLayerData = {
                 'appliedAPISchemas' : Vt.StringArray(allAppliedAPISchemas),
                 'multipleApplyAPISchemas' : allMultipleApplyAPISchemaNamespaces
         }
+
+    if allFallbackSchemaPrimTypes:
+        flatLayer.GetPrimAtPath('/').SetInfo(Usd.Tokens.fallbackPrimTypes, 
+                                             allFallbackSchemaPrimTypes)
 
     #
     # Generate Schematics
@@ -1267,10 +1302,6 @@ if __name__ == '__main__':
         Print.Err('Usage Error: First positional argument must be a USD schema file.')
         parser.print_help()
         sys.exit(1)
-    if not os.path.isdir(codeGenPath):
-        Print.Err('Usage Error: Second positional argument must be a directory to contain generated code.')
-        parser.print_help()
-        sys.exit(1)
     if args.templatePath and not os.path.isdir(templatePath):
         Print.Err('Usage Error: templatePath argument must be the path to the codegenTemplates.')
         parser.print_help()
@@ -1303,6 +1334,9 @@ if __name__ == '__main__':
         #
         # Generate Code from Templates
         #
+        if not os.path.isdir(codeGenPath):
+            os.makedirs(codeGenPath)
+
         j2_env = Environment(loader=FileSystemLoader(templatePath),
                              trim_blocks=True)
         j2_env.globals.update(Camel=_CamelCase,

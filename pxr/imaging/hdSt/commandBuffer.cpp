@@ -30,6 +30,7 @@
 #include "pxr/imaging/hdSt/immediateDrawBatch.h"
 #include "pxr/imaging/hdSt/indirectDrawBatch.h"
 #include "pxr/imaging/hdSt/resourceRegistry.h"
+#include "pxr/imaging/hdSt/materialParam.h"
 
 #include "pxr/imaging/hd/bufferArrayRange.h"
 #include "pxr/imaging/hd/perfLog.h"
@@ -182,7 +183,7 @@ HdStCommandBuffer::_RebuildDrawBatches()
 
     HD_PERF_COUNTER_INCR(HdPerfTokens->rebuildBatches);
 
-    bool bindlessTexture = GlfContextCaps::GetInstance()
+    const bool bindlessTexture = GlfContextCaps::GetInstance()
                                                .bindlessTextureEnabled;
 
     // Use a cheap bucketing strategy to reduce to number of comparison tests
@@ -224,10 +225,15 @@ HdStCommandBuffer::_RebuildDrawBatches()
         boost::hash_combine(key, drawItem->GetBufferArraysHash());
         if (!bindlessTexture) {
             // Geometric, RenderPass and Lighting shaders should never break
-            // batches, however materials can. We consider the material 
-            // parameters to be part of the batch key here for that reason.
-            boost::hash_combine(key, HdMaterialParam::ComputeHash(
-                            drawItem->GetMaterialShader()->GetParams()));
+            // batches, however materials can. We consider the textures
+            // used by the material to be part of the batch key for that
+            // reason.
+            // Since textures can be animated and thus materials can be batched
+            // at some times but not other times, we use the texture prim path
+            // for the hash which does not vary over time.
+            // 
+            boost::hash_combine(
+                key, drawItem->GetMaterialShader()->ComputeTextureSourceHash());
         }
 
         // Do a quick check to see if the draw item can be batched with the

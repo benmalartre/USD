@@ -152,14 +152,18 @@ HdRprim::InitRepr(HdSceneDelegate* delegate,
 // -------------------------------------------------------------------------- //
 ///                 Rprim Hydra Engine API : Execute-Phase
 // -------------------------------------------------------------------------- //
-const HdRprim::HdDrawItemPtrVector*
+const HdRepr::DrawItemUniquePtrVector &
 HdRprim::GetDrawItems(TfToken const& reprToken) const
 {
-    HdReprSharedPtr repr = _GetRepr(reprToken);
-    if (repr) {
-        return &(repr->GetDrawItems());
+    if (HdReprSharedPtr const repr = _GetRepr(reprToken)) {
+        return repr->GetDrawItems();
     }
-    return nullptr;
+
+    static HdRepr::DrawItemUniquePtrVector empty;
+
+    TF_CODING_ERROR("Rprim has draw items for repr %s", reprToken.GetText());
+
+    return empty;
 }
 
 // -------------------------------------------------------------------------- //
@@ -304,9 +308,10 @@ HdRprim::_IsEnabledSharedVertexPrimvar()
 }
 
 uint64_t
-HdRprim::_ComputeSharedPrimvarId(uint64_t baseId,
-                                 HdBufferSourceVector const &sources,
-                                 HdComputationVector const &computations) const
+HdRprim::_ComputeSharedPrimvarId(
+    uint64_t baseId,
+    HdBufferSourceSharedPtrVector const &sources,
+    HdComputationSharedPtrVector const &computations) const
 {
     size_t primvarId = baseId;
     for (HdBufferSourceSharedPtr const &bufferSource : sources) {

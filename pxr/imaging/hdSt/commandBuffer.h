@@ -33,8 +33,7 @@
 #include "pxr/base/gf/matrix4f.h"
 #include "pxr/base/gf/matrix4d.h"
 
-#include <boost/shared_ptr.hpp>
-
+#include <memory>
 #include <vector>
 
 PXR_NAMESPACE_OPEN_SCOPE
@@ -43,11 +42,12 @@ PXR_NAMESPACE_OPEN_SCOPE
 class HdStDrawItem;
 class HdStDrawItemInstance;
 
-typedef boost::shared_ptr<class HdStResourceRegistry>
-    HdStResourceRegistrySharedPtr;
-typedef boost::shared_ptr<class HdStRenderPassState> HdStRenderPassStateSharedPtr;
-typedef boost::shared_ptr<class HdSt_DrawBatch> HdSt_DrawBatchSharedPtr;
-typedef std::vector<HdSt_DrawBatchSharedPtr> HdSt_DrawBatchSharedPtrVector;
+using HdStRenderPassStateSharedPtr = std::shared_ptr<class HdStRenderPassState>;
+using HdStResourceRegistrySharedPtr = 
+        std::shared_ptr<class HdStResourceRegistry>;
+
+using HdSt_DrawBatchSharedPtr = std::shared_ptr<class HdSt_DrawBatch>;
+using HdSt_DrawBatchSharedPtrVector = std::vector<HdSt_DrawBatchSharedPtr>;
 
 /// \class HdStCommandBuffer
 ///

@@ -43,7 +43,7 @@ class HgiGLShaderProgram final : public HgiShaderProgram
 {
 public:
     HGIGL_API
-    virtual ~HgiGLShaderProgram();
+    ~HgiGLShaderProgram() override;
 
     HGIGL_API
     bool IsValid() const override;
@@ -53,6 +53,9 @@ public:
 
     HGIGL_API
     HgiShaderFunctionHandleVector const& GetShaderFunctions() const override;
+
+    HGIGL_API
+    uint64_t GetRawResource() const override;
 
     /// Returns the gl resource id of the program.
     HGIGL_API

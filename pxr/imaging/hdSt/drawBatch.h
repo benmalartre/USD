@@ -32,23 +32,23 @@
 #include "pxr/imaging/hd/repr.h"
 #include "pxr/imaging/hdSt/shaderCode.h"
 
-#include <boost/shared_ptr.hpp>
+#include <memory>
 #include <vector>
 
 PXR_NAMESPACE_OPEN_SCOPE
 
-
 class HdStDrawItem;
 class HdStDrawItemInstance;
 
-typedef boost::shared_ptr<class HdSt_DrawBatch> HdSt_DrawBatchSharedPtr;
-typedef boost::shared_ptr<class HdSt_GeometricShader> HdSt_GeometricShaderSharedPtr;
-typedef boost::shared_ptr<class HdStGLSLProgram> HdStGLSLProgramSharedPtr;
-typedef boost::shared_ptr<class HdStRenderPassState> HdStRenderPassStateSharedPtr;
-typedef std::vector<HdSt_DrawBatchSharedPtr> HdSt_DrawBatchSharedPtrVector;
-typedef std::vector<class HdBindingRequest> HdBindingRequestVector;
-typedef boost::shared_ptr<class HdStResourceRegistry>
-    HdStResourceRegistrySharedPtr;
+using HdSt_DrawBatchSharedPtr = std::shared_ptr<class HdSt_DrawBatch>;
+using HdSt_DrawBatchSharedPtrVector = std::vector<HdSt_DrawBatchSharedPtr>;
+using HdSt_GeometricShaderSharedPtr =
+    std::shared_ptr<class HdSt_GeometricShader>;
+using HdStGLSLProgramSharedPtr= std::shared_ptr<class HdStGLSLProgram>;
+
+using HdStRenderPassStateSharedPtr = std::shared_ptr<class HdStRenderPassState>;
+using HdStResourceRegistrySharedPtr = 
+    std::shared_ptr<class HdStResourceRegistry>;
 
 /// \class HdSt_DrawBatch
 ///
@@ -58,7 +58,8 @@ typedef boost::shared_ptr<class HdStResourceRegistry>
 /// aggregated drawing resources dispatched with a minimal number of draw
 /// calls.
 ///
-class HdSt_DrawBatch {
+class HdSt_DrawBatch
+{
 public:
     HDST_API
     HdSt_DrawBatch(HdStDrawItemInstance * drawItemInstance);

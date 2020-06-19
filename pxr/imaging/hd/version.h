@@ -39,7 +39,10 @@
 // 29 -> 30: added IDRenderColor decode and direct Rprim path fetching.
 // 30 -> 31: added pre-chained buffer sources
 // 31 -> 32: renamed HdShader{Param} to HdMaterial{Param}
-#define HD_API_VERSION 32
+// 32 -> 33: Deleted GetPathForInstanceIndex; added GetScenePrimPath.
+// 32 -> 34: Added HdInstancerContext to GetScenePrimPath.
+// 34 -> 35: HdRepr is using std::unique_ptr<HdDrawItem>
+#define HD_API_VERSION 35
 
 // 1  ->  2: SimpleLighting -> FallbackLighting
 #define HD_SHADER_API 2

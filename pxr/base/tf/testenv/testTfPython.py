@@ -196,6 +196,13 @@ class TestPython(unittest.TestCase):
         Tf._takesTestEnum(Tf._Alpha)
         Tf._takesTestEnum2(Tf._Enum.One)
 
+        self.assertEqual(Tf._TestScopedEnum.Boron,
+                         Tf._TestScopedEnum.GetValueFromName('Boron'))
+        self.assertEqual(Tf._TestScopedEnum.Hydrogen,
+                         Tf._TestScopedEnum.GetValueFromName('Hydrogen'))
+        self.assertNotEqual(Tf._TestScopedEnum.Hydrogen,
+                            Tf._TestScopedEnum.GetValueFromName('Boron'))
+
         def testRepr(s):
             self.assertEqual(s, repr(eval(s)))
 
@@ -299,6 +306,23 @@ class TestPython(unittest.TestCase):
 
         # The auto-generated python object should be convertible to the original type.
         Tf._takesTestEnum(value1)
+
+    def test_ByteArrayConversion(self):
+        '''Verify we can convert buffers to byte arrays.'''
+        ba = Tf._ConvertByteListToByteArray(['a', 'b', 'c'])
+        self.assertEqual(ba, bytearray([ord('a'), ord('b'), ord('c')]))
+
+        numbers = [str(x % 10) for x in range(256)]
+        ba = Tf._ConvertByteListToByteArray(numbers)
+        self.assertEqual(ba, bytearray([ord(x) for x in numbers]))
+
+        zeroes = ['\x00', '\x00', '\x00']
+        ba = Tf._ConvertByteListToByteArray(zeroes)
+        self.assertEqual(ba, bytearray([0, 0, 0]))
+
+        ba = Tf._ConvertByteListToByteArray([])
+        self.assertEqual(ba, bytearray())
+        self.assertTrue(isinstance(ba, bytearray))
 
     def test_Callbacks(self):
         global f1called

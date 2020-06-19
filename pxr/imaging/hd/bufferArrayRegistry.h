@@ -38,23 +38,23 @@
 #include "pxr/base/vt/dictionary.h"
 #include "pxr/base/tf/token.h"
 
-#include <boost/noncopyable.hpp>
-#include <boost/shared_ptr.hpp>
 #include <tbb/concurrent_unordered_map.h>
 
 #include <condition_variable>
+#include <memory>
 #include <mutex>
 
 PXR_NAMESPACE_OPEN_SCOPE
 
 
-typedef boost::shared_ptr<class HdBufferArray> HdBufferArraySharedPtr;
+using HdBufferArraySharedPtr = std::shared_ptr<class HdBufferArray>;
 
 /// \class HdBufferArrayRegistry
 ///
 /// Manages the pool of buffer arrays.
 ///
-class HdBufferArrayRegistry : public boost::noncopyable {
+class HdBufferArrayRegistry 
+{
 public:
     HF_MALLOC_TAG_NEW("new HdBufferArrayRegistry");
 
@@ -92,6 +92,10 @@ public:
                                      const HdBufferArrayRegistry& self);
 
 private:
+
+    HdBufferArrayRegistry(const HdBufferArrayRegistry &) = delete;
+    HdBufferArrayRegistry &operator=(const HdBufferArrayRegistry &) = delete;
+
     typedef std::list<HdBufferArraySharedPtr> _HdBufferArraySharedPtrList;
 
     /// \struct _Entry
