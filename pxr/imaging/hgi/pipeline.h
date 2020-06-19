@@ -149,6 +149,8 @@ bool operator!=(
 ///   Determines the culling rules for primitives (triangles).</li>
 /// <li>winding:
 ///   The rule that determines what makes a front-facing primitive.</li>
+/// <li>rasterizationEnabled:
+///   When false all primitives are discarded before rasterization stage.</li>
 /// </ul>
 ///
 struct HgiRasterizationState
@@ -160,6 +162,7 @@ struct HgiRasterizationState
     float lineWidth;
     HgiCullMode cullMode;
     HgiWinding winding;
+    bool rasterizerEnabled;
 };
 
 HGI_API
@@ -234,7 +237,7 @@ bool operator!=(
 ///   Various settings to control rasterization.</li>
 /// <li>vertexBuffers:
 ///   Description of the vertex buffers (per-vertex attributes).
-///   The actual VBOs are bound via GraphicsEncoder.</li>
+///   The actual VBOs are bound via GraphicsCmds.</li>
 /// <li>colorAttachmentDescs:
 ///   Describes each of the color attachments.</li>
 /// <li>depthAttachmentDesc:

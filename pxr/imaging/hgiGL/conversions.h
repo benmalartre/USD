@@ -53,9 +53,6 @@ public:
     static GLenum GetFormatType(HgiFormat inFormat);
 
     HGIGL_API
-    static int8_t GetElementCount(HgiFormat inFormat);
-
-    HGIGL_API
     static std::vector<GLenum> GetShaderStages(HgiShaderStage ss);
 
     HGIGL_API
@@ -75,6 +72,17 @@ public:
 
     HGIGL_API
     static GLenum GetTextureType(HgiTextureType tt);
+
+    HGIGL_API
+    static GLenum GetSamplerAddressMode(HgiSamplerAddressMode am);
+
+    HGIGL_API
+    static GLenum GetMagFilter(HgiSamplerFilter mf);
+
+    HGIGL_API
+    static GLenum GetMinFilter(
+        HgiSamplerFilter minFilter, 
+        HgiMipFilter mipFilter);
 };
 
 

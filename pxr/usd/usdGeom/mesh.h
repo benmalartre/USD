@@ -55,28 +55,26 @@ class SdfAssetPath;
 /// \class UsdGeomMesh
 ///
 /// Encodes a mesh surface whose definition and feature-set
-/// will converge with that of OpenSubdiv, http://graphics.pixar.com/opensubdiv/docs/subdivision_surfaces.html. Current exceptions/divergences include:
-/// 
-/// 1. Certain interpolation ("tag") parameters not yet supported
-/// 
-/// 2. Does not (as of 9/2014) yet support hierarchical edits.  We do intend
-/// to provide some encoding in a future version of the schema.
+/// will converge with that of OpenSubdiv, http://graphics.pixar.com/opensubdiv/docs/subdivision_surfaces.html.
+/// Certain interpolation ("tag") parameters are not yet supported.
 /// 
 /// A key property of this mesh schema is that it encodes both subdivision
-/// surfaces, and non-subdived "polygonal meshes", by varying the
+/// surfaces, and non-subdivided "polygonal meshes", by varying the
 /// \em subdivisionScheme attribute.
 /// 
 /// \section UsdGeom_Mesh_Normals A Note About Normals
 /// 
 /// Normals should not be authored on a subdivided mesh, since subdivision
 /// algorithms define their own normals. They should only be authored for
-/// polygonal meshes.
+/// polygonal meshes (_subdivisionScheme_ = "None").
 /// 
-/// The 'normals' attribute inherited from UsdGeomPointBased is not a generic
+/// The _normals_ attribute inherited from UsdGeomPointBased is not a generic
 /// primvar, but the number of elements in this attribute will be determined by
-/// its 'interpolation'.  See \ref UsdGeomPointBased::GetNormalsInterpolation() .
-/// If 'normals' and 'primvars:normals' are both specified, the latter has
-/// precedence.
+/// its _interpolation_.  See \ref UsdGeomPointBased::GetNormalsInterpolation() .
+/// If _normals_ and _primvars:normals_ are both specified, the latter has
+/// precedence.  If a polygonal Mesh specifies __neither__ _normals_ nor
+/// _primvars:normals_, then it should be treated and rendered as faceted,
+/// with no attempt to compute smooth normals.
 ///
 /// For any described attribute \em Fallback \em Value or \em Allowed \em Values below
 /// that are text/tokens, the actual token is published and defined in \ref UsdGeomTokens.
@@ -237,9 +235,11 @@ public:
     /// between schemes "bilinear" and "none" is that bilinearly subdivided
     /// meshes can be considered watertight, whereas there is no such guarantee
     /// for un-subdivided polymeshes, and more mesh features (e.g. holes) may
-    /// apply to bilinear meshes but not polymeshes.  Polymeshes \em may be
-    /// lighterweight and faster to render, depending on renderer and render
-    /// mode.)
+    /// apply to bilinear meshes but not polymeshes.   Further, if a polymesh 
+    /// does not provide normals, then it should be treated and rendered as 
+    /// faceted, whereas a "bilinear" Mesh should compute smooth normals. 
+    /// For primarily this latter reason, polymeshes \em may be lighterweight 
+    /// and faster to render, depending on renderer and render mode.)
     ///
     /// | ||
     /// | -- | -- |
@@ -368,7 +368,7 @@ public:
     // --------------------------------------------------------------------- //
     // CORNERINDICES 
     // --------------------------------------------------------------------- //
-    /// The vertex indices of all vertices that are sharp corners.
+    /// The point indices of sharp corners.
     ///
     /// | ||
     /// | -- | -- |
@@ -415,9 +415,10 @@ public:
     // --------------------------------------------------------------------- //
     // CREASEINDICES 
     // --------------------------------------------------------------------- //
-    /// The indices of all vertices forming creased edges.  The size of 
+    /// The point indices forming creased edges.  The size of 
     /// this array must be equal to the sum of all elements of the 
-    /// 'creaseLengths' attribute.
+    /// 'creaseLengths' attribute. Neighboring indices should correspond with the
+    /// valid edges indices.
     ///
     /// | ||
     /// | -- | -- |
@@ -517,6 +518,15 @@ public:
                                  std::string* reason=nullptr);
 
 public:
+
+    /// Returns whether or not \p sharpness is considered infinite.
+    ///
+    /// The \p sharpness value is usually intended for 'creaseSharpness' or
+    /// 'cornerSharpness' arrays and a return value of \c true indicates that
+    /// the crease or corner is perfectly sharp.
+    USDGEOM_API
+    static bool IsSharpnessInfinite(const float sharpness);
+
     /// \var const float SHARPNESS_INFINITE
     /// As an element of a 'creaseSharpness' or 'cornerSharpness' array,
     /// indicates that the crease or corner is perfectly sharp.
