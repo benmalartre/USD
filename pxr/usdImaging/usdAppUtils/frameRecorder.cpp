@@ -234,7 +234,6 @@ UsdAppUtilsFrameRecorder::Record(
     } while (!_imagingEngine.IsConverged());
 
     drawTarget->Unbind();
-
     return drawTarget->WriteToFile("color", outputImagePath);
 }
 
