@@ -18,6 +18,7 @@ set(DIRS
     usdNpr
     usdUI
     usdUtils
+	usdAnimX
     plugin
 )
 
