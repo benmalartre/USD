@@ -53,7 +53,8 @@ _MakeNewPlatformDefaultHgi()
     #if defined(ARCH_OS_LINUX)
         const TfType plugType = plugReg.FindDerivedTypeByName<Hgi>("HgiGL");
     #elif defined(ARCH_OS_DARWIN)
-        const TfType plugType = plugReg.FindDerivedTypeByName<Hgi>("HgiMetal");
+        //const TfType plugType = plugReg.FindDerivedTypeByName<Hgi>("HgiMetal");
+        const TfType plugType = plugReg.FindDerivedTypeByName<Hgi>("HgiGL");
     #elif defined(ARCH_OS_WINDOWS)
         const TfType plugType = plugReg.FindDerivedTypeByName<Hgi>("HgiGL");
     #else
