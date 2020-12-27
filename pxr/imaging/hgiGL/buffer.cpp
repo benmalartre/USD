@@ -39,7 +39,10 @@ HgiGLBuffer::HgiGLBuffer(HgiBufferDesc const & desc)
     }
 
     glCreateBuffers(1, &_bufferId);
-    glObjectLabel(GL_BUFFER, _bufferId, -1, _descriptor.debugName.c_str());
+
+    if (!_descriptor.debugName.empty()) {
+        glObjectLabel(GL_BUFFER, _bufferId, -1, _descriptor.debugName.c_str());
+    }
 
     if ((_descriptor.usage & HgiBufferUsageVertex)  ||
         (_descriptor.usage & HgiBufferUsageIndex32) ||
@@ -60,13 +63,14 @@ HgiGLBuffer::HgiGLBuffer(HgiBufferDesc const & desc)
             _bufferId,
             _descriptor.byteSize,
             _descriptor.initialData,
-            flags);
+            flags | GL_DYNAMIC_STORAGE_BIT);
+
         _mapped = glMapNamedBufferRange(_bufferId, 0, desc.byteSize, flags);
     } else {
         TF_CODING_ERROR("Unknown HgiBufferUsage bit");
     }
 
-    // glBindVertexBuffer (graphics encoder) needs to know the stride of each
+    // glBindVertexBuffer (graphics cmds) needs to know the stride of each
     // vertex buffer. Make sure user provides it.
     if (_descriptor.usage & HgiBufferUsageVertex) {
         TF_VERIFY(desc.vertexStride > 0);
@@ -92,6 +96,12 @@ HgiGLBuffer::~HgiGLBuffer()
     }
 
     HGIGL_POST_PENDING_GL_ERRORS();
+}
+
+uint64_t
+HgiGLBuffer::GetRawResource() const
+{
+    return (uint64_t) _bufferId;
 }
 
 

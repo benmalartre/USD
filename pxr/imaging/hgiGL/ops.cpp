@@ -25,7 +25,7 @@
 #include "pxr/imaging/hgiGL/buffer.h"
 #include "pxr/imaging/hgiGL/conversions.h"
 #include "pxr/imaging/hgiGL/diagnostic.h"
-#include "pxr/imaging/hgiGL/graphicsEncoder.h"
+#include "pxr/imaging/hgiGL/graphicsCmds.h"
 #include "pxr/imaging/hgiGL/pipeline.h"
 #include "pxr/imaging/hgiGL/resourceBindings.h"
 #include "pxr/imaging/hgiGL/texture.h"
@@ -36,10 +36,13 @@ PXR_NAMESPACE_OPEN_SCOPE
 HgiGLOpsFn
 HgiGLOps::PushDebugGroup(const char* label)
 {
-    return [label] {
+    // Make copy of string string since the lamda will execute later.
+    std::string lbl = label;
+
+    return [lbl] {
         #if defined(GL_KHR_debug)
         if (GLEW_KHR_debug) {
-            glPushDebugGroup(GL_DEBUG_SOURCE_THIRD_PARTY, 0, -1, label);
+            glPushDebugGroup(GL_DEBUG_SOURCE_THIRD_PARTY, 0, -1, lbl.c_str());
         }
         #endif
     };
@@ -86,21 +89,25 @@ HgiGLOps::CopyTextureGpuToCpu(HgiTextureGpuToCpuOp const& copyOp)
         GLenum glFormat = 0;
         GLenum glPixelType = 0;
 
-        if (texDesc.usage & HgiTextureUsageBitsColorTarget) {
-            HgiGLConversions::GetFormat(
-                texDesc.format,
-                &glFormat,
-                &glPixelType,
-                &glInternalFormat);
-        } else if (texDesc.usage & HgiTextureUsageBitsDepthTarget) {
+        if (texDesc.usage & HgiTextureUsageBitsDepthTarget) {
             TF_VERIFY(texDesc.format == HgiFormatFloat32);
             glFormat = GL_DEPTH_COMPONENT;
             glPixelType = GL_FLOAT;
             glInternalFormat = GL_DEPTH_COMPONENT32F;
         } else {
-            TF_CODING_ERROR("Unknown HgTextureUsage bit");
+            HgiGLConversions::GetFormat(
+                texDesc.format,
+                &glFormat,
+                &glPixelType,
+                &glInternalFormat);
         }
 
+        if (HgiIsCompressed(texDesc.format)) {
+            TF_CODING_ERROR(
+                "Copying from compressed GPU texture not supported.");
+            return;
+        }
+        
         // Make sure writes are finished before we read from the texture
         glMemoryBarrier(GL_ALL_BARRIER_BITS);
 
@@ -151,13 +158,19 @@ HgiGLOps::CopyBufferCpuToGpu(HgiBufferCpuToGpuOp const& copyOp)
 
         // Make sure the copy is finished before reads from buffer.
         glMemoryBarrier(GL_BUFFER_UPDATE_BARRIER_BIT);
+
+        HGIGL_POST_PENDING_GL_ERRORS();
     };
 }
 
 HgiGLOpsFn
-HgiGLOps::ResolveImage(HgiResolveImageOp const& resolveOp)
+HgiGLOps::ResolveImage(
+    HgiTextureHandle const& src,
+    HgiTextureHandle const& dst,
+    GfVec4i const& region,
+    bool isDepthResolve)
 {
-    return [resolveOp] {
+    return [src, dst, region, isDepthResolve] {
         // Create framebuffers for resolve.
         uint32_t readFramebuffer;
         uint32_t writeFramebuffer;
@@ -165,10 +178,8 @@ HgiGLOps::ResolveImage(HgiResolveImageOp const& resolveOp)
         glCreateFramebuffers(1, &writeFramebuffer);
 
         // Gather source and destination textures
-        HgiGLTexture* glSrcTexture = static_cast<HgiGLTexture*>(
-            resolveOp.source.Get());
-        HgiGLTexture* glDstTexture = static_cast<HgiGLTexture*>(
-            resolveOp.destination.Get());
+        HgiGLTexture* glSrcTexture = static_cast<HgiGLTexture*>(src.Get());
+        HgiGLTexture* glDstTexture = static_cast<HgiGLTexture*>(dst.Get());
 
         if (!glSrcTexture || !glDstTexture) {
             TF_CODING_ERROR("No textures provided for resolve");
@@ -181,7 +192,7 @@ HgiGLOps::ResolveImage(HgiResolveImageOp const& resolveOp)
         TF_VERIFY(glIsTexture(writeAttachment), "Destination is not a texture");
 
         // Update framebuffer bindings
-        if (resolveOp.usage & HgiTextureUsageBitsDepthTarget) {
+        if (isDepthResolve) {
             // Depth-only, so no color attachments for read or write
             // Clear previous color attachment since all attachments must be
             // written to from fragment shader or texels will be undefined.
@@ -242,11 +253,8 @@ HgiGLOps::ResolveImage(HgiResolveImageOp const& resolveOp)
         TF_VERIFY(status == GL_FRAMEBUFFER_COMPLETE);
 
         // Resolve MSAA fbo to a regular fbo
-        GLbitfield mask = (resolveOp.usage & HgiTextureUsageBitsDepthTarget) ?
-                GL_DEPTH_BUFFER_BIT : GL_COLOR_BUFFER_BIT;
-
-        const GfVec4i& src = resolveOp.sourceRegion;
-        const GfVec4i& dst = resolveOp.destinationRegion;
+        GLbitfield mask = isDepthResolve ?
+            GL_DEPTH_BUFFER_BIT : GL_COLOR_BUFFER_BIT;
 
         // Bind resolve framebuffer
         GLint restoreRead, restoreWrite;
@@ -257,8 +265,8 @@ HgiGLOps::ResolveImage(HgiResolveImageOp const& resolveOp)
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, writeFramebuffer);// regular
 
         glBlitFramebuffer(
-            src[0], src[1], src[2], src[3],
-            dst[0], dst[1], dst[2], dst[3],
+            region[0], region[1], region[2], region[3], // src region
+            region[0], region[1], region[2], region[3], // dst region
             mask,
             GL_NEAREST);
 
@@ -375,7 +383,7 @@ HgiGLOps::DrawIndexed(
 HgiGLOpsFn
 HgiGLOps::BindFramebufferOp(
     HgiGLDevice* device,
-    HgiGraphicsEncoderDesc const& desc)
+    HgiGraphicsCmdsDesc const& desc)
 {
     return [device, desc] {
         TF_VERIFY(desc.HasAttachments(), "Missing attachments");
@@ -431,6 +439,18 @@ HgiGLOps::BindFramebufferOp(
         }
 
         HGIGL_POST_PENDING_GL_ERRORS();
+    };
+}
+
+HgiGLOpsFn
+HgiGLOps::GenerateMipMaps(HgiTextureHandle const& texture)
+{
+    return [texture] {
+        HgiGLTexture* glTex = static_cast<HgiGLTexture*>(texture.Get());
+        if (glTex) {
+            glGenerateTextureMipmap(glTex->GetTextureId());
+            HGIGL_POST_PENDING_GL_ERRORS();
+        }
     };
 }
 

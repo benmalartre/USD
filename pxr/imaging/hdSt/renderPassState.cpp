@@ -34,12 +34,13 @@
 #include "pxr/imaging/hdSt/resourceRegistry.h"
 #include "pxr/imaging/hdSt/shaderCode.h"
 
+#include "pxr/imaging/hd/aov.h"
 #include "pxr/imaging/hd/changeTracker.h"
 #include "pxr/imaging/hd/resourceRegistry.h"
 #include "pxr/imaging/hd/tokens.h"
 #include "pxr/imaging/hd/vtBufferSource.h"
 
-#include "pxr/imaging/hgi/graphicsEncoderDesc.h"
+#include "pxr/imaging/hgi/graphicsCmdsDesc.h"
 
 #include "pxr/base/gf/frustum.h"
 #include "pxr/base/tf/staticTokens.h"
@@ -57,30 +58,23 @@ TF_DEFINE_PRIVATE_TOKENS(
 );
 
 HdStRenderPassState::HdStRenderPassState()
-    : HdRenderPassState()
-    , _renderPassShader(new HdStRenderPassShader())
-    , _fallbackLightingShader(new HdSt_FallbackLightingShader())
-    , _clipPlanesBufferSize(0)
-    , _alphaThresholdCurrent(0)
+    : HdStRenderPassState(std::make_shared<HdStRenderPassShader>())
 {
-    _lightingShader = _fallbackLightingShader;
 }
 
 HdStRenderPassState::HdStRenderPassState(
     HdStRenderPassShaderSharedPtr const &renderPassShader)
     : HdRenderPassState()
     , _renderPassShader(renderPassShader)
-    , _fallbackLightingShader(new HdSt_FallbackLightingShader())
+    , _fallbackLightingShader(std::make_shared<HdSt_FallbackLightingShader>())
     , _clipPlanesBufferSize(0)
     , _alphaThresholdCurrent(0)
+    , _hasCustomGraphicsCmdsDesc(false)
 {
     _lightingShader = _fallbackLightingShader;
 }
 
-HdStRenderPassState::~HdStRenderPassState()
-{
-    /*NOTHING*/
-}
+HdStRenderPassState::~HdStRenderPassState() = default;
 
 bool
 HdStRenderPassState::_UseAlphaMask() const
@@ -199,66 +193,69 @@ HdStRenderPassState::Prepare(
     GfMatrix4d const& worldToViewMatrix = GetWorldToViewMatrix();
     GfMatrix4d projMatrix = GetProjectionMatrix();
 
-    HdBufferSourceSharedPtrVector sources;
-    sources.push_back(HdBufferSourceSharedPtr(
-                         new HdVtBufferSource(HdShaderTokens->worldToViewMatrix,
-                                              worldToViewMatrix)));
-    sources.push_back(HdBufferSourceSharedPtr(
-                  new HdVtBufferSource(HdShaderTokens->worldToViewInverseMatrix,
-                                       worldToViewMatrix.GetInverse() )));
-    sources.push_back(HdBufferSourceSharedPtr(
-                          new HdVtBufferSource(HdShaderTokens->projectionMatrix,
-                                               projMatrix)));
-    // Override color alpha component is used as the amount to blend in the
-    // override color over the top of the regular fragment color.
-    sources.push_back(HdBufferSourceSharedPtr(
-                          new HdVtBufferSource(HdShaderTokens->overrideColor,
-                                               VtValue(_overrideColor))));
-    sources.push_back(HdBufferSourceSharedPtr(
-                          new HdVtBufferSource(HdShaderTokens->wireframeColor,
-                                               VtValue(_wireframeColor))));
-    sources.push_back(HdBufferSourceSharedPtr(
-                          new HdVtBufferSource(HdShaderTokens->maskColor,
-                                               VtValue(_maskColor))));
-    sources.push_back(HdBufferSourceSharedPtr(
-                          new HdVtBufferSource(HdShaderTokens->indicatorColor,
-                                               VtValue(_indicatorColor))));
-    sources.push_back(HdBufferSourceSharedPtr(
-                          new HdVtBufferSource(HdShaderTokens->pointColor,
-                                               VtValue(_pointColor))));
-    sources.push_back(HdBufferSourceSharedPtr(
-                          new HdVtBufferSource(HdShaderTokens->pointSize,
-                                               VtValue(_pointSize))));
-    sources.push_back(HdBufferSourceSharedPtr(
-                          new HdVtBufferSource(HdShaderTokens->pointSelectedSize,
-                                               VtValue(_pointSelectedSize))));
-
-    sources.push_back(HdBufferSourceSharedPtr(
-                       new HdVtBufferSource(HdShaderTokens->lightingBlendAmount,
-                                            VtValue(lightingBlendAmount))));
+    HdBufferSourceSharedPtrVector sources = {
+        std::make_shared<HdVtBufferSource>(
+            HdShaderTokens->worldToViewMatrix,
+            worldToViewMatrix),
+        std::make_shared<HdVtBufferSource>(
+            HdShaderTokens->worldToViewInverseMatrix,
+            worldToViewMatrix.GetInverse()),
+        std::make_shared<HdVtBufferSource>(
+            HdShaderTokens->projectionMatrix,
+            projMatrix),
+        // Override color alpha component is used as the amount to blend in the
+        // override color over the top of the regular fragment color.
+        std::make_shared<HdVtBufferSource>(
+            HdShaderTokens->overrideColor,
+            VtValue(_overrideColor)),
+        std::make_shared<HdVtBufferSource>(
+            HdShaderTokens->wireframeColor,
+            VtValue(_wireframeColor)),
+        std::make_shared<HdVtBufferSource>(
+            HdShaderTokens->maskColor,
+            VtValue(_maskColor)),
+        std::make_shared<HdVtBufferSource>(
+            HdShaderTokens->indicatorColor,
+            VtValue(_indicatorColor)),
+        std::make_shared<HdVtBufferSource>(
+            HdShaderTokens->pointColor,
+            VtValue(_pointColor)),
+        std::make_shared<HdVtBufferSource>(
+            HdShaderTokens->pointSize,
+            VtValue(_pointSize)),
+        std::make_shared<HdVtBufferSource>(
+            HdShaderTokens->pointSelectedSize,
+            VtValue(_pointSelectedSize)),
+        std::make_shared<HdVtBufferSource>(
+            HdShaderTokens->lightingBlendAmount,
+            VtValue(lightingBlendAmount))
+    };
 
     if (_UseAlphaMask()) {
-        sources.push_back(HdBufferSourceSharedPtr(
-                              new HdVtBufferSource(HdShaderTokens->alphaThreshold,
-                                                   VtValue(_alphaThreshold))));
+        sources.push_back(
+            std::make_shared<HdVtBufferSource>(
+                HdShaderTokens->alphaThreshold,
+                VtValue(_alphaThreshold)));
     }
 
-    sources.push_back(HdBufferSourceSharedPtr(
-                       new HdVtBufferSource(HdShaderTokens->tessLevel,
-                                            VtValue(_tessLevel))));
-    sources.push_back(HdBufferSourceSharedPtr(
-                          new HdVtBufferSource(HdShaderTokens->viewport,
-                                               VtValue(_viewport))));
+    sources.push_back(
+        std::make_shared<HdVtBufferSource>(
+            HdShaderTokens->tessLevel,
+            VtValue(_tessLevel)));
+    sources.push_back(
+        std::make_shared<HdVtBufferSource>(
+            HdShaderTokens->viewport,
+            VtValue(_viewport)));
 
     if (clipPlanes.size() > 0) {
-        sources.push_back(HdBufferSourceSharedPtr(
-                              new HdVtBufferSource(
-                                  HdShaderTokens->clipPlanes,
-                                  VtValue(clipPlanes),
-                                  clipPlanes.size())));
+        sources.push_back(
+            std::make_shared<HdVtBufferSource>(
+                HdShaderTokens->clipPlanes,
+                VtValue(clipPlanes),
+                clipPlanes.size()));
     }
 
-    hdStResourceRegistry->AddSources(_renderPassStateBar, sources);
+    hdStResourceRegistry->AddSources(_renderPassStateBar, std::move(sources));
 
     // notify view-transform to the lighting shader to update its uniform block
     _lightingShader->SetCamera(worldToViewMatrix, projMatrix);
@@ -463,17 +460,28 @@ HdStRenderPassState::GetShaderHash() const
     return hash;
 }
 
-HgiGraphicsEncoderDesc
-HdStRenderPassState::MakeGraphicsEncoderDesc() const
+HgiGraphicsCmdsDesc
+HdStRenderPassState::MakeGraphicsCmdsDesc() const
 {
-    const size_t maxColorAttachments = 8;
     const HdRenderPassAovBindingVector& aovBindings = GetAovBindings();
+
+    if (_hasCustomGraphicsCmdsDesc) {
+        if (!aovBindings.empty()) {
+            TF_CODING_ERROR(
+                "Cannot specify a graphics cmds desc and aov bindings "
+                "at the same time.");
+        }
+
+        return _customGraphicsCmdsDesc;
+    }
+
+    static const size_t maxColorTex = 8;
     const bool useMultiSample = GetUseAovMultiSample();
 
-    HgiGraphicsEncoderDesc desc;
+    HgiGraphicsCmdsDesc desc;
 
     // If the AOV bindings have not changed that does NOT mean the
-    // graphicsEncoderDescriptor will not change. The HdRenderBuffer may be
+    // graphicsCmdsDescriptor will not change. The HdRenderBuffer may be
     // resized at any time, which will destroy and recreate the HgiTextureHandle
     // that backs the render buffer and was attached for graphics encoding.
 
@@ -490,7 +498,18 @@ HdStRenderPassState::MakeGraphicsEncoderDesc() const
             continue;
         }
 
+        // Get render target texture
         HgiTextureHandle hgiTexHandle = rv.UncheckedGet<HgiTextureHandle>();
+
+        // Get resolve texture target.
+        HgiTextureHandle hgiResolveHandle;
+        if (multiSampled) {
+            VtValue resolveRes = aov.renderBuffer->GetResource(/*ms*/false);
+            if (!TF_VERIFY(resolveRes.IsHolding<HgiTextureHandle>())) {
+                continue;
+            }
+            hgiResolveHandle = resolveRes.UncheckedGet<HgiTextureHandle>();
+        }
 
         // Assume AOVs have the same dimensions so pick size of any.
         desc.width = aov.renderBuffer->GetWidth();
@@ -498,12 +517,21 @@ HdStRenderPassState::MakeGraphicsEncoderDesc() const
 
         HgiAttachmentDesc attachmentDesc;
 
+        // We need to use LoadOpLoad instead of DontCare because we can have
+        // multiple render passes that use the same attachments.
+        // For example, translucent renders after opaque so we must load the
+        // opaque results before rendering translucent objects.
         HgiAttachmentLoadOp loadOp = aov.clearValue.IsEmpty() ?
-            HgiAttachmentLoadOpDontCare :
+            HgiAttachmentLoadOpLoad :
             HgiAttachmentLoadOpClear;
 
         attachmentDesc.loadOp = loadOp;
-        attachmentDesc.storeOp = HgiAttachmentStoreOpStore;
+
+        // Don't store multisample images. Only store the resolved versions.
+        // This saves a bunch of bandwith (especially on tiled gpu's).
+        attachmentDesc.storeOp = multiSampled ?
+            HgiAttachmentStoreOpDontCare :
+            HgiAttachmentStoreOpStore;
 
         if (aov.clearValue.IsHolding<float>()) {
             float depth = aov.clearValue.UncheckedGet<float>();
@@ -523,19 +551,40 @@ HdStRenderPassState::MakeGraphicsEncoderDesc() const
         attachmentDesc.dstAlphaBlendFactor=HgiBlendFactor(_blendAlphaDstFactor);
         attachmentDesc.alphaBlendOp = HgiBlendOp(_blendAlphaOp);
 
-        if (aov.aovName == HdAovTokens->depth) {
+        if (HdAovHasDepthSemantic(aov.aovName)) {
             desc.depthAttachmentDesc = std::move(attachmentDesc);
             desc.depthTexture = hgiTexHandle;
-        } else if (TF_VERIFY(
-            desc.colorAttachmentDescs.size() < maxColorAttachments,
-            "Too many aov bindings for color attachments"))
+            if (hgiResolveHandle) {
+                desc.depthResolveTexture = hgiResolveHandle;
+            }
+        } else if (TF_VERIFY(desc.colorAttachmentDescs.size() < maxColorTex,
+                   "Too many aov bindings for color attachments"))
         {
-            desc.colorAttachmentDescs.emplace_back(std::move(attachmentDesc));
-            desc.colorTextures.emplace_back(hgiTexHandle);
+            desc.colorAttachmentDescs.push_back(std::move(attachmentDesc));
+            desc.colorTextures.push_back(hgiTexHandle);
+            if (hgiResolveHandle) {
+                desc.colorResolveTextures.push_back(hgiResolveHandle);
+            }
         }
     }
 
     return desc;
 }
+
+void
+HdStRenderPassState::SetCustomGraphicsCmdsDesc(
+    const HgiGraphicsCmdsDesc &graphicsCmdDesc)
+{
+    _customGraphicsCmdsDesc = graphicsCmdDesc;
+    _hasCustomGraphicsCmdsDesc = true;
+}
+
+void
+HdStRenderPassState::ClearCustomGraphicsCmdsDesc()
+{
+    _customGraphicsCmdsDesc = HgiGraphicsCmdsDesc();
+    _hasCustomGraphicsCmdsDesc = false;
+}
+
 
 PXR_NAMESPACE_CLOSE_SCOPE

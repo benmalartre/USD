@@ -31,7 +31,7 @@
 #include "pxr/base/gf/matrix4f.h"
 #include "pxr/base/vt/array.h"
 
-#include <embree2/rtcore.h>
+#include <embree3/rtcore.h>
 
 PXR_NAMESPACE_OPEN_SCOPE
 
@@ -40,7 +40,7 @@ class HdRprim;
 /// \class HdEmbreePrototypeContext
 ///
 /// A small bit of state attached to each bit of prototype geometry in embree,
-/// for the benefit of HdEmbreeRenderPass::_TraceRay.
+/// for the benefit of HdEmbreeRenderer::_TraceRay.
 ///
 struct HdEmbreePrototypeContext
 {
@@ -57,7 +57,7 @@ struct HdEmbreePrototypeContext
 /// \class HdEmbreeInstanceContext
 ///
 /// A small bit of state attached to each bit of instanced geometry in embree,
-/// for the benefit of HdEmbreeRenderPass::_TraceRay.
+/// for the benefit of HdEmbreeRenderer::_TraceRay.
 ///
 struct HdEmbreeInstanceContext
 {

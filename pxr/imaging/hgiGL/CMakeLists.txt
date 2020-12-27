@@ -24,17 +24,19 @@ pxr_library(hgiGL
     PRIVATE_CLASSES
         conversions
         diagnostic
+        scopedStateHolder
 
     PUBLIC_CLASSES
-        blitEncoder
+        blitCmds
         buffer
         device
         framebufferCache
-        graphicsEncoder
+        graphicsCmds
         hgi
         ops
         pipeline
         resourceBindings
+        sampler
         shaderFunction
         shaderProgram
         texture

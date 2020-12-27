@@ -29,9 +29,15 @@
 #include "pxr/imaging/hgi/hgi.h"
 #include "pxr/imaging/hgi/tokens.h"
 
+#include <functional>
+#include <vector>
+
 PXR_NAMESPACE_OPEN_SCOPE
 
 class HgiGLDevice;
+
+using HgiGLOpsFn = std::function<void(void)>;
+using HgiGLOpsVector = std::vector<HgiGLOpsFn>;
 
 
 /// \class HgiGL
@@ -47,22 +53,27 @@ public:
     HGIGL_API
     ~HgiGL() override;
 
-    // Returns the opengl device.
     HGIGL_API
-    HgiGLDevice* GetPrimaryDevice() const;
+    void SubmitCmds(HgiCmds* cmds) override;
 
     HGIGL_API
-    HgiGraphicsEncoderUniquePtr CreateGraphicsEncoder(
-        HgiGraphicsEncoderDesc const& desc) override;
+    HgiGraphicsCmdsUniquePtr CreateGraphicsCmds(
+        HgiGraphicsCmdsDesc const& desc) override;
 
     HGIGL_API
-    HgiBlitEncoderUniquePtr CreateBlitEncoder() override;
+    HgiBlitCmdsUniquePtr CreateBlitCmds() override;
 
     HGIGL_API
     HgiTextureHandle CreateTexture(HgiTextureDesc const & desc) override;
 
     HGIGL_API
     void DestroyTexture(HgiTextureHandle* texHandle) override;
+
+    HGIGL_API
+    HgiSamplerHandle CreateSampler(HgiSamplerDesc const & desc) override;
+
+    HGIGL_API
+    void DestroySampler(HgiSamplerHandle* smpHandle) override;
 
     HGIGL_API
     HgiBufferHandle CreateBuffer(HgiBufferDesc const & desc) override;
@@ -108,6 +119,14 @@ public:
 
     HGIGL_API
     void EndFrame() override {};
+
+    //
+    // HgiGL specific
+    //
+
+    /// Returns the opengl device.
+    HGIGL_API
+    HgiGLDevice* GetPrimaryDevice() const;
 
 private:
     HgiGL & operator=(const HgiGL&) = delete;

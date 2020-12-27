@@ -80,6 +80,15 @@ over "GLOBAL" (
                 belonging to the family and the union of all subsets in the 
                 family may not contain all the elements."""
             }
+            dictionary hermite = {
+                string doc = """A deprecated basis token for
+                UsdGeomBasisCurves. Consumers of USD should transition
+                to using the UsdGeomHermiteCurves schema."""
+            }
+            dictionary power = {
+                string doc = """A deprecated basis token for
+                UsdGeomBasisCurves."""
+            }
         }
     }
 )
@@ -739,28 +748,26 @@ class Mesh "Mesh" (
 #include "pxr/usd/usd/timeCode.h" """
     }
     doc="""Encodes a mesh surface whose definition and feature-set
-    will converge with that of OpenSubdiv, http://graphics.pixar.com/opensubdiv/docs/subdivision_surfaces.html. Current exceptions/divergences include:
-    
-    1. Certain interpolation ("tag") parameters not yet supported
-    
-    2. Does not (as of 9/2014) yet support hierarchical edits.  We do intend
-    to provide some encoding in a future version of the schema.
+    will converge with that of OpenSubdiv, http://graphics.pixar.com/opensubdiv/docs/subdivision_surfaces.html.
+    Certain interpolation ("tag") parameters are not yet supported.
     
     A key property of this mesh schema is that it encodes both subdivision
-    surfaces, and non-subdived "polygonal meshes", by varying the
+    surfaces, and non-subdivided "polygonal meshes", by varying the
     \\em subdivisionScheme attribute.
     
     \\section UsdGeom_Mesh_Normals A Note About Normals
 
     Normals should not be authored on a subdivided mesh, since subdivision
     algorithms define their own normals. They should only be authored for
-    polygonal meshes.
+    polygonal meshes (_subdivisionScheme_ = "None").
 
-    The 'normals' attribute inherited from UsdGeomPointBased is not a generic
+    The _normals_ attribute inherited from UsdGeomPointBased is not a generic
     primvar, but the number of elements in this attribute will be determined by
-    its 'interpolation'.  See \\ref UsdGeomPointBased::GetNormalsInterpolation() .
-    If 'normals' and 'primvars:normals' are both specified, the latter has
-    precedence."""
+    its _interpolation_.  See \\ref UsdGeomPointBased::GetNormalsInterpolation() .
+    If _normals_ and _primvars:normals_ are both specified, the latter has
+    precedence.  If a polygonal Mesh specifies __neither__ _normals_ nor
+    _primvars:normals_, then it should be treated and rendered as faceted,
+    with no attempt to compute smooth normals."""
 ) {
     #
     # Common Properties
@@ -791,9 +798,11 @@ class Mesh "Mesh" (
         between schemes "bilinear" and "none" is that bilinearly subdivided
         meshes can be considered watertight, whereas there is no such guarantee
         for un-subdivided polymeshes, and more mesh features (e.g. holes) may
-        apply to bilinear meshes but not polymeshes.  Polymeshes \\em may be
-        lighterweight and faster to render, depending on renderer and render
-        mode.)""")
+        apply to bilinear meshes but not polymeshes.   Further, if a polymesh 
+        does not provide normals, then it should be treated and rendered as 
+        faceted, whereas a "bilinear" Mesh should compute smooth normals. 
+        For primarily this latter reason, polymeshes \\em may be lighterweight 
+        and faster to render, depending on renderer and render mode.)""")
 
     token interpolateBoundary = "edgeAndCorner" (
         allowedTokens = ["none", "edgeAndCorner", "edgeOnly"]
@@ -826,7 +835,7 @@ class Mesh "Mesh" (
         attribute) of all faces that should be made invisible.""")
 
     int[] cornerIndices = [] (
-        doc = """The vertex indices of all vertices that are sharp corners.""")
+        doc = """The point indices of sharp corners.""")
 
     float[] cornerSharpnesses = [] (
         doc = """The sharpness values for corners: each corner gets a single
@@ -835,9 +844,10 @@ class Mesh "Mesh" (
         'cornerIndices'""")
 
     int[] creaseIndices = [] (
-        doc = """The indices of all vertices forming creased edges.  The size of 
+        doc = """The point indices forming creased edges.  The size of 
         this array must be equal to the sum of all elements of the 
-        'creaseLengths' attribute.""")
+        'creaseLengths' attribute. Neighboring indices should correspond with the
+        valid edges indices.""")
 
     int[] creaseLengths = [] (
         doc = """The length of this array specifies the number of creases on the
@@ -1338,11 +1348,10 @@ class BasisCurves "BasisCurves" (
         Cubic curves use a basis matrix with four vertices to interpolate a segment.""")
 
     uniform token basis = "bezier" (
-        allowedTokens = ["bezier", "bspline", "catmullRom", "hermite", "power"]
+        allowedTokens = ["bezier", "bspline", "catmullRom"]
         doc = """The basis specifies the vstep and matrix used for cubic 
         interpolation.  \\note The 'hermite' and 'power' tokens have been
-        marked as deprecated for the 20.05 release of USD and are targeted
-        for removal in the 20.08 release. We've provided UsdGeomHermiteCurves
+        removed. We've provided UsdGeomHermiteCurves
         as an alternative for the 'hermite' basis.""")
 
     uniform token wrap = "nonperiodic" (
@@ -2102,7 +2111,7 @@ class HermiteCurves "HermiteCurves" (
     for interchange, we strongly recommend the use of UsdGeomBasisCurves as
     the representation of curves intended to be rendered (ie. hair or grass).
     Hermite curves can be converted to a Bezier representation (though not
-    losslessly).
+    from Bezier back to Hermite in general).
 
     \\section UsdGeomHermiteCurves_Interpolation Point Interpolation
     

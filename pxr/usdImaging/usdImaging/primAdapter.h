@@ -286,7 +286,8 @@ public:
 
     USDIMAGING_API
     virtual SdfPath GetScenePrimPath(SdfPath const& cachePath,
-                                     int instanceIndex) const;
+                                     int instanceIndex,
+                                     HdInstancerContext *instancerCtx) const;
 
     // Add the given usdPrim to the HdSelection object, to mark it for
     // selection highlighting. cachePath is the path of the object referencing
@@ -525,6 +526,12 @@ protected:
         TfToken const& name,
         HdInterpolation interp,
         TfToken const& role = TfToken()) const;
+
+    // Convenience method for removing a primvar descriptor.
+    USDIMAGING_API
+    void _RemovePrimvar(
+        HdPrimvarDescriptorVector* vec,
+        TfToken const& name) const;
 
     // Convenience method for computing a primvar. THe primvar will only be
     // added to the list in the valueCache if there is no primvar of the same

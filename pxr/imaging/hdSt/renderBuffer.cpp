@@ -23,9 +23,10 @@
 //
 #include "pxr/imaging/hdSt/renderBuffer.h"
 #include "pxr/imaging/hdSt/hgiConversions.h"
+#include "pxr/imaging/hd/aov.h"
 #include "pxr/imaging/hd/tokens.h"
-#include "pxr/imaging/hgi/blitEncoder.h"
-#include "pxr/imaging/hgi/blitEncoderOps.h"
+#include "pxr/imaging/hgi/blitCmds.h"
+#include "pxr/imaging/hgi/blitCmdsOps.h"
 #include "pxr/imaging/hgi/texture.h"
 
 PXR_NAMESPACE_OPEN_SCOPE
@@ -65,17 +66,9 @@ HdStRenderBuffer::Allocate(
     _dimensions = dimensions;
     _format = format;
     _multiSampled = multiSampled;
-
-    // XXX HdFormat does not have a depth format and neither HdAovDescriptor
-    // nor HdRenderBufferDescriptor have 'Purpose / Usage' flags that tell us
-    // the usage is for depth. Temp hack: do a string-compare the path which
-    // is build out of HdAovTokens.
     const TfToken& bufferName = GetId().GetNameToken();
-    bool _isDepthBuffer =
-        TfStringEndsWith(bufferName.GetString(), HdAovTokens->depth);
-
-    _usage = _isDepthBuffer ? HgiTextureUsageBitsDepthTarget :
-                              HgiTextureUsageBitsColorTarget;
+    _usage = HdAovHasDepthSemantic(bufferName) ?
+                HgiTextureUsageBitsDepthTarget : HgiTextureUsageBitsColorTarget;
 
     // Allocate new GPU resource
     HgiTextureDesc texDesc;
@@ -88,6 +81,7 @@ HdStRenderBuffer::Allocate(
 
     // Allocate multi-sample texture (optional)
     if (_multiSampled) {
+        // XXX: The sample count should be an argument to this method.
         texDesc.sampleCount = HgiSampleCount4;
         _textureMS = _hgi->CreateTexture(texDesc);
     }
@@ -139,11 +133,10 @@ HdStRenderBuffer::Map()
         copyOp.destinationByteOffset = 0;
         copyOp.destinationBufferByteSize = dataByteSize;
 
-        // Use blit encoder to record resource copy commands.
-        HgiBlitEncoderUniquePtr blitEncoder = _hgi->CreateBlitEncoder();
-
-        blitEncoder->CopyTextureGpuToCpu(copyOp);
-        blitEncoder->Commit();
+        // Use blit work to record resource copy commands.
+        HgiBlitCmdsUniquePtr blitCmds = _hgi->CreateBlitCmds();
+        blitCmds->CopyTextureGpuToCpu(copyOp);
+        _hgi->SubmitCmds(blitCmds.get());
     }
 
     return _mappedBuffer.data();
@@ -163,24 +156,8 @@ HdStRenderBuffer::Unmap()
 void
 HdStRenderBuffer::Resolve()
 {
-    if (!_multiSampled) {
-        return;
-    }
-
-    GfVec4i region(0,0, _dimensions[0], _dimensions[1]);
-
-    HgiResolveImageOp resolveOp;
-    resolveOp.usage = _usage;
-    resolveOp.source = _textureMS;
-    resolveOp.destination = _texture;
-    resolveOp.sourceRegion = region;
-    resolveOp.destinationRegion = region;
-
-    // Use blit encoder to record resource copy commands.
-    HgiBlitEncoderUniquePtr blitEncoder = _hgi->CreateBlitEncoder();
-
-    blitEncoder->ResolveImage(resolveOp);
-    blitEncoder->Commit();
+    // Textures are resolved at the end of a render pass via the graphicsCmds
+    // by supplying the resolve textures to the graphicsCmds descriptor.
 }
 
 VtValue
