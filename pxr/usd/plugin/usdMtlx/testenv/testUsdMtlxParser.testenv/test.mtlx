@@ -25,9 +25,10 @@
     <input name="in" type="customtype"/>
     <parameter name="note" type="string" value=""/>
   </nodedef>
-  <nodedef name="nd_surface" node="UsdMtlxTestNode" type="surfaceshader">
+  <nodedef name="nd_surface" node="UsdMtlxTestNode" type="surfaceShader">
     <input name="in" type="string"/>
     <parameter name="note" type="string" value=""/>
+    <output name="out" type="surfaceshader"/>
   </nodedef>
   <!--
      These implementations don't conform to the definitions above.

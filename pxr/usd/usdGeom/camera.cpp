@@ -75,7 +75,12 @@ UsdGeomCamera::Define(
 }
 
 /* virtual */
-UsdSchemaType UsdGeomCamera::_GetSchemaType() const {
+UsdSchemaKind UsdGeomCamera::_GetSchemaKind() const {
+    return UsdGeomCamera::schemaKind;
+}
+
+/* virtual */
+UsdSchemaKind UsdGeomCamera::_GetSchemaType() const {
     return UsdGeomCamera::schemaType;
 }
 
@@ -323,6 +328,23 @@ UsdGeomCamera::CreateShutterCloseAttr(VtValue const &defaultValue, bool writeSpa
                        writeSparsely);
 }
 
+UsdAttribute
+UsdGeomCamera::GetExposureAttr() const
+{
+    return GetPrim().GetAttribute(UsdGeomTokens->exposure);
+}
+
+UsdAttribute
+UsdGeomCamera::CreateExposureAttr(VtValue const &defaultValue, bool writeSparsely) const
+{
+    return UsdSchemaBase::_CreateAttr(UsdGeomTokens->exposure,
+                       SdfValueTypeNames->Float,
+                       /* custom = */ false,
+                       SdfVariabilityVarying,
+                       defaultValue,
+                       writeSparsely);
+}
+
 namespace {
 static inline TfTokenVector
 _ConcatenateAttributeNames(const TfTokenVector& left,const TfTokenVector& right)
@@ -353,6 +375,7 @@ UsdGeomCamera::GetSchemaAttributeNames(bool includeInherited)
         UsdGeomTokens->stereoRole,
         UsdGeomTokens->shutterOpen,
         UsdGeomTokens->shutterClose,
+        UsdGeomTokens->exposure,
     };
     static TfTokenVector allNames =
         _ConcatenateAttributeNames(

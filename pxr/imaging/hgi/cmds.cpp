@@ -26,11 +26,27 @@
 PXR_NAMESPACE_OPEN_SCOPE
 
 HgiCmds::HgiCmds()
+    : _submitted(false)
+{}
+
+HgiCmds::~HgiCmds() = default;
+
+bool
+HgiCmds::IsSubmitted() const
 {
+    return _submitted;
 }
 
-HgiCmds::~HgiCmds()
+bool
+HgiCmds::_Submit(Hgi* hgi, HgiSubmitWaitType wait)
 {
+    return false;
+}
+
+void
+HgiCmds::_SetSubmitted()
+{
+    _submitted = true;
 }
 
 PXR_NAMESPACE_CLOSE_SCOPE

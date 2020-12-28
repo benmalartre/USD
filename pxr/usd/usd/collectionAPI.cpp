@@ -119,16 +119,40 @@ UsdCollectionAPI::IsCollectionAPIPath(
 }
 
 /* virtual */
-UsdSchemaType UsdCollectionAPI::_GetSchemaType() const {
+UsdSchemaKind UsdCollectionAPI::_GetSchemaKind() const {
+    return UsdCollectionAPI::schemaKind;
+}
+
+/* virtual */
+UsdSchemaKind UsdCollectionAPI::_GetSchemaType() const {
     return UsdCollectionAPI::schemaType;
 }
 
 /* static */
 UsdCollectionAPI
-UsdCollectionAPI::_Apply(const UsdPrim &prim, const TfToken &name)
+UsdCollectionAPI::Apply(const UsdPrim &prim, const TfToken &name)
 {
-    return UsdAPISchemaBase::_MultipleApplyAPISchema<UsdCollectionAPI>(
-            prim, _schemaTokens->CollectionAPI, name);
+    // Ensure that the instance name is valid.
+    TfTokenVector tokens = SdfPath::TokenizeIdentifierAsTokens(name);
+
+    if (tokens.empty()) {
+        TF_CODING_ERROR("Invalid CollectionAPI name '%s'.", 
+                        name.GetText());
+        return UsdCollectionAPI();
+    }
+
+    const TfToken &baseName = tokens.back();
+    if (IsSchemaPropertyBaseName(baseName)) {
+        TF_CODING_ERROR("Invalid CollectionAPI name '%s'. "
+                        "The base-name '%s' is a schema property name.", 
+                        name.GetText(), baseName.GetText());
+        return UsdCollectionAPI();
+    }
+
+    if (prim.ApplyAPI<UsdCollectionAPI>(name)) {
+        return UsdCollectionAPI(prim, name);
+    }
+    return UsdCollectionAPI();
 }
 
 /* static */
@@ -314,33 +338,6 @@ using PathExpansionRuleMap = UsdCollectionMembershipQuery::PathExpansionRuleMap;
 
 /* static */
 UsdCollectionAPI 
-UsdCollectionAPI::ApplyCollection(
-    const UsdPrim& prim, 
-    const TfToken &name, 
-    const TfToken &expansionRule /*=UsdTokens->expandPrims*/) 
-{
-    // Ensure that the collection name is valid.
-    TfTokenVector tokens = SdfPath::TokenizeIdentifierAsTokens(name);
-
-    if (tokens.empty()) {
-        TF_CODING_ERROR("Invalid collection name '%s'.", name.GetText());
-        return UsdCollectionAPI();
-    }
-
-    TfToken baseName = *tokens.rbegin();
-    if (IsSchemaPropertyBaseName(baseName)) {
-        TF_CODING_ERROR("Invalid collection name '%s'. The base-name '%s' is a "
-            "schema property name.", name.GetText(), baseName.GetText());
-        return UsdCollectionAPI();
-    }
-
-    UsdCollectionAPI collection = UsdCollectionAPI::_Apply(prim, name);
-    collection.CreateExpansionRuleAttr(VtValue(expansionRule));
-    return collection;
-}
-
-/* static */
-UsdCollectionAPI 
 UsdCollectionAPI::GetCollection(const UsdStagePtr &stage, 
                                 const SdfPath &collectionPath)
 {
@@ -472,7 +469,8 @@ UsdCollectionAPI::IncludePath(const SdfPath &pathToInclude) const
             auto it = map.find(pathToInclude);
             if (TF_VERIFY(it != map.end())) {
                 map.erase(it);
-                query = UsdCollectionMembershipQuery(std::move(map));
+                query = UsdCollectionMembershipQuery(
+                    std::move(map), query.GetIncludedCollections());
             }
         }
     }
@@ -516,7 +514,8 @@ UsdCollectionAPI::ExcludePath(const SdfPath &pathToExclude) const
             auto it = map.find(pathToExclude);
             if (TF_VERIFY(it != map.end())) {
                 map.erase(it);
-                query = UsdCollectionMembershipQuery(std::move(map));
+                query = UsdCollectionMembershipQuery(
+                    std::move(map), query.GetIncludedCollections());
             }
         }
     }
@@ -574,6 +573,7 @@ UsdCollectionAPI::_ComputeMembershipQueryImpl(
 
     // Get the map from the query
     PathExpansionRuleMap map = query->GetAsPathExpansionRuleMap();
+    SdfPathSet collections = query->GetIncludedCollections();
 
     // Get this collection's expansionRule.
     TfToken expRule;
@@ -658,6 +658,15 @@ UsdCollectionAPI::_ComputeMembershipQueryImpl(
             for (const auto &pathAndExpansionRule : includedMap) {
                 map[pathAndExpansionRule.first] = pathAndExpansionRule.second;
             }
+
+            // Merge included collections
+            collections.insert(includedPath);
+
+            const SdfPathSet& includedCollections = 
+                includedQuery.GetIncludedCollections();
+            collections.insert(
+                includedCollections.begin(), includedCollections.end());
+
         } else {
             // Append included path
             map[includedPath] = expRule;
@@ -670,7 +679,8 @@ UsdCollectionAPI::_ComputeMembershipQueryImpl(
         map[p] = UsdTokens->exclude;
     }
 
-    *query = UsdCollectionMembershipQuery(std::move(map));
+    *query = UsdCollectionMembershipQuery(
+        std::move(map), std::move(collections));
 }
 
 /* static */
@@ -798,12 +808,19 @@ UsdCollectionAPI::BlockCollection() const
 {
     bool success = true;
     if (UsdRelationship includesRel = GetIncludesRel()) {
-        success = includesRel.BlockTargets() && success;  
+        success = includesRel.SetTargets({}) && success;  
     }
     if (UsdRelationship excludesRel = GetExcludesRel()) {
-        success = excludesRel.BlockTargets() && success;
+        success = excludesRel.SetTargets({}) && success;
     }
     return success;    
+}
+
+/* static */
+bool
+UsdCollectionAPI::CanContainPropertyName(const TfToken &name)
+{
+    return TfStringStartsWith(name, UsdTokens->collection);
 }
 
 PXR_NAMESPACE_CLOSE_SCOPE

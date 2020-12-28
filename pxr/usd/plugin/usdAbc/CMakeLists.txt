@@ -23,8 +23,10 @@ pxr_plugin(usdAbc
         usd
         usdGeom
         ${ALEMBIC_LIBRARIES}
-        ${OPENEXR_Iex_LIBRARY}
-        ${OPENEXR_Half_LIBRARY}
+        ${OPENEXR_Half_LIBRARY} 
+        ${OPENEXR_Imath_LIBRARY} 
+        ${OPENEXR_Iex_LIBRARY} 
+        ${OPENEXR_IexMath_LIBRARY}
         ${optionalLibs}
 
     INCLUDE_DIRS
@@ -55,6 +57,9 @@ pxr_plugin(usdAbc
 
     RESOURCE_FILES
         plugInfo.json
+
+    DOXYGEN_FILES
+        overview.dox
 )
 
 pxr_test_scripts(
@@ -257,7 +262,6 @@ pxr_register_test(testUsdAbcUvReadWrite
     EXPECTED_RETURN_CODE 0
     ENV
         USD_ABC_WRITE_UV_AS_ST_TEXCOORD2FARRAY=1
-        USD_ABC_READ_FLOAT2ARRAY_ST_PRIMVARS=0
 )
 
 pxr_register_test(testUsdAbcUvReadWrite_OldEncoding
@@ -266,7 +270,6 @@ pxr_register_test(testUsdAbcUvReadWrite_OldEncoding
     EXPECTED_RETURN_CODE 0
     ENV
         USD_ABC_WRITE_UV_AS_ST_TEXCOORD2FARRAY=0
-        USD_ABC_READ_FLOAT2ARRAY_ST_PRIMVARS=1
 )
 
 pxr_register_test(testUsdAbcSDFArguments

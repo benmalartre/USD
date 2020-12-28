@@ -62,7 +62,12 @@ UsdGeomModelAPI::Get(const UsdStagePtr &stage, const SdfPath &path)
 
 
 /* virtual */
-UsdSchemaType UsdGeomModelAPI::_GetSchemaType() const {
+UsdSchemaKind UsdGeomModelAPI::_GetSchemaKind() const {
+    return UsdGeomModelAPI::schemaKind;
+}
+
+/* virtual */
+UsdSchemaKind UsdGeomModelAPI::_GetSchemaType() const {
     return UsdGeomModelAPI::schemaType;
 }
 
@@ -70,8 +75,10 @@ UsdSchemaType UsdGeomModelAPI::_GetSchemaType() const {
 UsdGeomModelAPI
 UsdGeomModelAPI::Apply(const UsdPrim &prim)
 {
-    return UsdAPISchemaBase::_ApplyAPISchema<UsdGeomModelAPI>(
-            prim, _schemaTokens->GeomModelAPI);
+    if (prim.ApplyAPI<UsdGeomModelAPI>()) {
+        return UsdGeomModelAPI(prim);
+    }
+    return UsdGeomModelAPI();
 }
 
 /* static */
@@ -479,9 +486,10 @@ _GetAuthoredDrawMode(const UsdPrim &prim, TfToken *drawMode)
 TfToken
 UsdGeomModelAPI::ComputeModelDrawMode(const TfToken &parentDrawMode) const
 {
-    TfToken drawMode;
+    TfToken drawMode = UsdGeomTokens->inherited;
 
-    if (_GetAuthoredDrawMode(GetPrim(), &drawMode)) {
+    if (_GetAuthoredDrawMode(GetPrim(), &drawMode) &&
+        drawMode != UsdGeomTokens->inherited) {
         return drawMode;
     }
 
@@ -494,7 +502,8 @@ UsdGeomModelAPI::ComputeModelDrawMode(const TfToken &parentDrawMode) const
          curPrim; 
          curPrim = curPrim.GetParent()) {
 
-        if (_GetAuthoredDrawMode(curPrim, &drawMode)) {
+        if (_GetAuthoredDrawMode(curPrim, &drawMode) &&
+            drawMode != UsdGeomTokens->inherited) {
             return drawMode;
         }
     }

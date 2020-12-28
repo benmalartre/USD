@@ -21,12 +21,14 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-#include "pxr/imaging/glf/glew.h"
+#include "pxr/imaging/garch/glApi.h"
+
 #include "pxr/imaging/glf/diagnostic.h"
 
-#include "pxr/imaging/hdSt/bufferArrayRangeGL.h"
+#include "pxr/imaging/hdSt/bufferArrayRange.h"
 #include "pxr/imaging/hdSt/drawItem.h"
 #include "pxr/imaging/hdSt/glConversions.h"
+#include "pxr/imaging/hdSt/hgiConversions.h"
 #include "pxr/imaging/hdSt/fallbackLightingShader.h"
 #include "pxr/imaging/hdSt/renderBuffer.h"
 #include "pxr/imaging/hdSt/renderPassShader.h"
@@ -36,7 +38,7 @@
 
 #include "pxr/imaging/hd/aov.h"
 #include "pxr/imaging/hd/changeTracker.h"
-#include "pxr/imaging/hd/resourceRegistry.h"
+#include "pxr/imaging/hd/renderIndex.h"
 #include "pxr/imaging/hd/tokens.h"
 #include "pxr/imaging/hd/vtBufferSource.h"
 
@@ -69,7 +71,7 @@ HdStRenderPassState::HdStRenderPassState(
     , _fallbackLightingShader(std::make_shared<HdSt_FallbackLightingShader>())
     , _clipPlanesBufferSize(0)
     , _alphaThresholdCurrent(0)
-    , _hasCustomGraphicsCmdsDesc(false)
+    , _resolveMultiSampleAov(true)
 {
     _lightingShader = _fallbackLightingShader;
 }
@@ -80,6 +82,24 @@ bool
 HdStRenderPassState::_UseAlphaMask() const
 {
     return (_alphaThreshold > 0.0f);
+}
+
+static
+GfVec4f
+_ComputeDataWindow(
+    const CameraUtilFraming &framing,
+    const GfVec4f &fallbackViewport)
+{
+    if (framing.IsValid()) {
+        const GfRect2i &dataWindow = framing.dataWindow;
+        return GfVec4f(
+            dataWindow.GetMinX(),
+            dataWindow.GetMinY(),
+            dataWindow.GetWidth(),
+            dataWindow.GetHeight());
+    }
+
+    return fallbackViewport;
 }
 
 void
@@ -177,8 +197,8 @@ HdStRenderPassState::Prepare(
             hdStResourceRegistry->AllocateUniformBufferArrayRange(
                 HdTokens->drawingShader, bufferSpecs, HdBufferArrayUsageHint());
 
-        HdStBufferArrayRangeGLSharedPtr _renderPassStateBar_ =
-            std::static_pointer_cast<HdStBufferArrayRangeGL> (_renderPassStateBar);
+        HdStBufferArrayRangeSharedPtr _renderPassStateBar_ =
+            std::static_pointer_cast<HdStBufferArrayRange> (_renderPassStateBar);
 
         // add buffer binding request
         _renderPassShader->AddBufferBinding(
@@ -245,7 +265,9 @@ HdStRenderPassState::Prepare(
     sources.push_back(
         std::make_shared<HdVtBufferSource>(
             HdShaderTokens->viewport,
-            VtValue(_viewport)));
+            VtValue(
+                _ComputeDataWindow(
+                    _framing, _viewport))));
 
     if (clipPlanes.size() > 0) {
         sources.push_back(
@@ -261,10 +283,21 @@ HdStRenderPassState::Prepare(
     _lightingShader->SetCamera(worldToViewMatrix, projMatrix);
 
     // Update cull style on renderpass shader
-    // XXX: Ideanlly cullstyle should stay in renderPassState.
-    // However, geometric shader also sets cullstyle during batch
-    // execution.
+    // (Note that the geometric shader overrides the render pass's cullStyle 
+    // opinion if the prim has an opinion).
     _renderPassShader->SetCullStyle(_cullStyle);
+}
+
+void
+HdStRenderPassState::SetResolveAovMultiSample(bool state)
+{
+    _resolveMultiSampleAov = state;
+}
+
+bool
+HdStRenderPassState::GetResolveAovMultiSample() const
+{
+    return _resolveMultiSampleAov;
 }
 
 void
@@ -285,8 +318,8 @@ HdStRenderPassState::SetRenderPassShader(HdStRenderPassShaderSharedPtr const &re
     _renderPassShader = renderPassShader;
     if (_renderPassStateBar) {
 
-        HdStBufferArrayRangeGLSharedPtr _renderPassStateBar_ =
-            std::static_pointer_cast<HdStBufferArrayRangeGL> (_renderPassStateBar);
+        HdStBufferArrayRangeSharedPtr _renderPassStateBar_ =
+            std::static_pointer_cast<HdStBufferArrayRange> (_renderPassStateBar);
 
         _renderPassShader->AddBufferBinding(
             HdBindingRequest(HdBinding::UBO, _tokens->renderPassState,
@@ -310,6 +343,37 @@ HdStRenderPassState::GetShaders() const
     return shaders;
 }
 
+// Note: The geometric shader may override the state set below if necessary,
+// including disabling h/w culling altogether. 
+// Disabling h/w culling is required to handle instancing wherein 
+// instanceScale/instanceTransform can flip the xform handedness.
+namespace {
+
+void
+_SetGLCullState(HdCullStyle cullstyle)
+{
+    switch (cullstyle) {
+        case HdCullStyleFront:
+        case HdCullStyleFrontUnlessDoubleSided:
+            glEnable(GL_CULL_FACE);
+            glCullFace(GL_FRONT);
+            break;
+        case HdCullStyleBack:
+        case HdCullStyleBackUnlessDoubleSided:
+            glEnable(GL_CULL_FACE);
+            glCullFace(GL_BACK);
+            break;
+        case HdCullStyleNothing:
+        case HdCullStyleDontCare:
+        default:
+            // disable culling
+            glDisable(GL_CULL_FACE);
+            break;
+    }
+}
+
+} // anonymous namespace 
+
 void
 HdStRenderPassState::Bind()
 {
@@ -325,10 +389,6 @@ HdStRenderPassState::Bind()
     // SetCamera will no-op if the transforms are the same as before.
     _lightingShader->SetCamera(GetWorldToViewMatrix(),
                                GetProjectionMatrix());
-
-    // XXX: viewport should be set.
-    // glViewport((GLint)_viewport[0], (GLint)_viewport[1],
-    //            (GLsizei)_viewport[2], (GLsizei)_viewport[3]);
 
     // when adding another GL state change here, please document
     // which states to be altered at the comment in the header file
@@ -358,6 +418,9 @@ HdStRenderPassState::Bind()
         glDisable(GL_STENCIL_TEST);
     }
     
+    // Face culling
+    _SetGLCullState(_cullStyle);
+
     // Line width
     if (_lineWidth > 0) {
         glLineWidth(_lineWidth);
@@ -382,13 +445,13 @@ HdStRenderPassState::Bind()
         glDisable(GL_BLEND);
     }
 
-    if (!_alphaToCoverageUseDefault) {
-        if (_alphaToCoverageEnabled) {
-            glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
-        } else {
-            glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
-        }
+    if (_alphaToCoverageEnabled) {
+        glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+        glEnable(GL_SAMPLE_ALPHA_TO_ONE);
+    } else {
+        glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
     }
+    
     glEnable(GL_PROGRAM_POINT_SIZE);
     GLint glMaxClipPlanes;
     glGetIntegerv(GL_MAX_CLIP_PLANES, &glMaxClipPlanes);
@@ -424,8 +487,10 @@ HdStRenderPassState::Unbind()
         return;
     }
 
+    glDisable(GL_CULL_FACE);
     glDisable(GL_POLYGON_OFFSET_FILL);
     glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+    glDisable(GL_SAMPLE_ALPHA_TO_ONE);
     glDisable(GL_PROGRAM_POINT_SIZE);
     glDisable(GL_STENCIL_TEST);
     glDepthFunc(GL_LESS);
@@ -445,6 +510,24 @@ HdStRenderPassState::Unbind()
     glDepthMask(true);
 }
 
+void
+HdStRenderPassState::SetCameraFramingState(GfMatrix4d const &worldToViewMatrix,
+                                           GfMatrix4d const &projectionMatrix,
+                                           GfVec4d const &viewport,
+                                           ClipPlanesVector const & clipPlanes)
+{
+    if (_camera) {
+        // If a camera handle was set, reset it.
+        _camera = nullptr;
+    }
+
+    _worldToViewMatrix = worldToViewMatrix;
+    _projectionMatrix = projectionMatrix;
+    _viewport = GfVec4f((float)viewport[0], (float)viewport[1],
+                        (float)viewport[2], (float)viewport[3]);
+    _clipPlanes = clipPlanes;
+}
+
 size_t
 HdStRenderPassState::GetShaderHash() const
 {
@@ -460,23 +543,70 @@ HdStRenderPassState::GetShaderHash() const
     return hash;
 }
 
+static
+HdRenderBuffer *
+_GetRenderBuffer(const HdRenderPassAovBinding& aov,
+                 const HdRenderIndex * const renderIndex)
+{
+    if (aov.renderBuffer) {
+        return aov.renderBuffer;
+    }
+
+    return 
+        dynamic_cast<HdRenderBuffer*>(
+            renderIndex->GetBprim(
+                HdPrimTypeTokens->renderBuffer,
+                aov.renderBufferId));
+}
+
+// Clear values are always vec4f in HgiGraphicsCmdDesc.
+static
+GfVec4f _ToVec4f(const VtValue &v)
+{
+    if (v.IsHolding<float>()) {
+        const float depth = v.UncheckedGet<float>();
+        return GfVec4f(depth,0,0,0);
+    }
+    if (v.IsHolding<double>()) {
+        const double val = v.UncheckedGet<double>();
+        return GfVec4f(val);
+    }
+    if (v.IsHolding<GfVec2f>()) {
+        const GfVec2f val = v.UncheckedGet<GfVec2f>();
+        return GfVec4f(val[0], val[1], 0.0, 1.0);
+    }
+    if (v.IsHolding<GfVec2d>()) {
+        const GfVec2d val = v.UncheckedGet<GfVec2d>();
+        return GfVec4f(val[0], val[1], 0.0, 1.0);
+    }
+    if (v.IsHolding<GfVec3f>()) {
+        const GfVec3f val = v.UncheckedGet<GfVec3f>();
+        return GfVec4f(val[0], val[1], val[2], 1.0);
+    }
+    if (v.IsHolding<GfVec3d>()) {
+        const GfVec3d val = v.UncheckedGet<GfVec3d>();
+        return GfVec4f(val[0], val[1], val[2], 1.0);
+    }
+    if (v.IsHolding<GfVec4f>()) {
+        return v.UncheckedGet<GfVec4f>();
+    }
+    if (v.IsHolding<GfVec4d>()) {
+        return GfVec4f(v.UncheckedGet<GfVec4d>());
+    }
+
+    TF_CODING_ERROR("Unsupported clear value for draw target attachment.");
+    return GfVec4f(0.0);
+}
+
 HgiGraphicsCmdsDesc
-HdStRenderPassState::MakeGraphicsCmdsDesc() const
+HdStRenderPassState::MakeGraphicsCmdsDesc(
+    const HdRenderIndex * const renderIndex) const
 {
     const HdRenderPassAovBindingVector& aovBindings = GetAovBindings();
 
-    if (_hasCustomGraphicsCmdsDesc) {
-        if (!aovBindings.empty()) {
-            TF_CODING_ERROR(
-                "Cannot specify a graphics cmds desc and aov bindings "
-                "at the same time.");
-        }
-
-        return _customGraphicsCmdsDesc;
-    }
-
     static const size_t maxColorTex = 8;
     const bool useMultiSample = GetUseAovMultiSample();
+    const bool resolveMultiSample = GetResolveAovMultiSample();
 
     HgiGraphicsCmdsDesc desc;
 
@@ -486,12 +616,17 @@ HdStRenderPassState::MakeGraphicsCmdsDesc() const
     // that backs the render buffer and was attached for graphics encoding.
 
     for (const HdRenderPassAovBinding& aov : aovBindings) {
-        if (!TF_VERIFY(aov.renderBuffer, "Invalid render buffer")) {
+        HdRenderBuffer * const renderBuffer =
+            _GetRenderBuffer(aov, renderIndex);
+
+
+        if (!TF_VERIFY(renderBuffer, "Invalid render buffer")) {
             continue;
         }
 
-        bool multiSampled= useMultiSample && aov.renderBuffer->IsMultiSampled();
-        VtValue rv = aov.renderBuffer->GetResource(multiSampled);
+        const bool multiSampled =
+            useMultiSample && renderBuffer->IsMultiSampled();
+        const VtValue rv = renderBuffer->GetResource(multiSampled);
 
         if (!TF_VERIFY(rv.IsHolding<HgiTextureHandle>(), 
             "Invalid render buffer texture")) {
@@ -503,19 +638,18 @@ HdStRenderPassState::MakeGraphicsCmdsDesc() const
 
         // Get resolve texture target.
         HgiTextureHandle hgiResolveHandle;
-        if (multiSampled) {
-            VtValue resolveRes = aov.renderBuffer->GetResource(/*ms*/false);
+        if (multiSampled && resolveMultiSample) {
+            VtValue resolveRes = renderBuffer->GetResource(/*ms*/false);
             if (!TF_VERIFY(resolveRes.IsHolding<HgiTextureHandle>())) {
                 continue;
             }
             hgiResolveHandle = resolveRes.UncheckedGet<HgiTextureHandle>();
         }
 
-        // Assume AOVs have the same dimensions so pick size of any.
-        desc.width = aov.renderBuffer->GetWidth();
-        desc.height = aov.renderBuffer->GetHeight();
-
         HgiAttachmentDesc attachmentDesc;
+
+        attachmentDesc.format = hgiTexHandle->GetDescriptor().format;
+        attachmentDesc.usage = hgiTexHandle->GetDescriptor().usage;
 
         // We need to use LoadOpLoad instead of DontCare because we can have
         // multiple render passes that use the same attachments.
@@ -529,16 +663,12 @@ HdStRenderPassState::MakeGraphicsCmdsDesc() const
 
         // Don't store multisample images. Only store the resolved versions.
         // This saves a bunch of bandwith (especially on tiled gpu's).
-        attachmentDesc.storeOp = multiSampled ?
+        attachmentDesc.storeOp = (multiSampled && resolveMultiSample) ?
             HgiAttachmentStoreOpDontCare :
             HgiAttachmentStoreOpStore;
 
-        if (aov.clearValue.IsHolding<float>()) {
-            float depth = aov.clearValue.UncheckedGet<float>();
-            attachmentDesc.clearValue = GfVec4f(depth,0,0,0);
-        } else if (aov.clearValue.IsHolding<GfVec4f>()) {
-            const GfVec4f& col = aov.clearValue.UncheckedGet<GfVec4f>();
-            attachmentDesc.clearValue = col;
+        if (!aov.clearValue.IsEmpty()) {
+            attachmentDesc.clearValue = _ToVec4f(aov.clearValue);
         }
 
         // HdSt expresses blending per RenderPassState, where Hgi expresses
@@ -570,21 +700,5 @@ HdStRenderPassState::MakeGraphicsCmdsDesc() const
 
     return desc;
 }
-
-void
-HdStRenderPassState::SetCustomGraphicsCmdsDesc(
-    const HgiGraphicsCmdsDesc &graphicsCmdDesc)
-{
-    _customGraphicsCmdsDesc = graphicsCmdDesc;
-    _hasCustomGraphicsCmdsDesc = true;
-}
-
-void
-HdStRenderPassState::ClearCustomGraphicsCmdsDesc()
-{
-    _customGraphicsCmdsDesc = HgiGraphicsCmdsDesc();
-    _hasCustomGraphicsCmdsDesc = false;
-}
-
 
 PXR_NAMESPACE_CLOSE_SCOPE

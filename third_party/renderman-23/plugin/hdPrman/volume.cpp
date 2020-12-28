@@ -50,6 +50,18 @@ void HdPrman_Field::Sync(HdSceneDelegate *sceneDelegate,
                          HdRenderParam *renderParam,
                          HdDirtyBits *dirtyBits)
 {
+    if (*dirtyBits & DirtyParams) {
+        // Force volume prim to pick up the new field resources -
+        // in the same way as in HdStField::Sync.
+        //
+        // Ideally, this would be more fine-grained than blasting all
+        // rprims.
+        HdChangeTracker& changeTracker =
+            sceneDelegate->GetRenderIndex().GetChangeTracker();
+        changeTracker.MarkAllRprimsDirty(HdChangeTracker::DirtyVolumeField);
+    }
+
+    *dirtyBits = Clean;
 }
 
 void HdPrman_Field::Finalize(HdRenderParam *renderParam)
@@ -70,9 +82,8 @@ HdDirtyBits HdPrman_Field::GetInitialDirtyBitsMask() const
     return (HdDirtyBits)mask;
 }
 
-HdPrman_Volume::HdPrman_Volume(SdfPath const& id,
-                           SdfPath const& instancerId)
-    : BASE(id, instancerId)
+HdPrman_Volume::HdPrman_Volume(SdfPath const& id)
+    : BASE(id)
 {
 }
 

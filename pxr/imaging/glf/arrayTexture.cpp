@@ -24,7 +24,7 @@
 /// \file ArrayTexture.cpp
 // 
 
-#include "pxr/imaging/glf/glew.h"
+#include "pxr/imaging/garch/glApi.h"
 
 #include "pxr/imaging/glf/arrayTexture.h"
 #include "pxr/imaging/glf/diagnostic.h"
@@ -50,7 +50,7 @@ GlfArrayTexture::New(
     unsigned int cropBottom,
     unsigned int cropLeft,
     unsigned int cropRight,
-    GlfImage::ImageOriginLocation originLocation)
+    HioImage::ImageOriginLocation originLocation)
 {
     if (imageFilePaths.empty()) {
         // Need atleast one valid image file path.
@@ -74,7 +74,7 @@ GlfArrayTexture::New(
     unsigned int cropBottom,
     unsigned int cropLeft,
     unsigned int cropRight,
-    GlfImage::ImageOriginLocation originLocation)
+    HioImage::ImageOriginLocation originLocation)
 {
     TfTokenVector imageFilePathTokens(imageFilePaths.begin(), imageFilePaths.end());
     return TfCreateRefPtr(new GlfArrayTexture(
@@ -100,7 +100,7 @@ GlfArrayTexture::GlfArrayTexture(
     unsigned int cropBottom,
     unsigned int cropLeft,
     unsigned int cropRight,
-    GlfImage::ImageOriginLocation originLocation)
+    HioImage::ImageOriginLocation originLocation)
     
     : GlfUVTexture(imageFilePaths[0],
                     cropTop,
@@ -197,16 +197,16 @@ GlfArrayTexture::_CreateTexture(
     //     going to be the same across the array.
     //     Maybe we need a check for this somewhere...
     glTexImage3D(
-        GL_TEXTURE_2D_ARRAY,                 /* target         */
-        0,                                   /* level          */
-        texDataVec[0]->GLInternalFormat(),   /* internalFormat */
-        texDataVec[0]->ResizedWidth(),       /* width          */
-        texDataVec[0]->ResizedHeight(),      /* height         */
-        _arraySize,                          /* depth          */
-        0,                                   /* border         */
-        texDataVec[0]->GLFormat(),           /* format         */
-        texDataVec[0]->GLType(),             /* type           */
-        NULL);                               /* data           */
+        GL_TEXTURE_2D_ARRAY,                            /* target         */
+        0,                                              /* level          */
+        GlfGetGLInternalFormat(texDataVec[0]->GetFormat()),/* internalFormat */
+        texDataVec[0]->ResizedWidth(),                  /* width          */
+        texDataVec[0]->ResizedHeight(),                 /* height         */
+        _arraySize,                                     /* depth          */
+        0,                                              /* border         */
+        GlfGetGLFormat(texDataVec[0]->GetFormat()),     /* format         */
+        GlfGetGLType(texDataVec[0]->GetFormat()),       /* type           */
+        NULL);                                          /* data           */
     
     int memUsed = 0;
     for (size_t i = 0; i < _arraySize; ++i) {
@@ -214,17 +214,17 @@ GlfArrayTexture::_CreateTexture(
         if (texData && texData->HasRawBuffer()) {
 
             glTexSubImage3D(
-                GL_TEXTURE_2D_ARRAY,         /* target         */
-                0,                           /* level          */
-                0,                           /* xOffset        */
-                0,                           /* yOffset        */
-                i,                           /* zOffset        */
-                texData->ResizedWidth(),     /* width          */
-                texData->ResizedHeight(),    /* height         */
-                1,                           /* depth          */
-                texData->GLFormat(),         /* format         */
-                texData->GLType(),           /* type           */
-                texData->GetRawBuffer());    /* data           */
+                GL_TEXTURE_2D_ARRAY,                     /* target         */
+                0,                                       /* level          */
+                0,                                       /* xOffset        */
+                0,                                       /* yOffset        */
+                i,                                       /* zOffset        */
+                texData->ResizedWidth(),                 /* width          */
+                texData->ResizedHeight(),                /* height         */
+                1,                                       /* depth          */
+                GlfGetGLFormat(texData->GetFormat()),    /* format         */
+                GlfGetGLType(texData->GetFormat()),      /* type           */
+                texData->GetRawBuffer());                /* data           */
             
             memUsed += texData->ComputeBytesUsed();
         }

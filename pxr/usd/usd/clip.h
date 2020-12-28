@@ -112,6 +112,7 @@ public:
         size_t clipSourceLayerIndex,
         const SdfAssetPath& clipAssetPath,
         const SdfPath& clipPrimPath,
+        ExternalTime clipAuthoredStartTime,
         ExternalTime clipStartTime,
         ExternalTime clipEndTime,
         const TimeMappings& timeMapping);
@@ -129,18 +130,13 @@ public:
             _TranslatePathToClip(path), field, value);
     }
 
-    size_t GetNumTimeSamplesForPath(const SdfPath& path) const;
+    std::type_info const &
+    GetFieldTypeid(const SdfPath& path, const TfToken& field) const {
+        return _GetLayerForClip()->GetFieldTypeid(
+            _TranslatePathToClip(path), field);
+    }    
 
-    // Internal function used during value resolution. When determining
-    // resolve info sources, value resolution needs to determine when clipTimes
-    // are mapping into an empty clip with no samples, so it can continue
-    // searching for value sources. 
-    size_t _GetNumTimeSamplesForPathInLayerForClip(
-        const SdfPath& path) const 
-    {
-        return _GetLayerForClip()->GetNumTimeSamplesForPath(
-            _TranslatePathToClip(path));
-    }
+    size_t GetNumTimeSamplesForPath(const SdfPath& path) const;
 
     std::set<ExternalTime>
     ListTimeSamplesForPath(const SdfPath& path) const;
@@ -153,6 +149,21 @@ public:
     bool QueryTimeSample(
         const SdfPath& path, ExternalTime time, 
         Usd_InterpolatorBase* interpolator, T* value) const;
+
+    /// Return true if this clip has authored time samples for the attribute
+    /// corresponding to the given \p path. Clips may add time sample times
+    /// at their boundaries and time mappings even if there are no samples
+    /// in the clip. This method ignores these time samples and returns
+    /// whether there truly is a time sample value for the attribute.
+    bool HasAuthoredTimeSamples(const SdfPath& path) const;
+
+    /// Return true if a value block is authored for the attribute
+    /// corresponding to the given \p path at \p time.
+    bool IsBlocked(const SdfPath& path, ExternalTime time) const;
+
+    /// Return the layer associated with this clip, opening it if it hasn't
+    /// been opened already.
+    SdfLayerHandle GetLayer() const;
 
     /// Return the layer associated with this clip iff it has already been
     /// opened successfully.
@@ -173,7 +184,19 @@ public:
     SdfAssetPath assetPath;
     SdfPath primPath;
 
-    /// A clip is active in the time range [startTime, endTime).
+    /// The authored start time for this clip. This generally is equivalent
+    /// to the clip's startTime, but for the earliest active clip:
+    ///
+    /// - authoredStartTime: the stage time value authored in the clip set's 
+    ///   active metadata
+    /// - startTime: Usd_ClipTimesEarliest
+    ///
+    /// This distinction is needed for time samples for the earliest clip.
+    ExternalTime authoredStartTime;
+
+    /// A clip is active in the time range [startTime, endTime). For the
+    /// earliest clip in a clip set, startTime will be Usd_ClipTimesEarliest,
+    /// for the latest clip in a clip set, endTime will be Usd_ClipTimesLatest.
     ExternalTime startTime;
     ExternalTime endTime;
 
@@ -183,11 +206,17 @@ public:
 private:
     friend class UsdStage;
 
+    // Helpers for retrieving time sample information from within
+    // clip layers and translating them to external times.
     bool 
-    _GetBracketingTimeSamplesForPathInternal(const SdfPath& path, 
-                                             ExternalTime time, 
-                                             ExternalTime* tLower, 
-                                             ExternalTime* tUpper) const;
+    _GetBracketingTimeSamplesForPathFromClipLayer(
+        const SdfPath& path, 
+        ExternalTime time, ExternalTime* tLower, ExternalTime* tUpper) const;
+
+    void
+    _ListTimeSamplesForPathFromClipLayer(
+        const SdfPath& path,
+        std::set<ExternalTime>* samples) const;
 
     SdfPath _TranslatePathToClip(const SdfPath &path) const;
 

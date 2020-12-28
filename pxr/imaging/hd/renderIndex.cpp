@@ -56,10 +56,7 @@
 #include <tbb/concurrent_unordered_map.h>
 #include <tbb/concurrent_vector.h>
 
-#include <boost/functional/hash.hpp>
-
 PXR_NAMESPACE_OPEN_SCOPE
-
 
 HdRenderIndex::HdRenderIndex(
     HdRenderDelegate *renderDelegate,
@@ -136,8 +133,7 @@ HdRenderIndex::RemoveSubtree(const SdfPath &root,
 void
 HdRenderIndex::InsertRprim(TfToken const& typeId,
                  HdSceneDelegate* sceneDelegate,
-                 SdfPath const& rprimId,
-                 SdfPath const& instancerId /*= SdfPath()*/)
+                 SdfPath const& rprimId)
 {
     HD_TRACE_FUNCTION();
     HF_MALLOC_TAG_FUNCTION();
@@ -153,16 +149,12 @@ HdRenderIndex::InsertRprim(TfToken const& typeId,
         return;
     }
 
-
-    HdRprim *rprim = _renderDelegate->CreateRprim(typeId,
-                                                  rprimId,
-                                                  instancerId);
+    HdRprim *rprim = _renderDelegate->CreateRprim(typeId, rprimId);
     if (rprim == nullptr) {
         return;
     }
 
     _rprimIds.Insert(rprimId);
-
 
     _tracker.RprimInserted(rprimId, rprim->GetInitialDirtyBitsMask());
     _AllocatePrimId(rprim);
@@ -172,12 +164,6 @@ HdRenderIndex::InsertRprim(TfToken const& typeId,
       rprim
     };
     _rprimMap[rprimId] = std::move(info);
-
-    SdfPath instanceId = rprim->GetInstancerId();
-
-    if (!instanceId.IsEmpty()) {
-        _tracker.AddInstancerRprimDependency(instanceId, rprimId);
-    }
 }
 
 void
@@ -334,8 +320,10 @@ HdRenderIndex::Clear()
             _tracker.RemoveInstancerInstancerDependency(instancerId, id);
         }
 
-        _renderDelegate->DestroyInstancer(instancer);
         _tracker.InstancerRemoved(id);
+
+        instancer->Finalize(_renderDelegate->GetRenderParam());
+        _renderDelegate->DestroyInstancer(instancer);
     }
     _instancerMap.clear();
 
@@ -499,15 +487,6 @@ HdRenderIndex::GetFallbackBprim(TfToken const& typeId) const
     return _bprimIndex.GetFallbackPrim(typeId);
 }
 
-
-HdResourceRegistry::TextureKey
-HdRenderIndex::GetTextureKey(HdTextureResource::ID id) const
-{
-    HdResourceRegistry::TextureKey key = boost::hash_value(this);
-    boost::hash_combine(key, id);
-
-    return key;
-}
 
 // ---------------------------------------------------------------------- //
 // Render Delegate
@@ -1248,8 +1227,8 @@ HdRenderIndex::SyncAll(HdTaskSharedPtrVector *tasks,
         if (taskMapIt != _taskMap.end()) {
             _TaskInfo &taskInfo = taskMapIt->second;
 
-            // If in the task is in the render index, then we have to
-            // possibility that the task pass in points to a
+            // If the task is in the render index, then we have the
+            // possibility that the task passed in points to a
             // different instance than the one stored in the render index
             // even though they have the same id.
             //
@@ -1626,36 +1605,30 @@ HdRenderIndex::GetRprimPathFromPrimId(int primId) const
 
 void
 HdRenderIndex::InsertInstancer(HdSceneDelegate* delegate,
-                               SdfPath const &id,
-                               SdfPath const &parentId)
+                               SdfPath const &id)
 {
     HD_TRACE_FUNCTION();
     HF_MALLOC_TAG_FUNCTION();
 
-#if 0
-    // TODO: enable this after patching.
-    if (!id.IsAbsolutePath()) {
-        TF_CODING_ERROR("All Rprim IDs must be absolute paths <%s>\n",
-                id.GetText());
+    if (ARCH_UNLIKELY(_instancerMap.find(id) != _instancerMap.end())) {
         return;
     }
-#endif
+
+    SdfPath const &sceneDelegateId = delegate->GetDelegateID();
+    if (!id.HasPrefix(sceneDelegateId)) {
+        TF_CODING_ERROR("Scene Delegate Id (%s) must prefix prim Id (%s)",
+                        sceneDelegateId.GetText(), id.GetText());
+        return;
+    }
 
     HdInstancer *instancer =
-        _renderDelegate->CreateInstancer(delegate, id, parentId);
-
+        _renderDelegate->CreateInstancer(delegate, id);
     if (instancer == nullptr) {
         return;
     }
 
     _instancerMap[id] = instancer;
-    _tracker.InstancerInserted(id);
-
-    SdfPath instanceId = instancer->GetParentId();
-
-    if (!instanceId.IsEmpty()) {
-        _tracker.AddInstancerInstancerDependency(instanceId, id);
-    }
+    _tracker.InstancerInserted(id, instancer->GetInitialDirtyBitsMask());
 }
 
 void
@@ -1675,8 +1648,11 @@ HdRenderIndex::RemoveInstancer(SdfPath const& id)
         _tracker.RemoveInstancerInstancerDependency(instancerId, id);
     }
 
-    _renderDelegate->DestroyInstancer(instancer);
     _tracker.InstancerRemoved(id);
+
+    instancer->Finalize(_renderDelegate->GetRenderParam());
+    _renderDelegate->DestroyInstancer(instancer);
+
     _instancerMap.erase(it);
 }
 
@@ -1701,9 +1677,10 @@ HdRenderIndex::_RemoveInstancerSubtree(const SdfPath &root,
                 _tracker.RemoveInstancerInstancerDependency(instancerId, id);
             }
 
-            _renderDelegate->DestroyInstancer(instancer);
-
             _tracker.InstancerRemoved(id);
+
+            instancer->Finalize(_renderDelegate->GetRenderParam());
+            _renderDelegate->DestroyInstancer(instancer);
 
             // Need to capture the iterator and increment it because
             // TfHashMap::erase() doesn't return the next iterator, like

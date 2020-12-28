@@ -60,6 +60,10 @@ using HgiDeviceCapabilities = HgiBits;
 ///   A two-dimensional texture.</li>
 /// <li>HgiTextureType3D:
 ///   A three-dimensional texture.</li>
+/// <li>HgiTextureType1DArray:
+///   An array of one-dimensional textures.</li>
+/// <li>HgiTextureType2DArray:
+///   An array of two-dimensional textures.</li>
 /// </ul>
 ///
 enum HgiTextureType
@@ -67,6 +71,8 @@ enum HgiTextureType
     HgiTextureType1D = 0,
     HgiTextureType2D,
     HgiTextureType3D,
+    HgiTextureType1DArray,
+    HgiTextureType2DArray,
 
     HgiTextureTypeCount
 };
@@ -78,13 +84,17 @@ enum HgiTextureType
 ///
 /// <ul>
 /// <li>HgiTextureUsageBitsColorTarget:
-///   The texture is an color attachment rendered into via a render pass.</li>
+///   The texture is a color attachment rendered into via a render pass.</li>
 /// <li>HgiTextureUsageBitsDepthTarget:
-///   The texture is an depth attachment rendered into via a render pass.</li>
+///   The texture is a depth attachment rendered into via a render pass.</li>
+/// <li>HgiTextureUsageBitsStencilTarget:
+///   The texture is a stencil attachment rendered into via a render pass.</li>
 /// <li>HgiTextureUsageBitsShaderRead:
-///   The texture is sampled from in a shader (image load / sampling)</li>
+///   The texture is sampled from in a shader (sampling)</li>
 /// <li>HgiTextureUsageBitsShaderWrite:
-///   The texture is written into from in a shader (image store)</li>
+///   The texture is written into from in a shader (image store)
+///   When a texture is used as HgiBindResourceTypeStorageImage you must
+///   add this flag (even if you only read from the image).</li>
 ///
 /// <li>HgiTextureUsageCustomBitsBegin:
 ///   This bit (and any bit after) can be used to attached custom, backend
@@ -93,12 +103,13 @@ enum HgiTextureType
 ///
 enum HgiTextureUsageBits : HgiBits
 {
-    HgiTextureUsageBitsColorTarget = 1 << 0,
-    HgiTextureUsageBitsDepthTarget = 1 << 1,
-    HgiTextureUsageBitsShaderRead  = 1 << 2,
-    HgiTextureUsageBitsShaderWrite = 1 << 3,
+    HgiTextureUsageBitsColorTarget   = 1 << 0,
+    HgiTextureUsageBitsDepthTarget   = 1 << 1,
+    HgiTextureUsageBitsStencilTarget = 1 << 2,
+    HgiTextureUsageBitsShaderRead    = 1 << 3,
+    HgiTextureUsageBitsShaderWrite   = 1 << 4,
 
-    HgiTextureUsageCustomBitsBegin = 1 << 4,
+    HgiTextureUsageCustomBitsBegin = 1 << 5,
 };
 
 using HgiTextureUsage = HgiBits;
@@ -168,6 +179,8 @@ enum HgiSampleCount
     HgiSampleCount1  = 1,
     HgiSampleCount4  = 4,
     HgiSampleCount16 = 16,
+
+    HgiSampleCountEnd
 };
 
 /// \enum HgiAttachmentLoadOp
@@ -271,27 +284,10 @@ enum HgiShaderStageBits : HgiBits
     HgiShaderStageTessellationControl  = 1 << 3,
     HgiShaderStageTessellationEval     = 1 << 4,
     HgiShaderStageGeometry             = 1 << 5,
+
+    HgiShaderStageCustomBitsBegin      = 1 << 6,
 };
 using HgiShaderStage = HgiBits;
-
-/// \enum HgiPipelineType
-///
-/// Describes the intended bind point for this pipeline.
-///
-/// <ul>
-/// <li>HgiPipelineTypeGraphics:
-///   The pipeline is meant to be bound to the graphics pipeline.</li>
-/// <li>HgiPipelineTypeCompute:
-///   The pipeline is meant to be bound to the compute pipeline.</li>
-/// </ul>
-///
-enum HgiPipelineType
-{
-    HgiPipelineTypeGraphics = 0,
-    HgiPipelineTypeCompute,
-
-    HgiPipelineTypeCount
-};
 
 /// \enum HgiBindResourceType
 ///
@@ -301,13 +297,14 @@ enum HgiPipelineType
 /// <li>HgiBindResourceTypeSampler:
 ///   Sampler.
 ///   Glsl example: uniform sampler samplerOnly</li>
-/// <li>HgiBindResourceTypeCombinedImageSampler:
-///   Image and sampler combined in one.
-///   Glsl example: uniform sampler2D combined</li>
-/// <li>HgiBindResourceTypeSamplerImage:
+/// <li>HgiBindResourceTypeSampledImage:
 ///   Image for use with sampling ops.
 ///   Glsl example: uniform texture2D textureOnly
-///   texture(sampler2D(textureOnly, samplerOnly))</li>
+///   texture(sampler2D(textureOnly, samplerOnly), ...)</li>
+/// <li>HgiBindResourceTypeCombinedSamplerImage:
+///   Image and sampler combined into one.
+///   Glsl example: uniform sampler2D texSmp;
+///   texture(texSmp, ...)</li>
 /// <li>HgiBindResourceTypeStorageImage:
 ///   Storage image used for image store/load ops (Unordered Access View).</li>
 /// <li>HgiBindResourceTypeUniformBuffer:
@@ -319,8 +316,8 @@ enum HgiPipelineType
 enum HgiBindResourceType
 {
     HgiBindResourceTypeSampler = 0,
-    HgiBindResourceTypeCombinedImageSampler,
-    HgiBindResourceTypeSamplerImage,
+    HgiBindResourceTypeSampledImage,
+    HgiBindResourceTypeCombinedSamplerImage,
     HgiBindResourceTypeStorageImage,
     HgiBindResourceTypeUniformBuffer,
     HgiBindResourceTypeStorageBuffer,
@@ -457,6 +454,86 @@ enum HgiCompareFunction
 
     HgiCompareFunctionCount
 };
+
+/// \enum HgiComponentSwizzle
+///
+/// Swizzle for a component.
+///
+enum HgiComponentSwizzle
+{
+    HgiComponentSwizzleZero = 0,
+    HgiComponentSwizzleOne,
+    HgiComponentSwizzleR,
+    HgiComponentSwizzleG,
+    HgiComponentSwizzleB,
+    HgiComponentSwizzleA,
+
+    HgiComponentSwizzleCount
+};
+
+/// \enum HgiPrimitiveType
+///
+/// What the stream of vertices being rendered represents
+///
+/// <ul>
+/// <li>HgiPrimitiveTypePointList:
+///   Rasterize a point at each vertex.</li>
+/// <li>HgiPrimitiveTypeLineList:
+///   Rasterize a line between each separate pair of vertices.</li>
+/// <li>HgiPrimitiveTypeLineStrip:
+///   Rasterize a line between each pair of adjacent vertices.</li>
+/// <li>HgiPrimitiveTypeTriangleList:
+///   Rasterize a triangle for every separate set of three vertices.</li>
+/// <li>HgiPrimitiveTypePatchList:
+///   A user-defined number of vertices, which is tessellated into
+///   points, lines, or triangles.</li>
+/// </ul>
+///
+enum HgiPrimitiveType
+{
+    HgiPrimitiveTypePointList = 0,
+    HgiPrimitiveTypeLineList,
+    HgiPrimitiveTypeLineStrip,
+    HgiPrimitiveTypeTriangleList,
+    HgiPrimitiveTypePatchList,
+
+    HgiPrimitiveTypeCount
+};
+
+/// \enum HgiSubmitWaitType
+///
+/// Describes command submission wait behavior.
+///
+/// <ul>
+/// <li>HgiSubmitWaitTypeNoWait:
+///   CPU should not wait for the GPU to finish processing the cmds.</li>
+/// <li>HgiSubmitWaitTypeWaitUntilCompleted:
+///   The CPU waits ("blocked") until the GPU has consumed the cmds.</li>
+/// </ul>
+///
+enum HgiSubmitWaitType
+{
+    HgiSubmitWaitTypeNoWait = 0,
+    HgiSubmitWaitTypeWaitUntilCompleted,
+};
+
+/// \enum HgiMemoryBarrier
+///
+/// Describes what objects the memory barrier affects.
+///
+/// <ul>
+/// <li>HgiMemoryBarrierNone:
+///   No barrier (no-op).</li>
+/// <li>HgiMemoryBarrierAll:
+///   The barrier affects all memory writes and reads.</li>
+/// </ul>
+///
+enum HgiMemoryBarrierBits
+{
+    HgiMemoryBarrierNone = 0,
+    HgiMemoryBarrierAll  = 1 << 0
+};
+using HgiMemoryBarrier = HgiBits;
 
 PXR_NAMESPACE_CLOSE_SCOPE
 

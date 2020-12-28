@@ -59,7 +59,7 @@ PXR_NAMESPACE_OPEN_SCOPE
 /// <li>resourceType:
 ///    The type of buffer(s) that is to be bound.
 ///    All buffers in the array must have the same type.
-///    Note that vertex and index buffers are not bound to a resourceSet.
+///    Vertex, index and indirect buffers are not bound to a resourceSet.
 ///    They are instead passed to the draw command.</li>
 /// <li>bindingIndex:
 ///    Binding location for the buffer(s).</li>
@@ -140,8 +140,6 @@ bool operator!=(
 /// Describes a set of resources that are bound to the GPU during encoding.
 ///
 /// <ul>
-/// <li>pipelineType:
-///   Bind point for pipeline.</li>
 /// <li>buffers:
 ///   The buffers to be bound (E.g. uniform or shader storage).</li>
 /// <li>textures:
@@ -154,7 +152,6 @@ struct HgiResourceBindingsDesc
     HgiResourceBindingsDesc();
 
     std::string debugName;
-    HgiPipelineType pipelineType;
     HgiBufferBindDescVector buffers;
     HgiTextureBindDescVector textures;
 };
@@ -198,9 +195,7 @@ private:
     HgiResourceBindings(const HgiResourceBindings&) = delete;
 };
 
-/// Explicitly instantiate and define ResourceBindings handle
-template class HgiHandle<class HgiResourceBindings>;
-using HgiResourceBindingsHandle = HgiHandle<class HgiResourceBindings>;
+using HgiResourceBindingsHandle = HgiHandle<HgiResourceBindings>;
 using HgiResourceBindingsHandleVector = std::vector<HgiResourceBindingsHandle>;
 
 

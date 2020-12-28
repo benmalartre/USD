@@ -23,30 +23,25 @@
 //
 
 // Must be included before GL headers.
-#include "pxr/imaging/glf/glew.h"
+#include "pxr/imaging/garch/glApi.h"
 
 #include "pxr/pxr.h"
 #include "pxr/usdImaging/usdAppUtils/frameRecorder.h"
 
 #include "pxr/base/gf/camera.h"
-#include "pxr/base/gf/math.h"
-#include "pxr/base/gf/frustum.h"
-#include "pxr/base/gf/vec2i.h"
-#include "pxr/base/gf/vec3d.h"
-#include "pxr/base/gf/vec4d.h"
-#include "pxr/base/gf/vec4f.h"
-#include "pxr/base/tf/diagnostic.h"
-#include "pxr/imaging/garch/gl.h"
-#include "pxr/imaging/glf/drawTarget.h"
+
 #include "pxr/imaging/glf/simpleLight.h"
 #include "pxr/imaging/glf/simpleMaterial.h"
-#include "pxr/usd/sdf/path.h"
-#include "pxr/usd/usd/prim.h"
+#include "pxr/imaging/hio/image.h"
 #include "pxr/usd/usd/stage.h"
 #include "pxr/usd/usdGeom/bboxCache.h"
-#include "pxr/usd/usdGeom/camera.h"
 #include "pxr/usd/usdGeom/metrics.h"
 #include "pxr/usd/usdGeom/tokens.h"
+
+#include "pxr/imaging/hdx/types.h"
+#include "pxr/imaging/hgi/blitCmds.h"
+#include "pxr/imaging/hgi/blitCmdsOps.h"
+#include "pxr/imaging/hgi/hgi.h"
 
 #include <string>
 
@@ -60,7 +55,7 @@ UsdAppUtilsFrameRecorder::UsdAppUtilsFrameRecorder() :
     _colorCorrectionMode("disabled"),
     _purposes({UsdGeomTokens->default_, UsdGeomTokens->proxy})
 {
-    GlfGlewInit();
+    GarchGLApiLoad();
 }
 
 static bool
@@ -130,6 +125,77 @@ _ComputeCameraToFrameStage(const UsdStagePtr& stage, UsdTimeCode timeCode,
     }
     gfCamera.SetTransform(xf);
     return gfCamera;
+}
+
+static void
+_ReadbackTexture(Hgi* const hgi,
+                 HgiTextureHandle const& textureHandle,
+                 std::vector<uint8_t>& buffer)
+{
+    const HgiTextureDesc& textureDesc = textureHandle.Get()->GetDescriptor();
+    const size_t formatByteSize = HgiGetDataSizeOfFormat(textureDesc.format);
+    const size_t width = textureDesc.dimensions[0];
+    const size_t height = textureDesc.dimensions[1];
+    const size_t dataByteSize = width * height * formatByteSize;
+    
+    // For Metal the CPU buffer has to be rounded up to multiple of 4096 bytes.
+    constexpr size_t bitMask = 4096 - 1;
+    const size_t alignedByteSize = (dataByteSize + bitMask) & (~bitMask);
+    
+    buffer.resize(alignedByteSize);
+
+    HgiBlitCmdsUniquePtr const blitCmds = hgi->CreateBlitCmds();
+    HgiTextureGpuToCpuOp copyOp;
+    copyOp.gpuSourceTexture = textureHandle;
+    copyOp.sourceTexelOffset = GfVec3i(0);
+    copyOp.mipLevel = 0;
+    copyOp.cpuDestinationBuffer = buffer.data();
+    copyOp.destinationByteOffset = 0;
+    copyOp.destinationBufferByteSize = alignedByteSize;
+    blitCmds->CopyTextureGpuToCpu(copyOp);
+    hgi->SubmitCmds(blitCmds.get(), HgiSubmitWaitTypeWaitUntilCompleted);
+}
+
+static bool
+_WriteTextureToFile(HgiTextureDesc const& textureDesc,
+                    std::vector<uint8_t> const& buffer,
+                    std::string const& filename,
+                    const bool flipped)
+{
+    const size_t formatByteSize = HgiGetDataSizeOfFormat(textureDesc.format);
+    const size_t width = textureDesc.dimensions[0];
+    const size_t height = textureDesc.dimensions[1];
+    const size_t dataByteSize = width * height * formatByteSize;
+    
+    if (buffer.size() < dataByteSize) {
+        return false;
+    }
+    
+    if (textureDesc.format < 0 || textureDesc.format >= HgiFormatCount) {
+        return false;
+    }
+    
+    HioImage::StorageSpec storage;
+    storage.width = width;
+    storage.height = height;
+    storage.format = GetHioFormat(textureDesc.format);
+    storage.flipped = flipped;
+    storage.data = (void*)buffer.data();
+
+    {
+        TRACE_FUNCTION_SCOPE("writing image");
+        VtDictionary metadata;
+        
+        HioImageSharedPtr const image = HioImage::OpenForWriting(filename);
+        const bool writeSuccess = image && image->Write(storage, metadata);
+        
+        if (!writeSuccess) {
+            TF_RUNTIME_ERROR("Failed to write image to %s", filename.c_str());
+            return false;
+        }
+    }
+
+    return true;
 }
 
 bool
@@ -213,15 +279,6 @@ UsdAppUtilsFrameRecorder::Record(
     renderParams.showGuides = _HasPurpose(_purposes, UsdGeomTokens->guide);
 
     glEnable(GL_DEPTH_TEST);
-
-    GlfDrawTargetRefPtr drawTarget = GlfDrawTarget::New(renderResolution);
-    drawTarget->Bind();
-
-    drawTarget->AddAttachment("color",
-        GL_RGBA, GL_FLOAT, GL_RGBA);
-    drawTarget->AddAttachment("depth",
-        GL_DEPTH_COMPONENT, GL_FLOAT, GL_DEPTH_COMPONENT32F);
-
     glViewport(0, 0, _imageWidth, imageHeight);
 
     const GLfloat CLEAR_DEPTH[1] = { 1.0f };
@@ -233,8 +290,24 @@ UsdAppUtilsFrameRecorder::Record(
         _imagingEngine.Render(pseudoRoot, renderParams);
     } while (!_imagingEngine.IsConverged());
 
+<<<<<<< HEAD
     drawTarget->Unbind();
     return drawTarget->WriteToFile("color", outputImagePath);
+=======
+    HgiTextureHandle handle = _imagingEngine.GetAovTexture(HdAovTokens->color);
+    if (!handle) {
+        TF_CODING_ERROR("No color presentation texture");
+        return false;
+    }
+    
+    std::vector<uint8_t> buffer;
+    _ReadbackTexture(_imagingEngine.GetHgi(), handle, buffer);
+
+    return _WriteTextureToFile(handle.Get()->GetDescriptor(),
+                               buffer,
+                               outputImagePath,
+                               true);
+>>>>>>> dev
 }
 
 

@@ -39,9 +39,12 @@ class TestUsdShadeMaterialBinding(unittest.TestCase):
         mw2 = UsdShade.Material.Define(s, "/weaker/mat2")
         gpw = s.OverridePrim("/weaker/gprim")
 
-        weakerBindingAPI = UsdShade.MaterialBindingAPI(gpw)
+        weakerBindingAPI = UsdShade.MaterialBindingAPI.Apply(gpw)
         weakerBindingAPI.Bind(mw1)
 
+        self.assertTrue(
+                UsdShade.MaterialBindingAPI.CanContainPropertyName(
+                weakerBindingAPI.GetDirectBindingRel().GetName()))
         self.assertEqual(weakerBindingAPI.GetDirectBindingRel().GetTargets(),
                          [Sdf.Path("/weaker/mat1")])
         self.assertEqual(weakerBindingAPI.GetDirectBinding().GetMaterialPath(),
@@ -53,7 +56,7 @@ class TestUsdShadeMaterialBinding(unittest.TestCase):
         ms2 = UsdShade.Material.Define(s, "/stronger/mat2")
         gps = s.OverridePrim("/stronger/gprim")
 
-        strongerBindingAPI = UsdShade.MaterialBindingAPI(gps)
+        strongerBindingAPI = UsdShade.MaterialBindingAPI.Apply(gps)
         strongerBindingAPI.Bind(ms2)
         self.assertEqual(strongerBindingAPI.GetDirectBindingRel().GetTargets(), 
                          [Sdf.Path("/stronger/mat2")])
@@ -109,9 +112,9 @@ class TestUsdShadeMaterialBinding(unittest.TestCase):
         mat1 = UsdShade.Material.Define(s, "/mat1")
         mat2 = UsdShade.Material.Define(s, "/mat2")
         
-        gpBindingAPI = UsdShade.MaterialBindingAPI(gp)
-        parentBindingAPI = UsdShade.MaterialBindingAPI(parent)
-        childBindingAPI = UsdShade.MaterialBindingAPI(child)
+        gpBindingAPI = UsdShade.MaterialBindingAPI.Apply(gp)
+        parentBindingAPI = UsdShade.MaterialBindingAPI.Apply(parent)
+        childBindingAPI = UsdShade.MaterialBindingAPI.Apply(child)
 
         # First, binding different materials to the three prims
         # gp, parent and child and verify proper inheritance along 
@@ -204,11 +207,11 @@ class TestUsdShadeMaterialBinding(unittest.TestCase):
         fullMat = UsdShade.Material.Define(s, "/full")
         allPurposeMat = UsdShade.Material.Define(s, "/allpurpose")
 
-        self.assertTrue(UsdShade.MaterialBindingAPI(bob).Bind(
+        self.assertTrue(UsdShade.MaterialBindingAPI.Apply(bob).Bind(
             previewMat, materialPurpose=UsdShade.Tokens.preview))
-        self.assertTrue(UsdShade.MaterialBindingAPI(body).Bind(
+        self.assertTrue(UsdShade.MaterialBindingAPI.Apply(body).Bind(
             fullMat, materialPurpose=UsdShade.Tokens.full))
-        self.assertTrue(UsdShade.MaterialBindingAPI(belt).Bind(
+        self.assertTrue(UsdShade.MaterialBindingAPI.Apply(belt).Bind(
             allPurposeMat, materialPurpose=UsdShade.Tokens.allPurpose))
 
         # Compute all-purpose bindings.
@@ -307,7 +310,7 @@ class TestUsdShadeMaterialBinding(unittest.TestCase):
 
         self.assertTrue(lampBasesColl and lampShadesColl and lampsColl)
 
-        tableGrpBindingAPI = UsdShade.MaterialBindingAPI(tableGrp)
+        tableGrpBindingAPI = UsdShade.MaterialBindingAPI.Apply(tableGrp)
 
         # Test basic collection-binding API.
         # Try specigying a bindingName with namespaces.
@@ -381,7 +384,7 @@ class TestUsdShadeMaterialBinding(unittest.TestCase):
                          defaultMat.GetPath())
 
         # Bind collections with overlapping geometry higher up in namespace.
-        roomSetBindingAPI = UsdShade.MaterialBindingAPI(roomSet)
+        roomSetBindingAPI = UsdShade.MaterialBindingAPI.Apply(roomSet)
         self.assertTrue(roomSetBindingAPI.Bind(lampBasesColl, metalMat, 
             bindingName="lampBasesOnly", 
             bindingStrength=UsdShade.Tokens.weakerThanDescendants))
@@ -495,13 +498,13 @@ class TestUsdShadeMaterialBinding(unittest.TestCase):
         yellowMat = UsdShade.Material.Define(s, "/Trees/Materials/yellowMat")
         redMat = UsdShade.Material.Define(s, "/Trees/Materials/RedMat")
 
-        leavesColl = Usd.CollectionAPI.ApplyCollection(geom, 'leaves')
+        leavesColl = Usd.CollectionAPI.Apply(geom, 'leaves')
         leavesColl.IncludePath(leaves.GetPath())
 
-        self.assertTrue(UsdShade.MaterialBindingAPI(leaf1).Bind(leaf1Mat))
-        self.assertTrue(UsdShade.MaterialBindingAPI(leaf2).Bind(leaf2Mat, 
+        self.assertTrue(UsdShade.MaterialBindingAPI.Apply(leaf1).Bind(leaf1Mat))
+        self.assertTrue(UsdShade.MaterialBindingAPI.Apply(leaf2).Bind(leaf2Mat, 
                 materialPurpose=UsdShade.Tokens.preview))
-        self.assertTrue(UsdShade.MaterialBindingAPI(leaf3).Bind(leaf3Mat, 
+        self.assertTrue(UsdShade.MaterialBindingAPI.Apply(leaf3).Bind(leaf3Mat, 
                 materialPurpose=UsdShade.Tokens.full))
 
         self.assertEqual(
@@ -528,7 +531,7 @@ class TestUsdShadeMaterialBinding(unittest.TestCase):
             leaf3Mat.GetPath())
 
         # Add a general purpose collection based binding.
-        self.assertTrue(UsdShade.MaterialBindingAPI(tree).Bind(leavesColl, 
+        self.assertTrue(UsdShade.MaterialBindingAPI.Apply(tree).Bind(leavesColl, 
             fallbackMat))
 
         self.assertEqual(
@@ -559,9 +562,9 @@ class TestUsdShadeMaterialBinding(unittest.TestCase):
             leaf3Mat.GetPath())
 
         # Add special purpose collection-based bindings.
-        self.assertTrue(UsdShade.MaterialBindingAPI(geom).Bind(leavesColl, 
+        self.assertTrue(UsdShade.MaterialBindingAPI.Apply(geom).Bind(leavesColl, 
             yellowMat, materialPurpose=UsdShade.Tokens.preview))
-        self.assertTrue(UsdShade.MaterialBindingAPI(leaves).Bind(leavesColl, 
+        self.assertTrue(UsdShade.MaterialBindingAPI.Apply(leaves).Bind(leavesColl, 
             redMat, materialPurpose=UsdShade.Tokens.full))
 
         self.assertEqual(
@@ -655,7 +658,7 @@ class TestUsdShadeMaterialBinding(unittest.TestCase):
         gprim = stage.DefinePrim("/World/gprim")
 
         UsdShade.MaterialBindingAPI(over).UnbindDirectBinding()
-        self.assertTrue(UsdShade.MaterialBindingAPI(gprim).Bind(look))
+        self.assertTrue(UsdShade.MaterialBindingAPI.Apply(gprim).Bind(look))
         # This will compose in gprim's binding, but should still be blocked
         over.GetInherits().AddInherit("/World/gprim")
         self.assertFalse(self._GetBoundMaterial(over))

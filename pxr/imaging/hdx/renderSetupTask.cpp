@@ -48,12 +48,8 @@ HdStShaderCodeSharedPtr HdxRenderSetupTask::_overrideShader;
 
 HdxRenderSetupTask::HdxRenderSetupTask(HdSceneDelegate* delegate, SdfPath const& id)
     : HdTask(id)
-    , _renderPassState()
-    , _colorRenderPassShader()
-    , _idRenderPassShader()
-    , _viewport()
-    , _cameraId()
-    , _aovBindings()
+    , _overrideWindowPolicy{false, CameraUtilFit}
+    , _viewport(0)
 {
     _colorRenderPassShader.reset(
         new HdStRenderPassShader(HdxPackageRenderPassShader()));
@@ -98,6 +94,7 @@ HdxRenderSetupTask::Prepare(HdTaskContext* ctx,
             _GetRenderPassState(renderIndex);
 
     renderPassState->Prepare(renderIndex->GetResourceRegistry());
+    (*ctx)[HdxTokens->renderPassState] = VtValue(_renderPassState);
 }
 
 void
@@ -171,17 +168,20 @@ HdxRenderSetupTask::SyncParams(HdSceneDelegate* delegate,
             params.blendAlphaSrcFactor, params.blendAlphaDstFactor);
     renderPassState->SetBlendConstantColor(params.blendConstantColor);
     
+    if (HdStRenderPassState * const hdStRenderPassState =
+                dynamic_cast<HdStRenderPassState*>(renderPassState.get())) {
+        hdStRenderPassState->SetResolveAovMultiSample(
+            params.resolveAovMultiSample);
+    }
+
     // alpha to coverage
-    // XXX:  Long-term Alpha to Coverage will be a render style on the
-    // task.  However, as there isn't a fallback we current force it
-    // enabled, unless a client chooses to manage the setting itself (aka usdImaging).
-    renderPassState->SetAlphaToCoverageUseDefault(
-        delegate->IsEnabled(HdxOptionTokens->taskSetAlphaToCoverage));
     renderPassState->SetAlphaToCoverageEnabled(
         params.enableAlphaToCoverage &&
         !TfDebug::IsEnabled(HDX_DISABLE_ALPHA_TO_COVERAGE));
 
     _viewport = params.viewport;
+    _framing = params.framing;
+    _overrideWindowPolicy = params.overrideWindowPolicy;
     _cameraId = params.camera;
     _aovBindings = params.aovBindings;
 
@@ -209,9 +209,13 @@ HdxRenderSetupTask::_PrepareAovBindings(HdTaskContext* ctx,
             _GetRenderPassState(renderIndex);
     renderPassState->SetAovBindings(_aovBindings);
 
-    // XXX Tasks that are not RenderTasks (OIT, ColorCorrection etc) also need
-    // access to AOVs, but cannot access SetupTask or RenderPassState.
-    (*ctx)[HdxTokens->aovBindings] = VtValue(_aovBindings);
+    if (!_aovBindings.empty()) {
+        // XXX Tasks that are not RenderTasks (OIT, ColorCorrection etc) also
+        // need access to AOVs, but cannot access SetupTask or RenderPassState.
+        // One option is to let them know about the aovs directly (as task
+        // parameters), but instead we do so via the task context.
+        (*ctx)[HdxTokens->aovBindings] = VtValue(_aovBindings);
+    }
 }
 
 void
@@ -227,9 +231,16 @@ HdxRenderSetupTask::PrepareCamera(HdRenderIndex* renderIndex)
         renderIndex->GetSprim(HdPrimTypeTokens->camera, _cameraId));
     TF_VERIFY(camera);
 
-    HdRenderPassStateSharedPtr &renderPassState =
+    HdRenderPassStateSharedPtr const &renderPassState =
             _GetRenderPassState(renderIndex);
-    renderPassState->SetCameraAndViewport(camera, _viewport);
+
+    if (_framing.IsValid()) {
+        renderPassState->SetCameraAndFraming(
+            camera, _framing, _overrideWindowPolicy);
+    } else {
+        renderPassState->SetCameraAndViewport(
+            camera, _viewport);
+    }
 }
 
 void
@@ -300,10 +311,13 @@ std::ostream& operator<<(std::ostream& out, const HdxRenderTaskParams& pv)
         << pv.enableAlphaToCoverage << ""
         << pv.cullStyle << " "
         << pv.camera << " "
+        << pv.framing.displayWindow << " "
+        << pv.framing.dataWindow << " "
+        << pv.framing.pixelAspectRatio << " "
         << pv.viewport << " ";
-        for (auto const& a : pv.aovBindings) {
-            out << a << " ";
-        }
+    for (auto const& a : pv.aovBindings) {
+        out << a << " ";
+    }
     return out;
 }
 
@@ -344,6 +358,8 @@ bool operator==(const HdxRenderTaskParams& lhs, const HdxRenderTaskParams& rhs)
            lhs.cullStyle               == rhs.cullStyle               &&
            lhs.aovBindings             == rhs.aovBindings             &&
            lhs.camera                  == rhs.camera                  &&
+           lhs.framing                 == rhs.framing                 &&
+           lhs.overrideWindowPolicy    == rhs.overrideWindowPolicy    &&
            lhs.viewport                == rhs.viewport;
 }
 

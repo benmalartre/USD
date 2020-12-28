@@ -23,13 +23,13 @@
 //
 /// \file simpleShadowArray.cpp
 
-#include "pxr/imaging/glf/glew.h"
+#include "pxr/imaging/garch/glApi.h"
 
 #include "pxr/imaging/glf/simpleShadowArray.h"
 #include "pxr/imaging/glf/debugCodes.h"
 #include "pxr/imaging/glf/diagnostic.h"
 #include "pxr/imaging/glf/glContext.h"
-#include "pxr/imaging/glf/image.h"
+#include "pxr/imaging/hio/image.h"
 
 #include "pxr/base/arch/fileSystem.h"
 #include "pxr/base/gf/vec2i.h"
@@ -44,7 +44,7 @@
 
 PXR_NAMESPACE_OPEN_SCOPE
 
-TF_DEFINE_ENV_SETTING(GLF_ENABLE_BINDLESS_SHADOW_TEXTURES, false,
+TF_DEFINE_ENV_SETTING(GLF_ENABLE_BINDLESS_SHADOW_TEXTURES, true,
                       "Enable use of bindless shadow maps");
 
 GlfSimpleShadowArray::GlfSimpleShadowArray() :
@@ -281,12 +281,11 @@ GlfSimpleShadowArray::EndCapture(size_t index)
     glDisable(GL_DEPTH_CLAMP);
 
     if (TfDebug::IsEnabled(GLF_DEBUG_DUMP_SHADOW_TEXTURES)) {
-        GlfImage::StorageSpec storage;
+        HioImage::StorageSpec storage;
         GfVec2i resolution = GetShadowMapSize(index);
         storage.width = resolution[0];
         storage.height = resolution[1];
-        storage.format = GL_DEPTH_COMPONENT;
-        storage.type = GL_FLOAT;
+        storage.format = HioFormatFloat32;
 
         // In OpenGL, (0, 0) is the lower left corner.
         storage.flipped = true;
@@ -299,8 +298,8 @@ GlfSimpleShadowArray::EndCapture(size_t index)
                      0,
                      storage.width,
                      storage.height,
-                     storage.format,
-                     storage.type,
+                     GL_DEPTH_COMPONENT,
+                     GL_FLOAT,
                      storage.data);
 
         GLfloat minValue = std::numeric_limits<float>::max();
@@ -325,7 +324,7 @@ GlfSimpleShadowArray::EndCapture(size_t index)
             TfStringPrintf("%s/GlfSimpleShadowArray.index_%zu.tif",
                            ArchGetTmpDir(),
                            index));
-        GlfImageSharedPtr image = GlfImage::OpenForWriting(outputImageFile);
+        HioImageSharedPtr image = HioImage::OpenForWriting(outputImageFile);
         if (image->Write(storage)) {
             TfDebug::Helper().Msg(
                 "Wrote shadow texture: %s\n", outputImageFile.c_str());

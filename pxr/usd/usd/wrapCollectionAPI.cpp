@@ -105,6 +105,9 @@ void wrapUsdCollectionAPI()
             (arg("prim"), arg("name")))
         .staticmethod("Get")
 
+        .def("Apply", &This::Apply, (arg("prim"), arg("name")))
+        .staticmethod("Apply")
+
         .def("GetSchemaAttributeNames",
              &This::GetSchemaAttributeNames,
              arg("includeInherited")=true,
@@ -195,11 +198,6 @@ WRAP_CUSTOM {
     scope collectionAPI = _class 
         .def(init<UsdPrim, TfToken>())
 
-        .def("ApplyCollection", &This::ApplyCollection, 
-             (arg("prim"), arg("name"), 
-              arg("expansionRule")=UsdTokens->expandPrims))
-            .staticmethod("ApplyCollection")
-
         .def("GetCollection", 
              (UsdCollectionAPI(*)(const UsdPrim &prim, 
                                   const TfToken &name))
@@ -248,6 +246,10 @@ WRAP_CUSTOM {
               arg("predicate")=UsdPrimDefaultPredicate),
              return_value_policy<TfPySequenceToList>())
              .staticmethod("ComputeIncludedPaths")
+
+        .def("CanContainPropertyName", 
+                This::CanContainPropertyName, arg("name"))
+        .staticmethod("CanContainPropertyName")
 
         .def("ResetCollection", &This::ResetCollection)
         .def("BlockCollection", &This::BlockCollection)

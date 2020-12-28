@@ -28,57 +28,19 @@
 #include "pxr/imaging/hgi/api.h"
 #include "pxr/imaging/hgi/enums.h"
 #include "pxr/imaging/hgi/handle.h"
+#include "pxr/imaging/hgi/shaderFunctionDesc.h"
 #include "pxr/imaging/hgi/types.h"
 
-#include <string>
-#include <vector>
-
-
 PXR_NAMESPACE_OPEN_SCOPE
-
-
-/// \struct HgiShaderFunctionDesc
-///
-/// Describes the properties needed to create a GPU shader function.
-///
-/// <ul>
-/// <li>debugName:
-///   This label can be applied as debug label for gpu debugging.</li>
-/// <li>shaderCode:
-///   The ascii shader code.</li>
-/// <li>shaderStage:
-///   The shader stage this function represents (e.g. vertex or fragment shader).</li>
-/// </ul>
-///
-struct HgiShaderFunctionDesc
-{
-    HGI_API
-    HgiShaderFunctionDesc();
-
-    std::string debugName;
-    HgiShaderStage shaderStage;
-    std::string shaderCode;
-};
-
-HGI_API
-inline bool operator==(
-    const HgiShaderFunctionDesc& lhs,
-    const HgiShaderFunctionDesc& rhs);
-
-HGI_API
-inline bool operator!=(
-    const HgiShaderFunctionDesc& lhs,
-    const HgiShaderFunctionDesc& rhs);
-
 
 ///
 /// \class HgiShaderFunction
 ///
 /// Represents one shader stage function (code snippet).
 ///
-/// ShaderFunctions are usually passed to a ShaderProgram, however be careful 
+/// ShaderFunctions are usually passed to a ShaderProgram, however be careful
 /// not to destroy the ShaderFunction after giving it to the program.
-/// While this may be safe for OpenGL after the program is created, it does not 
+/// While this may be safe for OpenGL after the program is created, it does not
 /// apply to other graphics backends, such as Vulkan, where the shader functions
 /// are used during rendering.
 ///
@@ -99,6 +61,11 @@ public:
     /// Returns shader compile errors.
     HGI_API
     virtual std::string const& GetCompileErrors() = 0;
+
+    /// Returns the byte size of the GPU shader function.
+    /// This can be helpful if the application wishes to tally up memory usage.
+    HGI_API
+    virtual size_t GetByteSizeOfResource() const = 0;
 
     /// This function returns the handle to the Hgi backend's gpu resource, cast
     /// to a uint64_t. Clients should avoid using this function and instead
@@ -126,11 +93,8 @@ private:
     HgiShaderFunction(const HgiShaderFunction&) = delete;
 };
 
-/// Explicitly instantiate and define ShaderFunction handle
-template class HgiHandle<class HgiShaderFunction>;
 using HgiShaderFunctionHandle = HgiHandle<class HgiShaderFunction>;
 using HgiShaderFunctionHandleVector = std::vector<HgiShaderFunctionHandle>;
-
 
 PXR_NAMESPACE_CLOSE_SCOPE
 

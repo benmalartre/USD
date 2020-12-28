@@ -26,6 +26,7 @@
 
 #include "pxr/pxr.h"
 #include "pxr/imaging/hdSt/api.h"
+#include "pxr/imaging/hdSt/resourceRegistry.h"
 #include "pxr/imaging/hd/version.h"
 #include "pxr/imaging/hd/enums.h"
 
@@ -47,8 +48,6 @@ using HdStShaderCodeSharedPtr =
 using HdStShaderCodeSharedPtrVector =
     std::vector<HdStShaderCodeSharedPtr>;
 
-using HdStTextureResourceHandleSharedPtr =
-    std::shared_ptr<class HdStTextureResourceHandle>;
 using HdSt_MaterialParamVector =
     std::vector<class HdSt_MaterialParam>;
 using HdBufferSourceSharedPtr =
@@ -125,42 +124,11 @@ public:
     HDST_API
     virtual TfTokenVector const& GetPrimvarNames() const;
 
-    ///
-    /// \name Old texture system
-    /// @{
-    struct TextureDescriptor {
-        TfToken name;
-        HdStTextureResourceHandleSharedPtr handle;
-        enum { TEXTURE_2D, TEXTURE_FIELD,
-               TEXTURE_UDIM_ARRAY, TEXTURE_UDIM_LAYOUT,
-               TEXTURE_PTEX_TEXEL, TEXTURE_PTEX_LAYOUT };
-        int type;
-        SdfPath textureSourcePath;
-    };
-    typedef std::vector<TextureDescriptor> TextureDescriptorVector;
-
-    // XXX: DOC
-    HDST_API
-    virtual TextureDescriptorVector GetTextures() const;
-
     /// @}
 
     ///
-    /// \name New texture system
+    /// \name Texture system
     /// @{
-
-    /// The old texture system relied on the scene delegate to load
-    /// textures. This system will soon be deprecated (including
-    /// HdTextureResource and HdSceneDelegate::GetTextureResource) in
-    /// favor of a new system where the render delegate is loading
-    /// textures (by allocating HdStTextureHandle).
-
-    /// During the transition period, both, HdTextureResource and
-    /// HdStTextureHandle can be used at the same time by populating
-    /// both GetTextures() and GetNamedTextureHandles() - in
-    /// particular, we can use the new texture system for texture
-    /// types that it already supports and keep using the old
-    /// texture system for the unsupported texture types.
 
     /// Information necessary to bind textures and create accessor
     /// for the texture.
@@ -179,9 +147,9 @@ public:
         /// The texture.
         HdStTextureHandleSharedPtr handle;
 
-        /// The path of the corresponding texture prim - used to
-        /// compute the hash for draw batches when not using bindless textures.
-        SdfPath textureSourcePath;
+        /// A hash unique to the corresponding asset; used to
+        /// split draw batches when not using bindless textures.
+        size_t hash;
     };
     using NamedTextureHandleVector = std::vector<NamedTextureHandle>;
 
@@ -237,7 +205,8 @@ public:
 
         HDST_API
         void AddComputation(HdBufferArrayRangeSharedPtr const &range,
-                            HdComputationSharedPtr const &computation);
+                            HdComputationSharedPtr const &computation,
+                            HdStComputeQueue const queue);
 
     private:
         friend class HdStResourceRegistry;

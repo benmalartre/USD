@@ -62,7 +62,12 @@ UsdModelAPI::Get(const UsdStagePtr &stage, const SdfPath &path)
 
 
 /* virtual */
-UsdSchemaType UsdModelAPI::_GetSchemaType() const {
+UsdSchemaKind UsdModelAPI::_GetSchemaKind() const {
+    return UsdModelAPI::schemaKind;
+}
+
+/* virtual */
+UsdSchemaKind UsdModelAPI::_GetSchemaType() const {
     return UsdModelAPI::schemaType;
 }
 
@@ -144,7 +149,7 @@ UsdModelAPI::GetKind(TfToken* retValue) const
     return GetPrim().GetMetadata(SdfFieldKeys->Kind, retValue);
 }
 bool
-UsdModelAPI::SetKind(const TfToken& value)
+UsdModelAPI::SetKind(const TfToken& value) const
 {
     if (GetPath() == SdfPath::AbsoluteRootPath()) {
         // Special-case to pre-empt coding errors.

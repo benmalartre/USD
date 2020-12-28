@@ -33,6 +33,7 @@ import datetime
 import distutils
 import fnmatch
 import glob
+import locale
 import multiprocessing
 import os
 import platform
@@ -90,12 +91,15 @@ def MacOS():
 def Python3():
     return sys.version_info.major == 3
 
+def GetLocale():
+    return sys.stdout.encoding or locale.getdefaultlocale()[1] or "UTF-8"
+
 def GetCommandOutput(command):
     """Executes the specified command and returns output or None."""
     try:
         return subprocess.check_output(
             shlex.split(command), 
-            stderr=subprocess.STDOUT).decode('utf-8').strip()
+            stderr=subprocess.STDOUT).decode(GetLocale(), 'replace').strip()
     except subprocess.CalledProcessError:
         pass
     return None
@@ -252,9 +256,8 @@ def Run(cmd, logCommandOutput = True):
         if logCommandOutput:
             p = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE, 
                                  stderr=subprocess.STDOUT)
-            encoding = sys.stdout.encoding or "UTF-8"
             while True:
-                l = p.stdout.readline().decode(encoding)
+                l = p.stdout.readline().decode(GetLocale(), 'replace')
                 if l:
                     logfile.write(l)
                     PrintCommandOutput(l)
@@ -347,7 +350,11 @@ def RunCMake(context, force, extraArgs = None):
 
     if IsVisualStudio2019OrGreater():
         generator = generator + " -A x64"
-                
+
+    toolset = context.cmakeToolset
+    if toolset is not None:
+        toolset = '-T "{toolset}"'.format(toolset=toolset)
+
     # On MacOS, enable the use of @rpath for relocatable builds.
     osx_rpath = None
     if MacOS():
@@ -366,6 +373,7 @@ def RunCMake(context, force, extraArgs = None):
             '-DCMAKE_BUILD_TYPE={config} '
             '{osx_rpath} '
             '{generator} '
+            '{toolset} '
             '{extraArgs} '
             '"{srcDir}"'
             .format(instDir=instDir,
@@ -374,6 +382,7 @@ def RunCMake(context, force, extraArgs = None):
                     srcDir=srcDir,
                     osx_rpath=(osx_rpath or ""),
                     generator=(generator or ""),
+                    toolset=(toolset or ""),
                     extraArgs=(" ".join(extraArgs) if extraArgs else "")))
         Run("cmake --build . --config {config} --target install -- {multiproc}"
             .format(config=config,
@@ -614,7 +623,10 @@ ZLIB = Dependency("zlib", InstallZlib, "include/zlib.h")
 ############################################################
 # boost
 
-if Linux() or MacOS():
+if MacOS():
+    BOOST_URL = "https://downloads.sourceforge.net/project/boost/boost/1.70.0/boost_1_70_0.tar.gz"
+    BOOST_VERSION_FILE = "include/boost/version.hpp"
+elif Linux():
     if Python3():
         BOOST_URL = "https://downloads.sourceforge.net/project/boost/boost/1.70.0/boost_1_70_0.tar.gz"
     else:
@@ -723,7 +735,13 @@ def InstallBoost_Helper(context, force, buildArgs):
         if Windows():
             # toolset parameter for Visual Studio documented here:
             # https://github.com/boostorg/build/blob/develop/src/tools/msvc.jam
-            if IsVisualStudio2019OrGreater():
+            if context.cmakeToolset == "v142":
+                b2_settings.append("toolset=msvc-14.2")
+            elif context.cmakeToolset == "v141":
+                b2_settings.append("toolset=msvc-14.1")
+            elif context.cmakeToolset == "v140":
+                b2_settings.append("toolset=msvc-14.0")
+            elif IsVisualStudio2019OrGreater():
                 b2_settings.append("toolset=msvc-14.2")
             elif IsVisualStudio2017OrGreater():
                 b2_settings.append("toolset=msvc-14.1")
@@ -752,7 +770,7 @@ def InstallBoost(context, force, buildArgs):
     except:
         versionHeader = os.path.join(context.instDir, BOOST_VERSION_FILE)
         if os.path.isfile(versionHeader):
-            try: os.path.remove(versionHeader)
+            try: os.remove(versionHeader)
             except: pass
         raise
 
@@ -860,7 +878,17 @@ def InstallTIFF(context, force, buildArgs):
         PatchFile("CMakeLists.txt", 
                    [("add_subdirectory(tools)", "# add_subdirectory(tools)"),
                     ("add_subdirectory(test)", "# add_subdirectory(test)")])
-        RunCMake(context, force, buildArgs)
+
+        # The libTIFF CMakeScript says the ld-version-script 
+        # functionality is only for compilers using GNU ld on 
+        # ELF systems or systems which provide an emulation; therefore
+        # skipping it completely on mac and windows.
+        if MacOS() or Windows():
+            extraArgs = ["-Dld-version-script=OFF"]
+        else:
+            extraArgs = []
+        extraArgs += buildArgs
+        RunCMake(context, force, extraArgs)
 
 TIFF = Dependency("TIFF", InstallTIFF, "include/tiff.h")
 
@@ -924,42 +952,6 @@ def InstallOpenEXR(context, force, buildArgs):
 OPENEXR = Dependency("OpenEXR", InstallOpenEXR, "include/OpenEXR/ImfVersion.h")
 
 ############################################################
-# GLEW
-
-if Windows():
-    GLEW_URL = "https://downloads.sourceforge.net/project/glew/glew/2.0.0/glew-2.0.0-win32.zip"
-else:
-    # Important to get source package from this URL and NOT github. This package
-    # contains pre-generated code that the github repo does not.
-    GLEW_URL = "https://downloads.sourceforge.net/project/glew/glew/2.0.0/glew-2.0.0.tgz"
-
-def InstallGLEW(context, force, buildArgs):
-    if Windows():
-        InstallGLEW_Windows(context, force)
-    elif Linux() or MacOS():
-        InstallGLEW_LinuxOrMacOS(context, force, buildArgs)
-
-def InstallGLEW_Windows(context, force):
-    with CurrentWorkingDirectory(DownloadURL(GLEW_URL, context, force)):
-        # On Windows, we install headers and pre-built binaries per
-        # https://glew.sourceforge.net/install.html
-        # Note that we are installing just the shared library. This is required
-        # by the USD build; if the static library is present, that one will be
-        # used and that causes errors with USD and OpenSubdiv.
-        CopyFiles(context, "bin\\Release\\x64\\glew32.dll", "bin")
-        CopyFiles(context, "lib\\Release\\x64\\glew32.lib", "lib")
-        CopyDirectory(context, "include\\GL", "include\\GL")
-
-def InstallGLEW_LinuxOrMacOS(context, force, buildArgs):
-    with CurrentWorkingDirectory(DownloadURL(GLEW_URL, context, force)):
-        Run('make GLEW_DEST="{instDir}" -j{procs} {buildArgs} install'
-            .format(instDir=context.instDir,
-                    procs=context.numJobs,
-                    buildArgs=" ".join(buildArgs)))
-
-GLEW = Dependency("GLEW", InstallGLEW, "include/GL/glew.h")
-
-############################################################
 # Ptex
 
 PTEX_URL = "https://github.com/wdas/ptex/archive/v2.1.28.zip"
@@ -987,6 +979,14 @@ def InstallPtex_Windows(context, force, buildArgs):
         PatchFile('src\\tests\\CMakeLists.txt',
                   [("add_definitions(-DPTEX_STATIC)", 
                     "# add_definitions(-DPTEX_STATIC)")])
+
+        # Patch Ptex::String to export symbol for operator<< 
+        # This is required for newer versions of OIIO, which make use of the
+        # this operator on Windows platform specifically.
+        PatchFile('src\\ptex\\Ptexture.h',
+                  [("std::ostream& operator << (std::ostream& stream, const Ptex::String& str);",
+                    "PTEXAPI std::ostream& operator << (std::ostream& stream, const Ptex::String& str);")])
+
 
         RunCMake(context, force, buildArgs)
 
@@ -1040,7 +1040,10 @@ def InstallOpenVDB(context, force, buildArgs):
         # OpenVDB needs Half type from IlmBase
         extraArgs.append('-DILMBASE_ROOT="{instDir}"'
                          .format(instDir=context.instDir))
-        
+
+        # Add on any user-specified extra arguments.
+        extraArgs += buildArgs
+
         RunCMake(context, force, extraArgs)
 
 OPENVDB = Dependency("OpenVDB", InstallOpenVDB, "include/openvdb/openvdb.h")
@@ -1048,7 +1051,7 @@ OPENVDB = Dependency("OpenVDB", InstallOpenVDB, "include/openvdb/openvdb.h")
 ############################################################
 # OpenImageIO
 
-OIIO_URL = "https://github.com/OpenImageIO/oiio/archive/Release-1.8.9.zip"
+OIIO_URL = "https://github.com/OpenImageIO/oiio/archive/Release-2.1.16.0.zip"
 
 def InstallOpenImageIO(context, force, buildArgs):
     with CurrentWorkingDirectory(DownloadURL(OIIO_URL, context, force)):
@@ -1284,16 +1287,24 @@ def InstallDraco(context, force, buildArgs):
         cmakeOptions += buildArgs
         RunCMake(context, force, cmakeOptions)
 
-DRACO = Dependency("Draco", InstallDraco, "include/Draco/src/draco/compression/decode.h")
+DRACO = Dependency("Draco", InstallDraco, "include/draco/compression/decode.h")
 
 ############################################################
 # MaterialX
 
-MATERIALX_URL = "https://github.com/materialx/MaterialX/archive/v1.36.0.zip"
+MATERIALX_URL = "https://github.com/materialx/MaterialX/archive/v1.37.3.zip"
 
 def InstallMaterialX(context, force, buildArgs):
     with CurrentWorkingDirectory(DownloadURL(MATERIALX_URL, context, force)):
-        RunCMake(context, force, buildArgs)
+        # USD requires MaterialX to be built as a shared library on Linux
+        # Currently MaterialX does not support shared builds on Windows or MacOS
+        cmakeOptions = []
+        if Linux():
+            cmakeOptions += ['-DMATERIALX_BUILD_SHARED_LIBS=ON']
+
+        cmakeOptions += buildArgs;
+
+        RunCMake(context, force, cmakeOptions)
 
 MATERIALX = Dependency("MaterialX", InstallMaterialX, "include/MaterialXCore/Library.h")
 
@@ -1333,6 +1344,9 @@ EMBREE = Dependency("Embree", InstallEmbree, "include/embree3/rtcore.h")
 def InstallUSD(context, force, buildArgs):
     with CurrentWorkingDirectory(context.usdSrcDir):
         extraArgs = []
+
+        extraArgs.append('-DPXR_PREFER_SAFETY_OVER_SPEED=' + 
+                         'ON' if context.safetyFirst else 'OFF')
 
         if context.buildPython:
             extraArgs.append('-DPXR_ENABLE_PYTHON_SUPPORT=ON')
@@ -1573,6 +1587,9 @@ group.add_argument("--force-all", action="store_true",
 group.add_argument("--generator", type=str,
                    help=("CMake generator to use when building libraries with "
                          "cmake"))
+group.add_argument("--toolset", type=str,
+                   help=("CMake toolset to use when building libraries with "
+                         "cmake"))
 
 group = parser.add_argument_group(title="3rd Party Dependency Build Options")
 group.add_argument("--src", type=str,
@@ -1628,6 +1645,16 @@ subgroup.add_argument("--python", dest="build_python", action="store_true",
                                          "(default)")
 subgroup.add_argument("--no-python", dest="build_python", action="store_false",
                       help="Do not build python based components")
+subgroup = group.add_mutually_exclusive_group()
+subgroup.add_argument("--prefer-safety-over-speed", dest="safety_first",
+                      action="store_true", default=True, help=
+                      "Enable extra safety checks (which may negatively "
+                      "impact performance) against malformed input files "
+                      "(default)")
+subgroup.add_argument("--prefer-speed-over-safety", dest="safety_first",
+                      action="store_false", help=
+                      "Disable performance-impacting safety checks against "
+                      "malformed input files")
 
 (NO_IMAGING, IMAGING, USD_IMAGING) = (0, 1, 2)
 
@@ -1761,8 +1788,9 @@ class InstallContext:
             self.downloader = DownloadFileWithUrllib
             self.downloaderName = "built-in"
 
-        # CMake generator
+        # CMake generator and toolset
         self.cmakeGenerator = args.generator
+        self.cmakeToolset = args.toolset
 
         # Number of jobs
         self.numJobs = args.jobs
@@ -1786,6 +1814,9 @@ class InstallContext:
         self.buildDebug = args.build_debug;
         self.buildShared = (args.build_type == SHARED_LIBS)
         self.buildMonolithic = (args.build_type == MONOLITHIC_LIB)
+
+        # Build options
+        self.safetyFirst = args.safety_first
 
         # Dependencies that are forced to be built
         self.forceBuildAll = args.force_all
@@ -1886,7 +1917,7 @@ if context.buildImaging:
     if context.enablePtex:
         requiredDependencies += [PTEX]
 
-    requiredDependencies += [GLEW, OPENSUBDIV]
+    requiredDependencies += [OPENSUBDIV]
 
     if context.enableOpenVDB:
         requiredDependencies += [BLOSC, BOOST, OPENEXR, OPENVDB, TBB]
@@ -2049,6 +2080,7 @@ Building with settings:
   3rd-party install directory   {instDir}
   Build directory               {buildDir}
   CMake generator               {cmakeGenerator}
+  CMake toolset                 {cmakeToolset}
   Downloader                    {downloader}
 
   Building                      {buildType}
@@ -2097,6 +2129,8 @@ summaryMsg = summaryMsg.format(
     instDir=context.instDir,
     cmakeGenerator=("Default" if not context.cmakeGenerator
                     else context.cmakeGenerator),
+    cmakeToolset=("Default" if not context.cmakeToolset
+                  else context.cmakeToolset),
     downloader=(context.downloaderName),
     dependencies=("None" if not dependenciesToBuild else 
                   ", ".join([d.name for d in dependenciesToBuild])),

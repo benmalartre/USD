@@ -105,6 +105,11 @@ public:
     HGI_API
     HgiBufferDesc const& GetDescriptor() const;
 
+    /// Returns the byte size of the GPU buffer.
+    /// This can be helpful if the application wishes to tally up memory usage.
+    HGI_API
+    virtual size_t GetByteSizeOfResource() const = 0;
+
     /// This function returns the handle to the Hgi backend's gpu resource, cast
     /// to a uint64_t. Clients should avoid using this function and instead
     /// use Hgi base classes so that client code works with any Hgi platform.
@@ -119,6 +124,18 @@ public:
     HGI_API
     virtual uint64_t GetRawResource() const = 0;
 
+    /// Returns the 'staging area' in which new buffer data is copied before
+    /// it is flushed to GPU.
+    /// Some implementations (e.g. Metal) may have build in support for
+    /// queueing up CPU->GPU copies. Those implementations can return the
+    /// CPU pointer to the buffer's content directly.
+    /// The caller should not assume that the data from the CPU staging area
+    /// is automatically flushed to the GPU. Instead, after copying is finished,
+    /// the caller should use BlitCmds CopyBufferCpuToGpu to ensure the transfer
+    /// from the staging area to the GPU is scheduled.
+    HGI_API
+    virtual void* GetCPUStagingAddress() = 0;
+
 protected:
     HGI_API
     HgiBuffer(HgiBufferDesc const& desc);
@@ -131,9 +148,7 @@ private:
     HgiBuffer(const HgiBuffer&) = delete;
 };
 
-/// Explicitly instantiate and define buffer handle
-template class HgiHandle<class HgiBuffer>;
-using HgiBufferHandle = HgiHandle<class HgiBuffer>;
+using HgiBufferHandle = HgiHandle<HgiBuffer>;
 using HgiBufferHandleVector = std::vector<HgiBufferHandle>;
 
 

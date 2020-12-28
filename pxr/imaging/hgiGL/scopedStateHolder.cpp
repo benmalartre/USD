@@ -21,11 +21,14 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-#include "pxr/base/tf/diagnostic.h"
+#include "pxr/imaging/garch/glApi.h"
 
 #include "pxr/imaging/hgiGL/scopedStateHolder.h"
 #include "pxr/imaging/hgiGL/conversions.h"
 #include "pxr/imaging/hgiGL/diagnostic.h"
+
+#include "pxr/base/tf/diagnostic.h"
+#include "pxr/base/tf/iterator.h"
 
 PXR_NAMESPACE_OPEN_SCOPE
 
@@ -43,13 +46,16 @@ HgiGL_ScopedStateHolder::HgiGL_ScopedStateHolder()
     , _restoreColorOp(0)
     , _restoreAlphaOp(0)
     , _restoreAlphaToCoverage(false)
+    , _restoreSampleAlphaToOne(false)
     , _lineWidth(1.0f)
     , _cullFace(true)
     , _cullMode(GL_BACK)
+    , _frontFace(GL_CCW)
     , _rasterizerDiscard(true)
+    , _restoreFramebufferSRGB(false)
 {
     #if defined(GL_KHR_debug)
-    if (GLEW_KHR_debug) {
+    if (GARCH_GLAPI_HAS(KHR_debug)) {
         glPushDebugGroup(GL_DEBUG_SOURCE_THIRD_PARTY, 0, -1, "Capture state");
     }
     #endif
@@ -73,14 +79,19 @@ HgiGL_ScopedStateHolder::HgiGL_ScopedStateHolder()
     glGetBooleanv(
         GL_SAMPLE_ALPHA_TO_COVERAGE, 
         (GLboolean*)&_restoreAlphaToCoverage);
+    glGetBooleanv(
+        GL_SAMPLE_ALPHA_TO_ONE,
+        (GLboolean*)&_restoreSampleAlphaToOne);
     glGetFloatv(GL_LINE_WIDTH, &_lineWidth);
     glGetBooleanv(GL_CULL_FACE, (GLboolean*)&_cullFace);
     glGetIntegerv(GL_CULL_FACE_MODE, &_cullMode);
+    glGetIntegerv(GL_FRONT_FACE, &_frontFace);
     glGetBooleanv(GL_RASTERIZER_DISCARD, (GLboolean*)&_rasterizerDiscard);
+    glGetBooleanv(GL_FRAMEBUFFER_SRGB, (GLboolean*)&_restoreFramebufferSRGB);
 
     HGIGL_POST_PENDING_GL_ERRORS();
     #if defined(GL_KHR_debug)
-    if (GLEW_KHR_debug) {
+    if (GARCH_GLAPI_HAS(KHR_debug)) {
         glPopDebugGroup();
     }
     #endif
@@ -89,7 +100,7 @@ HgiGL_ScopedStateHolder::HgiGL_ScopedStateHolder()
 HgiGL_ScopedStateHolder::~HgiGL_ScopedStateHolder()
 {
     #if defined(GL_KHR_debug)
-    if (GLEW_KHR_debug) {
+    if (GARCH_GLAPI_HAS(KHR_debug)) {
         glPushDebugGroup(GL_DEBUG_SOURCE_THIRD_PARTY, 0, -1, "Restore state");
     }
     #endif
@@ -98,6 +109,12 @@ HgiGL_ScopedStateHolder::~HgiGL_ScopedStateHolder()
         glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
     } else {
         glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+    }
+
+    if (_restoreSampleAlphaToOne) {
+        glEnable(GL_SAMPLE_ALPHA_TO_ONE);
+    } else {
+        glDisable(GL_SAMPLE_ALPHA_TO_ONE);
     }
 
     glBlendFuncSeparate(_restoreColorSrcFnOp, _restoreColorDstFnOp, 
@@ -131,6 +148,7 @@ HgiGL_ScopedStateHolder::~HgiGL_ScopedStateHolder()
         glDisable(GL_CULL_FACE);
     }
     glCullFace(_cullMode);
+    glFrontFace(_frontFace);
 
     if (_rasterizerDiscard) {
         glEnable(GL_RASTERIZER_DISCARD);
@@ -138,9 +156,18 @@ HgiGL_ScopedStateHolder::~HgiGL_ScopedStateHolder()
         glDisable(GL_RASTERIZER_DISCARD);
     }
 
+    if (_restoreFramebufferSRGB) {
+       glEnable(GL_FRAMEBUFFER_SRGB);
+    } else {
+       glDisable(GL_FRAMEBUFFER_SRGB);
+    }
+
+    static const GLuint samplers[8] = {0};
+    glBindSamplers(0, TfArraySize(samplers), samplers);
+
     HGIGL_POST_PENDING_GL_ERRORS();
     #if defined(GL_KHR_debug)
-    if (GLEW_KHR_debug) {
+    if (GARCH_GLAPI_HAS(KHR_debug)) {
         glPopDebugGroup();
     }
     #endif

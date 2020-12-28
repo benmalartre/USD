@@ -23,8 +23,9 @@
 #
 from pxr import Tf
 
-from qt import QtCore, QtGui, QtWidgets
-from usdviewApi import UsdviewApi
+from .common import DefaultFontFamily
+from .qt import QtCore, QtGui, QtWidgets
+from .usdviewApi import UsdviewApi
 
 from code import InteractiveInterpreter
 import os, sys, keyword
@@ -658,7 +659,7 @@ class View(QtWidgets.QTextEdit):
 
     def ResetCharFormat(self):
         charFormat = QtGui.QTextCharFormat()
-        charFormat.setFontFamily('monospace')
+        charFormat.setFontFamily(DefaultFontFamily.MONOSPACE_FONT_FAMILY)
         self.setCurrentCharFormat(charFormat)
 
     def _PositionInInputArea(self, position):

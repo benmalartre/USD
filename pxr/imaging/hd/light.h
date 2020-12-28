@@ -48,7 +48,7 @@ PXR_NAMESPACE_OPEN_SCOPE
     (radius)                                                \
     (length)                                                \
     ((textureFile, "texture:file"))                         \
-    (textureResource)                                       \
+    ((textureFormat, "texture:format"))                     \
     (width)                                                 \
     (diffuse)                                               \
     (specular)                                              \
@@ -68,8 +68,7 @@ PXR_NAMESPACE_OPEN_SCOPE
                                                             \
     (params)                                                \
     (shadowCollection)                                      \
-    (shadowParams)                                          \
-    (transform)
+    (shadowParams)
 
 TF_DECLARE_PUBLIC_TOKENS(HdLightTokens, HD_API, HD_LIGHT_TOKENS);
 

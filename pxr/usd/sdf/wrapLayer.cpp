@@ -258,6 +258,9 @@ _ExtractFileFormatArguments(
 static std::string
 _Repr(const SdfLayerHandle &self)
 {
+    if (!self) {
+        return "<expired " + TF_PY_REPR_PREFIX + "Layer instance>";
+    }
     return TF_PY_REPR_PREFIX + "Find(" + TfPyRepr(self->GetIdentifier()) + ")";
 }
 
@@ -375,7 +378,6 @@ _CanApplyNamespaceEdit(
 static SdfLayerRefPtr
 _CreateNew(
     const std::string& identifier,
-    const std::string& realPath = std::string(),
     const boost::python::dict& dict = boost::python::dict())
 {
     SdfLayer::FileFormatArguments args;
@@ -383,14 +385,13 @@ _CreateNew(
         return SdfLayerRefPtr();
     }
 
-    return SdfLayer::CreateNew(identifier, realPath, args);
+    return SdfLayer::CreateNew(identifier, args);
 }
 
 static SdfLayerRefPtr
 _New(
     const SdfFileFormatConstPtr& fileFormat,
     const std::string& identifier,
-    const std::string& realPath = std::string(),
     const boost::python::dict& dict = boost::python::dict())
 {
     SdfLayer::FileFormatArguments args;
@@ -398,7 +399,7 @@ _New(
         return SdfLayerRefPtr();
     }
 
-    return SdfLayer::New(fileFormat, identifier, realPath, args);
+    return SdfLayer::New(fileFormat, identifier, args);
 }
 
 static SdfLayerRefPtr
@@ -457,7 +458,7 @@ _Find(
 static SdfLayerHandle
 _FindRelativeToLayer(
     const SdfLayerHandle& anchor,
-    const std::string& assetPath,
+    const std::string& identifier,
     const boost::python::dict& dict)
 {
     SdfLayer::FileFormatArguments args;
@@ -465,13 +466,13 @@ _FindRelativeToLayer(
         return SdfLayerHandle();
     }
 
-    return SdfLayer::FindRelativeToLayer(anchor, assetPath, args);
+    return SdfLayer::FindRelativeToLayer(anchor, identifier, args);
 }
 
 static SdfLayerRefPtr
 _FindOrOpenRelativeToLayer(
     const SdfLayerHandle& anchor,
-    const std::string& layerPath,
+    const std::string& identifier,
     const boost::python::dict& dict)
 {
     SdfLayer::FileFormatArguments args;
@@ -479,11 +480,16 @@ _FindOrOpenRelativeToLayer(
         return SdfLayerHandle();
     }
 
-    std::string mutableLayerPath(layerPath);
-    return SdfFindOrOpenRelativeToLayer(anchor, &mutableLayerPath, args);
+    return SdfLayer::FindOrOpenRelativeToLayer(anchor, identifier, args);
 }
 
 using Py_SdfLayerTraversalFunctionSig = void(const SdfPath&);
+
+// Just for testing purposes.
+static void _TestTakeOwnership(SdfLayerRefPtr layerRef)
+{
+    // do nothing
+}
 
 } // anonymous namespace 
 
@@ -494,15 +500,11 @@ void wrapLayer()
 
     TfPyFunctionFromPython<::Py_SdfLayerTraversalFunctionSig>();
 
-    def("FindOrOpenRelativeToLayer", &_FindOrOpenRelativeToLayer,
-         ( arg("anchor"),
-           arg("layerPath"),
-           arg("args") = boost::python::dict()),
-         return_value_policy<TfPyRefPtrFactory<ThisHandle> >());
-
     def("ComputeAssetPathRelativeToLayer", &SdfComputeAssetPathRelativeToLayer,
         ( arg("anchor"),
           arg("assetPath")));
+
+    def("_TestTakeOwnership", &_TestTakeOwnership);
 
     scope s = class_<This,
                      ThisHandle,
@@ -519,7 +521,6 @@ void wrapLayer()
 
         .def("CreateNew", &_CreateNew,
              ( arg("identifier"),
-               arg("realPath") = std::string(),
                arg("args") = boost::python::dict()),
              return_value_policy<TfPyRefPtrFactory<ThisHandle> >())
         .staticmethod("CreateNew")
@@ -545,7 +546,6 @@ void wrapLayer()
         .def("New", &_New,
              ( arg("fileFormat"),
                arg("identifier"),
-               arg("realPath") = std::string(),
                arg("args") = boost::python::dict()),
              return_value_policy<TfPyRefPtrFactory<ThisHandle> >())
         .staticmethod("New")
@@ -555,6 +555,13 @@ void wrapLayer()
                arg("args") = boost::python::dict()),
              return_value_policy<TfPyRefPtrFactory<ThisHandle> >())
         .staticmethod("FindOrOpen")
+
+        .def("FindOrOpenRelativeToLayer", &_FindOrOpenRelativeToLayer,
+             ( arg("anchor"),
+               arg("identifier"),
+               arg("args") = boost::python::dict()),
+             return_value_policy<TfPyRefPtrFactory<ThisHandle> >())
+        .staticmethod("FindOrOpenRelativeToLayer")
 
         .def("OpenAsAnonymous", This::OpenAsAnonymous,
              ( arg("filePath") = std::string(),
@@ -615,11 +622,15 @@ void wrapLayer()
             &This::SetIdentifier,
             "The layer's identifier.")
 
+        .add_property("resolvedPath",
+            make_function(&This::GetResolvedPath,
+                return_value_policy<return_by_value>()),
+            "The layer's resolved path.")
+
         .add_property("realPath",
             make_function(&This::GetRealPath,
                 return_value_policy<return_by_value>()),
-            "The layer's canonical full path. This path is guaranteed to\n"
-            "be valid.")
+            "The layer's resolved path.")
 
         .add_property("fileExtension", &This::GetFileExtension,
             "The layer's file extension.")
@@ -642,8 +653,12 @@ void wrapLayer()
 
         .def("GetDisplayName", &This::GetDisplayName)
 
+#if AR_VERSION == 1
         .def("UpdateAssetInfo", &This::UpdateAssetInfo,
              ( arg("fileVersion") = std::string() ))
+#else
+        .def("UpdateAssetInfo", &This::UpdateAssetInfo)
+#endif
 
         .def("ComputeAbsolutePath", &This::ComputeAbsolutePath)
 
@@ -869,6 +884,10 @@ void wrapLayer()
                           return_value_policy<TfPySequenceToList>()),
             "Return unique list of asset paths of external references for\n"
             "given layer.")
+
+        .def("GetExternalAssetDependencies",
+             make_function(&This::GetExternalAssetDependencies,
+                           return_value_policy<TfPySequenceToList>()))
 
         .add_property("permissionToSave", &This::PermissionToSave, 
               "Return true if permitted to be saved, false otherwise.\n")

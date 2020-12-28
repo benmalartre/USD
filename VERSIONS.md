@@ -20,8 +20,7 @@ Our test machines have the following software versions installed
 | Boost         | 1.61.0, 1.70.0       | 1.61.0, 1.70.0               | 1.61.0, 1.70.0                 |
 | Intel TBB     | 2017 Update 6        | 2017 Update 6                | 2017 Update 6                  |
 | OpenSubdiv    | 3.4.3                | 3.4.3                        | 3.4.3                          |
-| GLEW          | 2.0.0                | 2.0.0                        | 2.0.0                          |
-| OpenImageIO   | 1.8.9                | 1.8.9                        | 1.8.9                          |
+| OpenImageIO   | 2.1.16.0             | 2.1.16.0                     | 2.1.16.0                       |
 | OpenColorIO   | 1.0.9                | 1.1.0                        | 1.1.0                          |
 | OSL           | 1.8.12               |                              |                                |
 | Ptex          | 2.1.28               | 2.1.28                       | 2.1.28                         |
@@ -31,13 +30,14 @@ Our test machines have the following software versions installed
 | RenderMan     | 23.0                 | 23.0                         | 23.0                           |
 | Alembic       | 1.7.10               | 1.7.10                       | 1.7.10                         |
 | OpenEXR       | 2.2.0                | 2.2.0                        | 2.2.0                          |
-| MaterialX     | 1.36.0               | 1.36.0                       | 1.36.0                         |
+| MaterialX     | 1.37.1               | 1.37.1                       | 1.37.1                         |
 | Jinja2        | 2.0                  |                              |                                |
 | Flex          | 2.5.39               |                              |                                |
 | Bison         | 2.4.1                |                              |                                |
 | Doxygen       | 1.8.14               |                              |                                |
 | GraphViz      | 2.40.1               |                              |                                |
 | OpenVDB       | 5.2.0, 6.1.0         | 6.1.0                        | 6.1.0                          |
+| Vulkan SDK    | 1.2.135.0            | 1.2.135.0                    | 1.2.135.0                      |
 
 ## Other Known Versions
 

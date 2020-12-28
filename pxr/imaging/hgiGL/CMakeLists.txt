@@ -10,31 +10,30 @@ endif()
 pxr_library(hgiGL
     LIBRARIES
         arch
+        garch
         hgi
         tf
         trace
-        ${GLEW_LIBRARY}
-        ${OPENGL_gl_LIBRARY}
-        ${OPENGL_glu_LIBRARY}
-
-    INCLUDE_DIRS
-        ${GLEW_INCLUDE_DIR}
-        ${OPENGL_INCLUDE_DIR}
 
     PRIVATE_CLASSES
         conversions
         diagnostic
         scopedStateHolder
+        shaderGenerator
+        shaderSection
 
     PUBLIC_CLASSES
         blitCmds
         buffer
+        computeCmds
+        computePipeline
         device
         framebufferCache
+        garbageCollector
         graphicsCmds
+        graphicsPipeline
         hgi
         ops
-        pipeline
         resourceBindings
         sampler
         shaderFunction

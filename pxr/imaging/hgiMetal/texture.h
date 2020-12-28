@@ -42,11 +42,10 @@ class HgiMetal;
 class HgiMetalTexture final : public HgiTexture {
 public:
     HGIMETAL_API
-    HgiMetalTexture(HgiMetal *hgi,
-                    HgiTextureDesc const & desc);
+    ~HgiMetalTexture() override;
 
     HGIMETAL_API
-    ~HgiMetalTexture() override;
+    size_t GetByteSizeOfResource() const override;
 
     /// This hgi transition helper returns the Metal resource as uint64_t
     /// for external clients.
@@ -57,6 +56,17 @@ public:
     HGIMETAL_API
     id<MTLTexture> GetTextureId() const;
 
+protected:
+    friend class HgiMetal;
+
+    HGIMETAL_API
+    HgiMetalTexture(HgiMetal *hgi,
+                    HgiTextureDesc const & desc);
+    
+    HGIMETAL_API
+    HgiMetalTexture(HgiMetal *hgi,
+                    HgiTextureViewDesc const & desc);
+    
 private:
     HgiMetalTexture() = delete;
     HgiMetalTexture & operator=(const HgiMetalTexture&) = delete;

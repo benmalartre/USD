@@ -75,7 +75,12 @@ UsdVolVolume::Define(
 }
 
 /* virtual */
-UsdSchemaType UsdVolVolume::_GetSchemaType() const {
+UsdSchemaKind UsdVolVolume::_GetSchemaKind() const {
+    return UsdVolVolume::schemaKind;
+}
+
+/* virtual */
+UsdSchemaKind UsdVolVolume::_GetSchemaType() const {
     return UsdVolVolume::schemaType;
 }
 
@@ -221,7 +226,7 @@ UsdVolVolume::BlockFieldRelationship(const TfToken &name) const
     UsdRelationship fieldRel =  GetPrim().GetRelationship(_MakeNamespaced(name));
     
     if (fieldRel){
-        fieldRel.BlockTargets();
+        fieldRel.SetTargets({});
         return true;
     }
     else {

@@ -51,12 +51,6 @@ class TestUsdSchemaRegistry(unittest.TestCase):
         self.assertEqual(primDef.GetDocumentation(),
                          "Testing documentation metadata")
 
-        primSpec = primDef.GetSchemaPrimSpec()
-        self.assertEqual(primSpec.GetInfo("documentation"),
-                         "Testing documentation metadata")
-        self.assertEqual(primSpec.GetInfo("hidden"), True)
-        self.assertEqual(primSpec.GetInfo("testCustomMetadata"), "garply")
-
     def test_AttributeMetadata(self):
         primDef = Usd.SchemaRegistry().FindConcretePrimDefinition(
             "MetadataTest")
@@ -218,8 +212,6 @@ class TestUsdSchemaRegistry(unittest.TestCase):
         primDef = Usd.SchemaRegistry().FindConcretePrimDefinition(
             'MetadataTest')
         self.assertTrue(primDef)
-        # Prim def has schema spec with USD type name.
-        self.assertEqual(primDef.GetSchemaPrimSpec().name, 'MetadataTest')
 
         # Prim def has built in property names.
         self.assertEqual(primDef.GetPropertyNames(), ['testAttr', 'testRel'])
@@ -248,8 +240,6 @@ class TestUsdSchemaRegistry(unittest.TestCase):
         primDef = Usd.SchemaRegistry().FindAppliedAPIPrimDefinition(
             'CollectionAPI')
         self.assertTrue(primDef)
-        # Prim def has schema spec with USD type name.
-        self.assertEqual(primDef.GetSchemaPrimSpec().name, 'CollectionAPI')
 
         # Prim def has built in property names.
         self.assertEqual(primDef.GetPropertyNames(), 
@@ -281,34 +271,75 @@ class TestUsdSchemaRegistry(unittest.TestCase):
         self.assertFalse(Usd.SchemaRegistry.IsTyped(clipsAPI))
         self.assertFalse(Usd.SchemaRegistry.IsTyped(collectionAPI))
 
+    def test_GetSchemaKind(self):
+        modelAPI = Tf.Type.FindByName("UsdModelAPI")
+        clipsAPI = Tf.Type.FindByName("UsdClipsAPI")
+        collectionAPI = Tf.Type.FindByName("UsdCollectionAPI")
+
+        self.assertEqual(Usd.SchemaRegistry.GetSchemaKind(modelAPI),
+                         Usd.SchemaKind.NonAppliedAPI)
+        self.assertEqual(Usd.SchemaRegistry.GetSchemaKind(clipsAPI),
+                         Usd.SchemaKind.NonAppliedAPI)
+        self.assertEqual(Usd.SchemaRegistry.GetSchemaKind(collectionAPI),
+                         Usd.SchemaKind.MultipleApplyAPI)
+
+        self.assertEqual(Usd.SchemaRegistry.GetSchemaKind("Bogus"),
+                         Usd.SchemaKind.Invalid)
+
     def test_IsConcrete(self):
         modelAPI = Tf.Type.FindByName("UsdModelAPI")
         clipsAPI = Tf.Type.FindByName("UsdClipsAPI")
         collectionAPI = Tf.Type.FindByName("UsdCollectionAPI")
 
-        self.assertFalse(Usd.SchemaRegistry().IsConcrete(modelAPI))
-        self.assertFalse(Usd.SchemaRegistry().IsConcrete(clipsAPI))
-        self.assertFalse(Usd.SchemaRegistry().IsConcrete(collectionAPI))
+        self.assertFalse(Usd.SchemaRegistry.IsConcrete(modelAPI))
+        self.assertFalse(Usd.SchemaRegistry.IsConcrete(clipsAPI))
+        self.assertFalse(Usd.SchemaRegistry.IsConcrete(collectionAPI))
 
     def test_IsAppliedAPISchema(self):
         modelAPI = Tf.Type.FindByName("UsdModelAPI")
         clipsAPI = Tf.Type.FindByName("UsdClipsAPI")
         collectionAPI = Tf.Type.FindByName("UsdCollectionAPI")
 
-        self.assertFalse(Usd.SchemaRegistry().IsAppliedAPISchema(modelAPI))
-        self.assertFalse(Usd.SchemaRegistry().IsAppliedAPISchema(clipsAPI))
-        self.assertTrue(Usd.SchemaRegistry().IsAppliedAPISchema(
-                            collectionAPI))
+        self.assertFalse(Usd.SchemaRegistry.IsAppliedAPISchema(modelAPI))
+        self.assertFalse(Usd.SchemaRegistry.IsAppliedAPISchema(clipsAPI))
+        self.assertTrue(Usd.SchemaRegistry.IsAppliedAPISchema(collectionAPI))
 
     def test_IsMultipleApplyAPISchema(self):
         modelAPI = Tf.Type.FindByName("UsdModelAPI")
         clipsAPI = Tf.Type.FindByName("UsdClipsAPI")
         collectionAPI = Tf.Type.FindByName("UsdCollectionAPI")
 
-        self.assertFalse(Usd.SchemaRegistry().IsMultipleApplyAPISchema(modelAPI))
-        self.assertFalse(Usd.SchemaRegistry().IsMultipleApplyAPISchema(clipsAPI))
-        self.assertTrue(Usd.SchemaRegistry().IsMultipleApplyAPISchema(
+        self.assertFalse(Usd.SchemaRegistry.IsMultipleApplyAPISchema(modelAPI))
+        self.assertFalse(Usd.SchemaRegistry.IsMultipleApplyAPISchema(clipsAPI))
+        self.assertTrue(Usd.SchemaRegistry.IsMultipleApplyAPISchema(
                             collectionAPI))
+
+    def test_GetTypeAndInstance(self):
+        # test multiplyapply api schema token
+        typeAndInstance = Usd.SchemaRegistry.GetTypeAndInstance(
+                "CollectionAPI:lightlink")
+        self.assertEqual(typeAndInstance[0], 'CollectionAPI')
+        self.assertEqual(typeAndInstance[1], 'lightlink')
+
+        # test singleapply api schema token
+        typeAndInstance = Usd.SchemaRegistry.GetTypeAndInstance(
+                "SingleApplyAPI")
+        self.assertEqual(typeAndInstance[0], "SingleApplyAPI")
+        self.assertEqual(typeAndInstance[1], "")
+
+    def test_GetPropertyNamespacePrefix(self):
+        # CollectionAPI is a multiple apply API so it must have a property
+        # namespace prefix.
+        self.assertEqual(
+            Usd.SchemaRegistry().GetPropertyNamespacePrefix("CollectionAPI"),
+            "collection")
+        # Other schema types that are not multiple apply API will not have a 
+        # property namespace prefix.
+        self.assertEqual(
+            Usd.SchemaRegistry().GetPropertyNamespacePrefix("MetadataTest"), "")
+        self.assertEqual(
+            Usd.SchemaRegistry().GetPropertyNamespacePrefix("ClipsAPI"), "")
+
 
 if __name__ == "__main__":
     unittest.main()

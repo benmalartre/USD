@@ -22,6 +22,8 @@
 // language governing permissions and limitations under the Apache License.
 //
 
+#include "pxr/imaging/garch/glApi.h"
+
 #include "pxr/imaging/hgiInterop/metal.h"
 
 #include "pxr/imaging/hgiMetal/capabilities.h"
@@ -221,8 +223,7 @@ HgiInteropMetal::HgiInteropMetal(Hgi* hgi)
 
     NSError *error = NULL;
     
-    glewExperimental = true;
-    glewInit();
+    GarchGLApiLoad();
     
     _currentOpenGLContext = [NSOpenGLContext currentContext];
     
@@ -758,10 +759,16 @@ HgiInteropMetal::_RestoreOpenGlState()
     }
     glBindBuffer(GL_ARRAY_BUFFER, _restoreVbo);
     
-    if (!_restoreVao) {
+    if (!_restoreVao && _restoreVbo) {
         for (int i = 0; i < 2; i++) {
             VertexAttribState &state(_restoreVertexAttribState[i]);
-            
+            if (state.enabled) {
+                glVertexAttribPointer(state.bufferBinding, state.size,
+                    state.type, state.normalized, state.stride, state.pointer);
+                glEnableVertexAttribArray(state.bufferBinding);
+            } else {
+                glDisableVertexAttribArray(state.bufferBinding);
+            }
         }
     }
     
@@ -776,13 +783,17 @@ HgiInteropMetal::_RestoreOpenGlState()
 }
 
 void
-HgiInteropMetal::_BlitToOpenGL(bool flipY, int shaderIndex)
+HgiInteropMetal::_BlitToOpenGL(GfVec4i const &compRegion,
+                               bool flipY, int shaderIndex)
 {
     // Clear GL error state
     _ProcessGLErrors(true);
 
     _CaptureOpenGlState();
     
+    // XXX: This doesn't support "optional" depth. Enabling depth writes without
+    // a depth aov to xfer would mean that the bound depth buffer is overwritten
+    // with the fullscreen tri's depth (i.e., the near plane).
     glDepthFunc(GL_LEQUAL);
     glDepthMask(GL_TRUE);
     glEnable(GL_DEPTH_TEST);
@@ -791,7 +802,10 @@ HgiInteropMetal::_BlitToOpenGL(bool flipY, int shaderIndex)
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
     glEnable(GL_BLEND);
-    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ZERO);
+    glBlendFuncSeparate(/*srcColor*/GL_ONE,
+                        /*dstColor*/GL_ONE_MINUS_SRC_ALPHA,
+                        /*srcAlpha*/GL_ONE,
+                        /*dstAlpha*/GL_ONE);
     glBlendEquationSeparate(GL_FUNC_ADD, GL_FUNC_ADD);
     
     ShaderContext &shader = _shaderProgramContext[shaderIndex];
@@ -830,6 +844,9 @@ HgiInteropMetal::_BlitToOpenGL(bool flipY, int shaderIndex)
                 _mtlAliasedColorTexture.width,
                 _mtlAliasedColorTexture.height);
     
+    // Region of the framebuffer over which to composite.
+    glViewport(compRegion[0], compRegion[1], compRegion[2], compRegion[3]);
+
     if (flipY) {
         glDrawArrays(GL_TRIANGLES, 6, 12);
     }
@@ -842,12 +859,13 @@ HgiInteropMetal::_BlitToOpenGL(bool flipY, int shaderIndex)
 }
 
 void
-HgiInteropMetal::CopyToInterop(
+HgiInteropMetal::CompositeToInterop(
     HgiTextureHandle const &color,
-    HgiTextureHandle const &depth)
+    HgiTextureHandle const &depth,
+    GfVec4i const &compRegion)
 {
     if (!ARCH_UNLIKELY(color)) {
-        TF_WARN("No valid color texture provided");
+        TF_CODING_ERROR("No valid color texture provided");
         return;
     }
 
@@ -882,7 +900,7 @@ HgiInteropMetal::CopyToInterop(
         depthTexture = metalDepth->GetTextureId();
     }
 
-    id<MTLCommandBuffer> commandBuffer = _hgiMetal->GetCommandBuffer();
+    id<MTLCommandBuffer> commandBuffer = _hgiMetal->GetPrimaryCommandBuffer();
     
     id<MTLComputeCommandEncoder> computeEncoder;
     
@@ -957,11 +975,11 @@ HgiInteropMetal::CopyToInterop(
 
     // We wait until the work is scheduled for execution so that future OpenGL
     // calls are guaranteed to happen after the Metal work encoded above
-    _hgiMetal->CommitCommandBuffer(
+    _hgiMetal->CommitPrimaryCommandBuffer(
         HgiMetal::CommitCommandBuffer_WaitUntilScheduled);
 
     if (glShaderIndex != -1) {
-        _BlitToOpenGL(flipImage, glShaderIndex);
+        _BlitToOpenGL(compRegion, flipImage, glShaderIndex);
 
         _ProcessGLErrors();
     }

@@ -57,10 +57,11 @@ TF_DEFINE_PRIVATE_TOKENS(
     (emission)
 );
 
-const float HdStVolume::defaultStepSize         = 1.0f;
-const float HdStVolume::defaultStepSizeLighting = 2.0f;
+const float HdStVolume::defaultStepSize                 =   1.0f;
+const float HdStVolume::defaultStepSizeLighting         =  10.0f;
+const float HdStVolume::defaultMaxTextureMemoryPerField = 128.0f;
 
-HdStVolume::HdStVolume(SdfPath const& id, SdfPath const & instancerId)
+HdStVolume::HdStVolume(SdfPath const& id)
     : HdVolume(id)
 {
 }
@@ -81,17 +82,13 @@ static const int _initialDirtyBitsMask =
     | HdChangeTracker::DirtyPrimID
     | HdChangeTracker::DirtyPrimvar
     | HdChangeTracker::DirtyTransform
-    | HdChangeTracker::DirtyVisibility;
+    | HdChangeTracker::DirtyVisibility
+    | HdChangeTracker::DirtyInstancer;
 
 HdDirtyBits 
 HdStVolume::GetInitialDirtyBitsMask() const
 {
     int mask = _initialDirtyBitsMask;
-
-    if (!GetInstancerId().IsEmpty()) {
-        mask |= HdChangeTracker::DirtyInstancer;
-    }
-
     return (HdDirtyBits)mask;
 }
 
@@ -197,7 +194,7 @@ _MakeFallbackVolumeShader()
             HdSt_MaterialParam(
                 HdSt_MaterialParam::ParamTypeFieldRedirect,
                 _fallbackShaderTokens->density,
-                VtValue(GfVec3f(0.0, 0.0, 0.0)),
+                VtValue(0.0f),
                 { _fallbackShaderTokens->density }),
             HdSt_MaterialParam(
                 HdSt_MaterialParam::ParamTypeFieldRedirect,
@@ -399,7 +396,7 @@ _ComputeMaterialShader(
         params.push_back(param);
 
         namedTextureHandles.push_back(
-            { textureName, textureType, nullptr, desc->fieldId });
+            { textureName, textureType, nullptr, desc->fieldId.GetHash() });
     }
 
     const bool bindlessTextureEnabled
@@ -411,8 +408,8 @@ _ComputeMaterialShader(
         namedTextureHandles, bindlessTextureEnabled, &bufferSpecs);
 
     // Create params (so that HdGet_... are created) and buffer specs,
-    // to communicate volume bounding box to shader.
-    HdSt_VolumeShader::GetParamsAndBufferSpecsForBBox(
+    // to communicate volume bounding box and sample distance to shader.
+    HdSt_VolumeShader::GetParamsAndBufferSpecsForBBoxAndSampleDistance(
         &params, &bufferSpecs);
 
     const bool hasField = !namedTextureHandles.empty();
@@ -421,8 +418,9 @@ _ComputeMaterialShader(
     // the volume bounding box until after the textures have been
     // committed.
     if (!hasField) {
-        HdSt_VolumeShader::GetBufferSourcesForBBox(
-            GfBBox3d(authoredExtents), &bufferSources);
+        HdSt_VolumeShader::GetBufferSourcesForBBoxAndSampleDistance(
+            { GfBBox3d(authoredExtents), 1.0f },
+            &bufferSources);
     }
 
     // Make volume shader responsible if we have fields with bounding
@@ -556,7 +554,8 @@ HdStVolume::_UpdateDrawItem(HdSceneDelegate *sceneDelegate,
         return;
     }
 
-    if ((*dirtyBits) & HdChangeTracker::DirtyVolumeField) {
+    if ((*dirtyBits) & (HdChangeTracker::DirtyVolumeField |
+                        HdChangeTracker::DirtyMaterialId)) {
         /* FIELD TEXTURES */
         
         // (Re-)Allocate the textures associated with the field prims.

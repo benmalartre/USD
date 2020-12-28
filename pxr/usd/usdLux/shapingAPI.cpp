@@ -62,7 +62,12 @@ UsdLuxShapingAPI::Get(const UsdStagePtr &stage, const SdfPath &path)
 
 
 /* virtual */
-UsdSchemaType UsdLuxShapingAPI::_GetSchemaType() const {
+UsdSchemaKind UsdLuxShapingAPI::_GetSchemaKind() const {
+    return UsdLuxShapingAPI::schemaKind;
+}
+
+/* virtual */
+UsdSchemaKind UsdLuxShapingAPI::_GetSchemaType() const {
     return UsdLuxShapingAPI::schemaType;
 }
 
@@ -70,8 +75,10 @@ UsdSchemaType UsdLuxShapingAPI::_GetSchemaType() const {
 UsdLuxShapingAPI
 UsdLuxShapingAPI::Apply(const UsdPrim &prim)
 {
-    return UsdAPISchemaBase::_ApplyAPISchema<UsdLuxShapingAPI>(
-            prim, _schemaTokens->ShapingAPI);
+    if (prim.ApplyAPI<UsdLuxShapingAPI>()) {
+        return UsdLuxShapingAPI(prim);
+    }
+    return UsdLuxShapingAPI();
 }
 
 /* static */

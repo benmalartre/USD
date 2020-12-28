@@ -8,11 +8,6 @@ if(WIN32)
     set(WINLIBS Shlwapi.lib)
 endif()
 
-# Workaround for issue where the version of lz4 embedded in tf 
-# fails to build on clang with C++14 enabled. For more details
-# see: https://github.com/lz4/lz4/issues/409.
-add_definitions(-DLZ4_DISABLE_DEPRECATE_WARNINGS)
-
 pxr_library(tf
     LIBRARIES
         arch
@@ -233,6 +228,14 @@ pxr_library(tf
         testenv/testTfScriptModuleLoader_Other.py
         testenv/testTfScriptModuleLoader_Test.py
         testenv/testTfScriptModuleLoader_Unknown.py
+
+    DOXYGEN_FILES
+        diagnosticOverview.dox
+        errorOverview.dox
+        mallocTagOverview.dox
+        noteOverview.dox
+        overview.dox
+        registryOverview.dox
 )
 
 if(PXR_ENABLE_PYTHON_SUPPORT)

@@ -45,6 +45,7 @@ using HdStRenderPassShaderSharedPtr =
 using HdSt_FallbackLightingShaderSharedPtr =
     std::shared_ptr<class HdSt_FallbackLightingShader>;
 using HdStShaderCodeSharedPtrVector = std::vector<HdStShaderCodeSharedPtr>;
+class HdRenderIndex;
 
 /// \class HdStRenderPassState
 ///
@@ -69,20 +70,35 @@ public:
     /// Apply the GL states.
     /// Following states may be changed and restored to
     /// the GL default at Unbind().
+    ///   glEnable(GL_BLEND);
+    ///   glEnable(GL_CULL_FACE);
     ///   glEnable(GL_POLYGON_OFFSET_FILL)
-    ///   glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE)
     ///   glEnable(GL_PROGRAM_POINT_SIZE);
+    ///   glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE)
     ///   glEnable(GL_STENCIL_TEST);
     ///   glPolygonOffset()
+    ///   glBlend*()
+    ///   glColorMask()
+    ///   glCullFace()
     ///   glDepthFunc()
+    ///   glDepthMask()
+    ///   glLineWidth()
     ///   glStencilFunc()
     ///   glStencilOp()
-    ///   glLineWidth()
     HDST_API
     void Bind() override;
 
     HDST_API
     void Unbind() override;
+
+    /// If set to true (default) and the render pass is rendering into a
+    /// multi-sampled aovs, the aovs will be resolved at the end of the render
+    /// pass. If false or the aov is not multi-sampled or the render pass is not
+    /// rendering into the multi-sampled aov, no resolution takes place.
+    HD_API
+    void SetResolveAovMultiSample(bool state);
+    HD_API
+    bool GetResolveAovMultiSample() const;
 
     /// Set lighting shader
     HDST_API
@@ -112,21 +128,21 @@ public:
     HDST_API
     size_t GetShaderHash() const;
 
+    /// Camera setter API
+    /// Option 1: Specify matrices, viewport and clipping planes (defined in
+    /// camera space) directly.
+    HD_API
+    void SetCameraFramingState(GfMatrix4d const &worldToViewMatrix,
+                               GfMatrix4d const &projectionMatrix,
+                               GfVec4d const &viewport,
+                               ClipPlanesVector const & clipPlanes);
+    
     // Helper to get graphics cmds descriptor describing textures
-    // we render into and the blend state.
-    //
-    // By default, converts AOV bindings to HgiGraphicsCmds descriptor
-    HDST_API
-    HgiGraphicsCmdsDesc MakeGraphicsCmdsDesc() const;
-
-    // Use custom graphics cmds descriptor instead of creating one from
+    // we render into and the blend state, constructed from
     // AOV bindings.
+    //
     HDST_API
-    void SetCustomGraphicsCmdsDesc(const HgiGraphicsCmdsDesc &graphicsCmdDesc);
-
-    // Go back to using AOV bindings again.
-    HDST_API
-    void ClearCustomGraphicsCmdsDesc();
+    HgiGraphicsCmdsDesc MakeGraphicsCmdsDesc(const HdRenderIndex *) const;
 
 private:
     bool _UseAlphaMask() const;
@@ -142,9 +158,7 @@ private:
     HdBufferArrayRangeSharedPtr _renderPassStateBar;
     size_t _clipPlanesBufferSize;
     float _alphaThresholdCurrent;
-
-    HgiGraphicsCmdsDesc _customGraphicsCmdsDesc;
-    bool _hasCustomGraphicsCmdsDesc;
+    bool _resolveMultiSampleAov;
 };
 
 PXR_NAMESPACE_CLOSE_SCOPE

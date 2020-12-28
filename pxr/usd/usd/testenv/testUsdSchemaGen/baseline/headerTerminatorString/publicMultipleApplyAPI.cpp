@@ -117,7 +117,12 @@ UsdContrivedPublicMultipleApplyAPI::IsPublicMultipleApplyAPIPath(
 }
 
 /* virtual */
-UsdSchemaType UsdContrivedPublicMultipleApplyAPI::_GetSchemaType() const {
+UsdSchemaKind UsdContrivedPublicMultipleApplyAPI::_GetSchemaKind() const {
+    return UsdContrivedPublicMultipleApplyAPI::schemaKind;
+}
+
+/* virtual */
+UsdSchemaKind UsdContrivedPublicMultipleApplyAPI::_GetSchemaType() const {
     return UsdContrivedPublicMultipleApplyAPI::schemaType;
 }
 
@@ -125,8 +130,27 @@ UsdSchemaType UsdContrivedPublicMultipleApplyAPI::_GetSchemaType() const {
 UsdContrivedPublicMultipleApplyAPI
 UsdContrivedPublicMultipleApplyAPI::Apply(const UsdPrim &prim, const TfToken &name)
 {
-    return UsdAPISchemaBase::_MultipleApplyAPISchema<UsdContrivedPublicMultipleApplyAPI>(
-            prim, _schemaTokens->PublicMultipleApplyAPI, name);
+    // Ensure that the instance name is valid.
+    TfTokenVector tokens = SdfPath::TokenizeIdentifierAsTokens(name);
+
+    if (tokens.empty()) {
+        TF_CODING_ERROR("Invalid PublicMultipleApplyAPI name '%s'.", 
+                        name.GetText());
+        return UsdContrivedPublicMultipleApplyAPI();
+    }
+
+    const TfToken &baseName = tokens.back();
+    if (IsSchemaPropertyBaseName(baseName)) {
+        TF_CODING_ERROR("Invalid PublicMultipleApplyAPI name '%s'. "
+                        "The base-name '%s' is a schema property name.", 
+                        name.GetText(), baseName.GetText());
+        return UsdContrivedPublicMultipleApplyAPI();
+    }
+
+    if (prim.ApplyAPI<UsdContrivedPublicMultipleApplyAPI>(name)) {
+        return UsdContrivedPublicMultipleApplyAPI(prim, name);
+    }
+    return UsdContrivedPublicMultipleApplyAPI();
 }
 
 /* static */

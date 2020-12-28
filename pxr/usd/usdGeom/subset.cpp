@@ -75,7 +75,12 @@ UsdGeomSubset::Define(
 }
 
 /* virtual */
-UsdSchemaType UsdGeomSubset::_GetSchemaType() const {
+UsdSchemaKind UsdGeomSubset::_GetSchemaKind() const {
+    return UsdGeomSubset::schemaKind;
+}
+
+/* virtual */
+UsdSchemaKind UsdGeomSubset::_GetSchemaType() const {
     return UsdGeomSubset::schemaType;
 }
 
@@ -397,6 +402,18 @@ UsdGeomSubset::GetUnassignedIndices(
         VtIntArray indices;
         subset.GetIndicesAttr().Get(&indices, time);
         assignedIndices.insert(indices.begin(), indices.end());
+    }
+
+    // This is protection against the possibility that any of the subsets can
+    // erroneously contain negative valued indices. Even though negative indices
+    // are invalid, their presence breaks the assumption in the rest of this 
+    // function that all indices are nonnegative. This can lead to crashes.
+    // 
+    // Negative indices should be extremely rare which is why it's better to 
+    // check and remove them after the collection of assigned indices rather 
+    // than during.
+    while (!assignedIndices.empty() && *assignedIndices.begin() < 0) {
+        assignedIndices.erase(assignedIndices.begin());
     }
 
     VtIntArray result;

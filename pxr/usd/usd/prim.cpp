@@ -201,8 +201,198 @@ UsdPrim::_HasAPI(
 }
 
 bool
-UsdPrim::HasAPI(const TfType& schemaType, const TfToken& instanceName) const{
+UsdPrim::HasAPI(const TfType& schemaType, const TfToken& instanceName) const
+{
     return _HasAPI(schemaType, true, instanceName);
+}
+
+bool
+UsdPrim::_ApplyAPI(const TfType& schemaType, const TfToken& instanceName) const
+{
+    // Validate the prim to protect against crashes in the schema generated 
+    // SchemaClass::Apply(const UsdPrim &prim) functions when called with a null
+    // prim as these generated functions call prim.ApplyAPI<SchemaClass>
+    //
+    // While we don't typically validate "this" prim for public UsdPrim C++ API,
+    // for performance reasons, we opt to do so here since ApplyAPI isn't 
+    // performance critical. If ApplyAPI becomes performance critical in the
+    // future, we may have to move this validation elsewhere if this validation
+    // is problematic.
+    if (!IsValid()) {
+        TF_CODING_ERROR("Invalid prim '%s'", GetDescription().c_str());
+        return false;
+    }
+
+    const TfToken typeName = UsdSchemaRegistry::GetSchemaTypeName(schemaType);
+    if (instanceName.IsEmpty()) {
+        return AddAppliedSchema(typeName);
+    }
+    TfToken apiName(SdfPath::JoinIdentifier(typeName, instanceName));
+    return AddAppliedSchema(apiName);
+}
+
+bool
+UsdPrim::ApplyAPI(const TfType& schemaType, const TfToken& instanceName) const
+{
+    if (!UsdSchemaRegistry::GetInstance().IsAppliedAPISchema(schemaType)) {
+        TF_CODING_ERROR("ApplyAPI: provided schema type ( %s ) is not an "
+            "applied API schema type.", schemaType.GetTypeName().c_str());
+        return false;
+    }
+
+    if (UsdSchemaRegistry::GetInstance().IsMultipleApplyAPISchema(schemaType)) {
+        if (instanceName.IsEmpty()) {
+            TF_CODING_ERROR("ApplyAPI: Multiple application API schemas like "
+                            "%s must have an application instanceName.", 
+                            schemaType.GetTypeName().c_str());
+            return false;
+        }
+    } else {
+        if (!instanceName.IsEmpty()) {
+            TF_CODING_ERROR("ApplyAPI: Single application API schemas like "
+                            "%s cannot have an application instanceName.", 
+                            schemaType.GetTypeName().c_str());
+            return false;
+        }
+    }
+
+    return _ApplyAPI(schemaType, instanceName);
+}
+
+bool
+UsdPrim::_RemoveAPI(const TfType& schemaType, const TfToken& instanceName) const
+{
+    const TfToken typeName = UsdSchemaRegistry::GetSchemaTypeName(schemaType);
+    if (instanceName.IsEmpty()) {
+        return RemoveAppliedSchema(typeName);
+    }
+    TfToken apiName(SdfPath::JoinIdentifier(typeName, instanceName));
+    return RemoveAppliedSchema(apiName);
+}
+
+bool
+UsdPrim::RemoveAPI(const TfType& schemaType, const TfToken& instanceName) const
+{
+    if (!UsdSchemaRegistry::GetInstance().IsAppliedAPISchema(schemaType)) {
+        TF_CODING_ERROR("RemoveAPI: provided schema type ( %s ) is not an "
+            "applied API schema type.", schemaType.GetTypeName().c_str());
+        return false;
+    }
+
+    if (UsdSchemaRegistry::GetInstance().IsMultipleApplyAPISchema(schemaType)) {
+        if (instanceName.IsEmpty()) {
+            TF_CODING_ERROR("RemoveAPI: Multiple application API schemas like "
+                            "%s must have an application instanceName.", 
+                            schemaType.GetTypeName().c_str());
+            return false;
+        }
+    } else {
+        if (!instanceName.IsEmpty()) {
+            TF_CODING_ERROR("RemoveAPI: Single application API schemas like "
+                            "%s cannot have an application instanceName.", 
+                            schemaType.GetTypeName().c_str());
+            return false;
+        }
+    }
+
+    return _RemoveAPI(schemaType, instanceName);
+}
+
+bool 
+UsdPrim::AddAppliedSchema(const TfToken &appliedSchemaName) const
+{
+    // This should find or create the primSpec in the current edit target.
+    // It will also issue an error if it's unable to.
+    SdfPrimSpecHandle primSpec = _GetStage()->_CreatePrimSpecForEditing(*this);
+
+    // _CreatePrimSpecForEditing would have already issued a runtime error
+    // in case of a failure.
+    if (!primSpec) {
+        TF_WARN("Unable to create primSpec at path <%s> in edit target '%s'. "
+                "Failed to add applied API schema.",
+            GetPath().GetText(),
+            _GetStage()->GetEditTarget().GetLayer()->GetIdentifier().c_str());
+        return false;
+    }
+
+    auto _HasItem = [](const TfTokenVector &items, const TfToken &item) {
+        return std::find(items.begin(), items.end(), item) != items.end();
+    };
+
+    SdfTokenListOp listOp =
+        primSpec->GetInfo(UsdTokens->apiSchemas).Get<SdfTokenListOp>();
+
+    if (listOp.IsExplicit()) {
+        // If the list op is explicit we check if the explicit item to see if
+        // our name is already in it. We'll add it to the end of the explicit
+        // list if it is not.
+        const TfTokenVector &items = listOp.GetExplicitItems();
+        if (_HasItem(items, appliedSchemaName)) {
+            return true;
+        }
+        // Use ReplaceOperations to append in place.
+        if (!listOp.ReplaceOperations(SdfListOpTypeExplicit, 
+                items.size(), 0, {appliedSchemaName})) {
+            return false;
+        }
+    } else {
+        // Otherwise our name could be in the append or prepend list (we 
+        // purposefully ignore the "add" list which is deprecated) so we check 
+        // both before adding it to the end of prepends.
+        const TfTokenVector &preItems = listOp.GetPrependedItems();
+        const TfTokenVector &appItems = listOp.GetAppendedItems();
+        if (_HasItem(preItems, appliedSchemaName) || 
+            _HasItem(appItems, appliedSchemaName)) {
+            return true;
+        }
+        // Use ReplaceOperations to append in place.
+        if (!listOp.ReplaceOperations(SdfListOpTypePrepended, 
+                preItems.size(), 0, {appliedSchemaName})) {
+            return false;
+        }
+    }
+
+    // If we got here, we edited the list op, so author it back to the spec.
+    primSpec->SetInfo(UsdTokens->apiSchemas, VtValue::Take(listOp));
+    return true;
+}
+
+bool 
+UsdPrim::RemoveAppliedSchema(const TfToken &appliedSchemaName) const
+{
+    // This should create the primSpec in the current edit target.
+    // It will also issue an error if it's unable to.
+    SdfPrimSpecHandle primSpec = _GetStage()->_CreatePrimSpecForEditing(*this);
+
+    // _CreatePrimSpecForEditing would have already issued a runtime error
+    // in case of a failure.
+    if (!primSpec) {
+        TF_WARN("Unable to create primSpec at path <%s> in edit target '%s'. "
+                "Failed to remove applied API schema.",
+            GetPath().GetText(),
+            _GetStage()->GetEditTarget().GetLayer()->GetIdentifier().c_str());
+        return false;
+    }
+
+    SdfTokenListOp listOp =
+        primSpec->GetInfo(UsdTokens->apiSchemas).Get<SdfTokenListOp>();
+
+    // Create a list op that deletes our schema name and apply it to the current
+    // apiSchemas list op for the edit prim spec. This will take care of making
+    // sure it ends up in the deletes list (for non-explicit list ops) and is
+    // removed from any other items list that would add it back.
+    SdfTokenListOp editListOp;
+    editListOp.SetDeletedItems({appliedSchemaName});
+    if (auto result = editListOp.ApplyOperations(listOp)) {
+        primSpec->SetInfo(UsdTokens->apiSchemas, VtValue(*result));
+        return true;
+    } else {
+        TF_CODING_ERROR("Failed to apply list op edits to 'apiSchemas' on spec "
+                        "at path <%s> in layer '%s'", 
+                        primSpec->GetLayer()->GetIdentifier().c_str(), 
+                        primSpec->GetPath().GetText());
+        return false;
+    }
 }
 
 std::vector<UsdProperty>
@@ -291,13 +481,6 @@ UsdPrim::GetPropertyOrder() const
     GetMetadata(SdfFieldKeys->PropertyOrder, &order);
     return order;
 }
-
-void
-UsdPrim::SetPropertyOrder(const TfTokenVector &order) const
-{
-    SetMetadata(SdfFieldKeys->PropertyOrder, order);
-}
-
 
 static void
 _ComposePrimPropertyNames( 
@@ -892,8 +1075,8 @@ UsdPrim::HasAuthoredPayloads() const
 void
 UsdPrim::Load(UsdLoadPolicy policy) const
 {
-    if (IsInMaster()) {
-        TF_CODING_ERROR("Attempted to load a prim in a master <%s>",
+    if (IsInPrototype()) {
+        TF_CODING_ERROR("Attempted to load a prim in a prototype <%s>",
                         GetPath().GetText());
         return;
     }
@@ -903,12 +1086,50 @@ UsdPrim::Load(UsdLoadPolicy policy) const
 void
 UsdPrim::Unload() const
 {
-    if (IsInMaster()) {
-        TF_CODING_ERROR("Attempted to unload a prim in a master <%s>",
+    if (IsInPrototype()) {
+        TF_CODING_ERROR("Attempted to unload a prim in a prototype <%s>",
                         GetPath().GetText());
         return;
     }
     _GetStage()->Unload(GetPath());
+}
+
+TfTokenVector 
+UsdPrim::GetChildrenNames() const
+{
+    TfTokenVector names;
+    for (const auto &child : GetChildren()) {
+        names.push_back(child.GetName());
+    }
+    return names;
+}
+
+TfTokenVector 
+UsdPrim::GetAllChildrenNames() const
+{
+    TfTokenVector names;
+    for (const auto &child : GetAllChildren()) {
+        names.push_back(child.GetName());
+    }
+    return names;
+}
+
+TfTokenVector 
+UsdPrim::GetFilteredChildrenNames(const Usd_PrimFlagsPredicate &predicate) const
+{
+    TfTokenVector names;
+    for (const auto &child : GetFilteredChildren(predicate)) {
+        names.push_back(child.GetName());
+    }
+    return names;
+}
+
+TfTokenVector
+UsdPrim::GetChildrenReorder() const
+{
+    TfTokenVector reorder;
+    GetMetadata(SdfFieldKeys->PrimOrder, &reorder);
+    return reorder;
 }
 
 UsdPrim
@@ -937,24 +1158,48 @@ UsdPrim::IsPseudoRoot() const
     return GetPath() == SdfPath::AbsoluteRootPath();
 }
 
+bool
+UsdPrim::IsPrototypePath(const SdfPath& path)
+{
+    return Usd_InstanceCache::IsPrototypePath(path);
+}
+
+bool
+UsdPrim::IsPathInPrototype(const SdfPath& path)
+{
+    return Usd_InstanceCache::IsPathInPrototype(path);
+}
+
+bool
+UsdPrim::IsMasterPath(const SdfPath& path)
+{
+    return IsPrototypePath(path);
+}
+
+bool
+UsdPrim::IsPathInMaster(const SdfPath& path)
+{
+    return IsPathInPrototype(path);
+}
+
 UsdPrim
 UsdPrim::GetMaster() const
 {
-    Usd_PrimDataConstPtr masterPrimData = 
-        _GetStage()->_GetMasterForInstance(get_pointer(_Prim()));
-    return UsdPrim(masterPrimData, SdfPath());
+    return GetPrototype();
+}
+
+UsdPrim
+UsdPrim::GetPrototype() const
+{
+    Usd_PrimDataConstPtr protoPrimData = 
+        _GetStage()->_GetPrototypeForInstance(get_pointer(_Prim()));
+    return UsdPrim(protoPrimData, SdfPath());
 }
 
 std::vector<UsdPrim>
 UsdPrim::GetInstances() const
 {
-    return _GetStage()->_GetInstancesForMaster(*this);
-}
-
-bool 
-UsdPrim::_PrimPathIsInMaster() const
-{
-    return Usd_InstanceCache::IsPathInMaster(GetPrimPath());
+    return _GetStage()->_GetInstancesForPrototype(*this);
 }
 
 SdfPrimSpecHandleVector 

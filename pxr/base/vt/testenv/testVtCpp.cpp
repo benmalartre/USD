@@ -253,9 +253,9 @@ static void testArray() {
         TF_AXIOM(array1.size() == 0);
         array1 = {7, 8, 9};
         TF_AXIOM(array1.size() == 3);
-        TF_AXIOM(array1[0] == 7);
-        TF_AXIOM(array1[1] == 8);
-        TF_AXIOM(array1[2] == 9);
+        TF_AXIOM(array1.AsConst()[0] == 7);
+        TF_AXIOM(array1.AsConst()[1] == 8);
+        TF_AXIOM(array1.AsConst()[2] == 9);
         array1 = {};
         TF_AXIOM(array1.size() == 0);
         
@@ -358,6 +358,146 @@ static void testArray() {
         for (int n = 0; n != 123; ++n) {
             TF_AXIOM(da.cdata()[n] == double(n));
         }
+    }
+    {
+        // Test VtArray erasing from the middle
+        VtIntArray array({1, 2, 3, 4, 5, 6});
+        VtIntArray::iterator it = array.erase(
+            array.cbegin() + 2, array.cbegin() + 4);
+        TF_AXIOM(array.size() == 4);
+        TF_AXIOM(array == VtIntArray({1, 2, 5, 6}));
+        TF_AXIOM(it == array.begin() + 2);
+    }
+    {
+        // Test VtArray erasing from the beginning
+        VtIntArray array({1, 2, 3, 4, 5, 6});
+        VtIntArray::iterator it = array.erase(
+            array.cbegin(), array.cbegin() + 4);
+        TF_AXIOM(array.size() == 2);
+        TF_AXIOM(array == VtIntArray({5, 6}));
+        TF_AXIOM(it == array.begin());
+    }
+    {
+        // Test VtArray erasing to the end
+        VtIntArray array({1, 2, 3, 4, 5, 6});
+        VtIntArray::iterator it = array.erase(array.cbegin()+4, array.cend());
+        TF_AXIOM(array.size() == 4);
+        TF_AXIOM(array == VtIntArray({1, 2, 3, 4}));
+        TF_AXIOM(it == array.end());
+    }
+    {
+        // Test VtArray erasing all
+        VtIntArray array({1, 2, 3, 4, 5, 6});
+        VtIntArray::iterator it = array.erase(array.cbegin(), array.cend());
+        TF_AXIOM(array.empty());
+        TF_AXIOM(array == VtIntArray({}));
+        TF_AXIOM(it == array.end());
+    }
+    {
+        // Test VtArray erasing single element with copy
+        VtIntArray array({1, 2, 3, 4, 5, 6});
+        VtIntArray copy = array;
+        VtIntArray::iterator it = array.erase(array.cbegin() + 2);
+        TF_AXIOM(array.size() == 5);
+        TF_AXIOM(array == VtIntArray({1, 2, 4, 5, 6}));
+        TF_AXIOM(it == array.begin() + 2);
+        TF_AXIOM(copy.size() == 6);
+        TF_AXIOM(copy == VtIntArray({1, 2, 3, 4, 5, 6}));
+    }
+    {
+        // Test VtArray erasing all with copy
+        VtIntArray array({1, 2, 3, 4, 5, 6});
+        VtIntArray copy = array;
+        VtIntArray::iterator it = array.erase(array.cbegin(), array.cend());
+        TF_AXIOM(array.empty());
+        TF_AXIOM(array == VtIntArray({}));
+        TF_AXIOM(it == array.end());
+        TF_AXIOM(copy.size() == 6);
+        TF_AXIOM(copy == VtIntArray({1, 2, 3, 4, 5, 6}));
+    }
+    {
+        // Test VtArray erasing all strings with copies
+        VtStringArray array({"one", "two", "three", "four"});
+        VtStringArray copy = array;
+        VtStringArray::iterator it = array.erase(array.cbegin(), array.cend());
+        TF_AXIOM(array.empty());
+        TF_AXIOM(array == VtStringArray());
+        TF_AXIOM(it == array.end());
+        TF_AXIOM(copy.size() == 4);
+        TF_AXIOM(copy == VtStringArray({"one", "two", "three", "four"}));
+    }
+    {
+        // Test VtArray erasing single element string
+        VtStringArray array({"one", "two", "three", "four"});
+        array.erase(array.cbegin() + 1);
+        TF_AXIOM(array.size() == 3);
+        TF_AXIOM(array == VtStringArray({"one", "three", "four"}));
+    }
+    {
+        // Test erasing an empty range from an empty vec
+        VtStringArray array;
+        VtStringArray::iterator it =
+            array.erase(array.cbegin(), array.cbegin());
+        TF_AXIOM(array.empty());
+        TF_AXIOM(it == array.cbegin());
+        TF_AXIOM(it == array.cend());        
+    }
+    {
+        // Ensure that iterator returned from erase returns the same value 
+        // for vector and array
+        VtIntArray array({1, 2, 3, 4, 5, 6});
+        std::vector<int> vector({1, 2, 3, 4, 5, 6});
+        
+        VtIntArray::iterator arrayIt = array.erase(
+            std::next(array.cbegin(), 1));
+        std::vector<int>::iterator vectorIt = vector.erase(
+            std::next(vector.cbegin(), 1));
+        
+        TF_AXIOM(*vectorIt == 3);
+        TF_AXIOM(*vectorIt == *arrayIt);
+
+        VtIntArray::iterator emptyArrayIt = 
+            array.erase(array.cbegin(), array.cbegin());
+        std::vector<int>::iterator emptyVectorIt = 
+            vector.erase(vector.cbegin(), vector.cbegin());
+
+        TF_AXIOM(*emptyVectorIt == 1);
+        TF_AXIOM(*emptyVectorIt == *emptyArrayIt);
+
+        // When erasing the last element in an array, make sure we return
+        // the new end()
+        VtIntArray::iterator lastArrayIt = array.erase(
+            std::next(array.cend(), - 1));
+        std::vector<int>::iterator lastVectorIt = 
+            vector.erase(std::next(vector.cend(), - 1));
+        TF_AXIOM(lastVectorIt == vector.end());
+        TF_AXIOM(lastArrayIt == array.end());
+    }
+    {
+        // Test emplace_back and push_back with rvalue references
+        std::string hello("hello");
+        std::string world("world");
+        std::string ciao("ciao");
+        std::string aloha("aloha");
+        VtStringArray array({hello});
+        TF_AXIOM(array.size() == 1);
+        TF_AXIOM(array.front() == "hello");
+        TF_AXIOM(array.cfront() == "hello");
+        TF_AXIOM(hello == "hello");
+        // Ensure that emplace_back forwards an rvalue to world
+        array.emplace_back(std::move(world));
+        TF_AXIOM(array.back() == "world");
+        // Ensure that the rvalue version of push_back is used
+        array.push_back(std::move(ciao));
+        TF_AXIOM(array.size() == 3);
+        TF_AXIOM(array.back() == "ciao");
+        TF_AXIOM(array.cback() == "ciao");
+        // Ensure that the lvalue version of push_back is used
+        array.push_back(aloha);
+        TF_AXIOM(array.size() == 4);
+        TF_AXIOM(array.back() == "aloha");
+        TF_AXIOM(array.cback() == "aloha");
+        TF_AXIOM(aloha == "aloha");
     }
 }
 

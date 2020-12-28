@@ -62,7 +62,12 @@ UsdLuxShadowAPI::Get(const UsdStagePtr &stage, const SdfPath &path)
 
 
 /* virtual */
-UsdSchemaType UsdLuxShadowAPI::_GetSchemaType() const {
+UsdSchemaKind UsdLuxShadowAPI::_GetSchemaKind() const {
+    return UsdLuxShadowAPI::schemaKind;
+}
+
+/* virtual */
+UsdSchemaKind UsdLuxShadowAPI::_GetSchemaType() const {
     return UsdLuxShadowAPI::schemaType;
 }
 
@@ -70,8 +75,10 @@ UsdSchemaType UsdLuxShadowAPI::_GetSchemaType() const {
 UsdLuxShadowAPI
 UsdLuxShadowAPI::Apply(const UsdPrim &prim)
 {
-    return UsdAPISchemaBase::_ApplyAPISchema<UsdLuxShadowAPI>(
-            prim, _schemaTokens->ShadowAPI);
+    if (prim.ApplyAPI<UsdLuxShadowAPI>()) {
+        return UsdLuxShadowAPI(prim);
+    }
+    return UsdLuxShadowAPI();
 }
 
 /* static */

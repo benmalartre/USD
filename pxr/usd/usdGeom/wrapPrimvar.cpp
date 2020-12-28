@@ -114,7 +114,7 @@ static object
 __getattribute__(object selfObj, const char *name) {
 
     // Allow attribute lookups if the attribute name starts with '__', or
-    // if the object's prim and attribute are both valid, or whitelist a few
+    // if the object's prim and attribute are both valid, or allow a few
     // methods if just the prim is valid, or an even smaller subset if neither
     // are valid.
     if ((name[0] == '_' && name[1] == '_') ||
@@ -175,9 +175,9 @@ void wrapUsdGeomPrimvar()
         .def("IsValidPrimvarName", Primvar::IsValidPrimvarName, 
                 arg("name"))
         .staticmethod("IsValidPrimvarName")
-        .def("IsPrimvarRelatedPropertyName", 
-                Primvar::IsPrimvarRelatedPropertyName, arg("name"))
-        .staticmethod("IsPrimvarRelatedPropertyName")
+        
+        .def("StripPrimvarsName", Primvar::StripPrimvarsName, arg("name"))
+        .staticmethod("StripPrimvarsName")
 
         .def("IsValidInterpolation", Primvar::IsValidInterpolation,
              arg("interpolation"))

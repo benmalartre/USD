@@ -50,7 +50,8 @@ class Usd_ClipSetDefinition
 {
 public:
     Usd_ClipSetDefinition() 
-        : indexOfLayerWhereAssetPathsFound(0) 
+        : interpolateMissingClipValues(false)
+        , indexOfLayerWhereAssetPathsFound(0) 
     {
     }
 
@@ -61,6 +62,7 @@ public:
             && clipPrimPath == rhs.clipPrimPath
             && clipActive == rhs.clipActive
             && clipTimes == rhs.clipTimes
+            && interpolateMissingClipValues == rhs.interpolateMissingClipValues
             && sourceLayerStack == rhs.sourceLayerStack
             && sourcePrimPath == rhs.sourcePrimPath
             && indexOfLayerWhereAssetPathsFound 
@@ -101,6 +103,9 @@ public:
                 boost::hash_combine(hash, time[1]);
             }
         }
+        if (interpolateMissingClipValues) {
+            boost::hash_combine(hash, *interpolateMissingClipValues);
+        }
 
         return hash;
     }
@@ -110,17 +115,22 @@ public:
     boost::optional<std::string> clipPrimPath;
     boost::optional<VtVec2dArray> clipActive;
     boost::optional<VtVec2dArray> clipTimes;
+    boost::optional<bool> interpolateMissingClipValues;
 
     PcpLayerStackPtr sourceLayerStack;
     SdfPath sourcePrimPath;
     size_t indexOfLayerWhereAssetPathsFound;
 };
 
-/// Computes clip set definitions for the given \p primIndex.
+/// Computes clip set definitions for the given \p primIndex and returns
+/// them in \p clipSetDefinitions. The clip sets in this vector are sorted in
+/// strength order. If \p clipSetNames is provided it will contain the name
+/// for each clip set in the corresponding position in \p clipSetDefinitions.
 void
 Usd_ComputeClipSetDefinitionsForPrimIndex(
     const PcpPrimIndex& primIndex,
-    std::vector<Usd_ClipSetDefinition>* clipDefinitions);
+    std::vector<Usd_ClipSetDefinition>* clipSetDefinitions,
+    std::vector<std::string>* clipSetNames = nullptr);
 
 PXR_NAMESPACE_CLOSE_SCOPE
 

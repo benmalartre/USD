@@ -36,9 +36,7 @@ HgiMetalResourceBindings::HgiMetalResourceBindings(
 {
 }
 
-HgiMetalResourceBindings::~HgiMetalResourceBindings()
-{
-}
+HgiMetalResourceBindings::~HgiMetalResourceBindings() = default;
 
 void
 HgiMetalResourceBindings::BindResources(
@@ -55,27 +53,21 @@ HgiMetalResourceBindings::BindResources(
         HgiMetalTexture* metalTexture =
             static_cast<HgiMetalTexture*>(texHandle.Get());
 
-        HgiMetalSampler* metalSmp = nullptr;
-        if (!texDesc.samplers.empty()) {
-            HgiSamplerHandle const& smpHandle = texDesc.samplers.front();
-            metalSmp = static_cast<HgiMetalSampler*>(smpHandle.Get());
-        }
+        HgiSamplerHandle const& smpHandle = texDesc.samplers.front();
+        HgiMetalSampler* metalSmp =
+            static_cast<HgiMetalSampler*>(smpHandle.Get());
 
         if (texDesc.stageUsage & HgiShaderStageVertex) {
             [renderEncoder setVertexTexture:metalTexture->GetTextureId()
                                     atIndex:texDesc.bindingIndex];
-            if (metalSmp) {
-                [renderEncoder setVertexSamplerState:metalSmp->GetSamplerId()
-                                        atIndex:texDesc.bindingIndex];
-            }
+            [renderEncoder setVertexSamplerState:metalSmp->GetSamplerId()
+                                    atIndex:texDesc.bindingIndex];
         }
         if (texDesc.stageUsage & HgiShaderStageFragment) {
             [renderEncoder setFragmentTexture:metalTexture->GetTextureId()
                                       atIndex:texDesc.bindingIndex];
-            if (metalSmp) {
-                [renderEncoder setFragmentSamplerState:metalSmp->GetSamplerId()
-                                        atIndex:texDesc.bindingIndex];
-            }
+            [renderEncoder setFragmentSamplerState:metalSmp->GetSamplerId()
+                                    atIndex:texDesc.bindingIndex];
         }
     }
 
@@ -103,6 +95,58 @@ HgiMetalResourceBindings::BindResources(
         }
         if (bufDesc.stageUsage & HgiShaderStageFragment) {
             [renderEncoder setFragmentBuffer:h offset:offset atIndex:unit];
+        }
+    }
+}
+
+void
+HgiMetalResourceBindings::BindResources(
+    id<MTLComputeCommandEncoder> computeEncoder)
+{
+    //
+    // Bind Textures and Samplers
+    //
+
+    for (HgiTextureBindDesc const& texDesc : _descriptor.textures) {
+        if (!TF_VERIFY(texDesc.textures.size() == 1)) continue;
+
+        HgiTextureHandle const& texHandle = texDesc.textures.front();
+        HgiMetalTexture* metalTexture =
+            static_cast<HgiMetalTexture*>(texHandle.Get());
+
+        HgiSamplerHandle const& smpHandle = texDesc.samplers.front();
+        HgiMetalSampler* metalSmp =
+            static_cast<HgiMetalSampler*>(smpHandle.Get());
+
+        if (texDesc.stageUsage & HgiShaderStageCompute) {
+            [computeEncoder setTexture:metalTexture->GetTextureId()
+                               atIndex:texDesc.bindingIndex];
+            [computeEncoder setSamplerState:metalSmp->GetSamplerId()
+                                    atIndex:texDesc.bindingIndex];
+        }
+    }
+
+    //
+    // Bind Buffers
+    //
+
+    // Note that index and vertex buffers are not bound here.
+    // They are bound via the GraphicsEncoder.
+
+    for (HgiBufferBindDesc const& bufDesc : _descriptor.buffers) {
+        if (!TF_VERIFY(bufDesc.buffers.size() == 1)) continue;
+
+        uint32_t unit = bufDesc.bindingIndex;
+
+        HgiBufferHandle const& bufHandle = bufDesc.buffers.front();
+        HgiMetalBuffer* metalbuffer =
+            static_cast<HgiMetalBuffer*>(bufHandle.Get());
+
+        id<MTLBuffer> h = metalbuffer->GetBufferId();
+        NSUInteger offset = bufDesc.offsets.front();
+        
+        if (bufDesc.stageUsage & HgiShaderStageCompute) {
+            [computeEncoder setBuffer:h offset:offset atIndex:unit];
         }
     }
 }

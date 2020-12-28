@@ -62,7 +62,12 @@ UsdGeomPrimvarsAPI::Get(const UsdStagePtr &stage, const SdfPath &path)
 
 
 /* virtual */
-UsdSchemaType UsdGeomPrimvarsAPI::_GetSchemaType() const {
+UsdSchemaKind UsdGeomPrimvarsAPI::_GetSchemaKind() const {
+    return UsdGeomPrimvarsAPI::schemaKind;
+}
+
+/* virtual */
+UsdSchemaKind UsdGeomPrimvarsAPI::_GetSchemaType() const {
     return UsdGeomPrimvarsAPI::schemaType;
 }
 
@@ -557,6 +562,14 @@ UsdGeomPrimvarsAPI::HasPossiblyInheritedPrimvar(const TfToken &name) const
         }
     }
     return false;
+}
+
+/* static */
+bool
+UsdGeomPrimvarsAPI::CanContainPropertyName(const TfToken& name)
+{
+    TfToken const& prefix = UsdGeomPrimvar::_GetNamespacePrefix();
+    return TfStringStartsWith(name, prefix);
 }
 
 PXR_NAMESPACE_CLOSE_SCOPE

@@ -62,7 +62,12 @@ UsdUISceneGraphPrimAPI::Get(const UsdStagePtr &stage, const SdfPath &path)
 
 
 /* virtual */
-UsdSchemaType UsdUISceneGraphPrimAPI::_GetSchemaType() const {
+UsdSchemaKind UsdUISceneGraphPrimAPI::_GetSchemaKind() const {
+    return UsdUISceneGraphPrimAPI::schemaKind;
+}
+
+/* virtual */
+UsdSchemaKind UsdUISceneGraphPrimAPI::_GetSchemaType() const {
     return UsdUISceneGraphPrimAPI::schemaType;
 }
 
@@ -70,8 +75,10 @@ UsdSchemaType UsdUISceneGraphPrimAPI::_GetSchemaType() const {
 UsdUISceneGraphPrimAPI
 UsdUISceneGraphPrimAPI::Apply(const UsdPrim &prim)
 {
-    return UsdAPISchemaBase::_ApplyAPISchema<UsdUISceneGraphPrimAPI>(
-            prim, _schemaTokens->SceneGraphPrimAPI);
+    if (prim.ApplyAPI<UsdUISceneGraphPrimAPI>()) {
+        return UsdUISceneGraphPrimAPI(prim);
+    }
+    return UsdUISceneGraphPrimAPI();
 }
 
 /* static */

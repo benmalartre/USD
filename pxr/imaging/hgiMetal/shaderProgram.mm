@@ -51,9 +51,7 @@ HgiMetalShaderProgram::HgiMetalShaderProgram(HgiShaderProgramDesc const& desc)
     }
 }
 
-HgiMetalShaderProgram::~HgiMetalShaderProgram()
-{
-}
+HgiMetalShaderProgram::~HgiMetalShaderProgram() = default;
 
 HgiShaderFunctionHandleVector const&
 HgiMetalShaderProgram::GetShaderFunctions() const
@@ -71,6 +69,16 @@ std::string const&
 HgiMetalShaderProgram::GetCompileErrors()
 {
     return _errors;
+}
+
+size_t
+HgiMetalShaderProgram::GetByteSizeOfResource() const
+{
+    size_t  byteSize = 0;
+    for (HgiShaderFunctionHandle const& fn : _descriptor.shaderFunctions) {
+        byteSize += fn->GetByteSizeOfResource();
+    }
+    return byteSize;
 }
 
 uint64_t

@@ -62,7 +62,12 @@ UsdUINodeGraphNodeAPI::Get(const UsdStagePtr &stage, const SdfPath &path)
 
 
 /* virtual */
-UsdSchemaType UsdUINodeGraphNodeAPI::_GetSchemaType() const {
+UsdSchemaKind UsdUINodeGraphNodeAPI::_GetSchemaKind() const {
+    return UsdUINodeGraphNodeAPI::schemaKind;
+}
+
+/* virtual */
+UsdSchemaKind UsdUINodeGraphNodeAPI::_GetSchemaType() const {
     return UsdUINodeGraphNodeAPI::schemaType;
 }
 
@@ -70,8 +75,10 @@ UsdSchemaType UsdUINodeGraphNodeAPI::_GetSchemaType() const {
 UsdUINodeGraphNodeAPI
 UsdUINodeGraphNodeAPI::Apply(const UsdPrim &prim)
 {
-    return UsdAPISchemaBase::_ApplyAPISchema<UsdUINodeGraphNodeAPI>(
-            prim, _schemaTokens->NodeGraphNodeAPI);
+    if (prim.ApplyAPI<UsdUINodeGraphNodeAPI>()) {
+        return UsdUINodeGraphNodeAPI(prim);
+    }
+    return UsdUINodeGraphNodeAPI();
 }
 
 /* static */

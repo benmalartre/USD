@@ -21,8 +21,6 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-#include "pxr/imaging/glf/glew.h"
-#include "pxr/imaging/glf/contextCaps.h"
 #include "pxr/imaging/hio/glslfx.h"
 #include "pxr/imaging/hd/perfLog.h"
 #include "pxr/imaging/hd/tokens.h"
@@ -32,6 +30,7 @@
 #include "pxr/imaging/hdSt/glslProgram.h"
 #include "pxr/imaging/hdSt/glUtils.h"
 #include "pxr/imaging/hdSt/resourceRegistry.h"
+#include "pxr/base/arch/hash.h"
 #include "pxr/base/tf/diagnostic.h"
 
 #include <climits>
@@ -140,8 +139,7 @@ HdStGLSLProgram::HdStGLSLProgram(
     TfToken const &role,
     HdStResourceRegistry *const registry)
     :_registry(registry)
-    , _programResource(role),
-    _uniformBuffer(role)
+    , _role(role)
 {
     static size_t globalDebugID = 0;
     _debugID = globalDebugID++;
@@ -156,14 +154,6 @@ HdStGLSLProgram::~HdStGLSLProgram()
             hgi->DestroyShaderFunction(&fn);
         }
         hgi->DestroyShaderProgram(&_program);
-    }
-    _programResource.SetAllocation(0, 0);
-
-    GLuint uniformBuffer = _uniformBuffer.GetId();
-    if (uniformBuffer) {
-        if (glDeleteBuffers)
-            glDeleteBuffers(1, &uniformBuffer);
-        _uniformBuffer.SetAllocation(0, 0);
     }
 }
 
@@ -231,12 +221,14 @@ HdStGLSLProgram::CompileShader(
 
     // Create a shader, compile it
     HgiShaderFunctionDesc shaderFnDesc;
-    shaderFnDesc.shaderCode = shaderSource;
+    shaderFnDesc.shaderCode = shaderSource.c_str();
     shaderFnDesc.shaderStage = stage;
     HgiShaderFunctionHandle shaderFn = hgi->CreateShaderFunction(shaderFnDesc);
 
     std::string fname;
-    if (TfDebug::IsEnabled(HDST_DUMP_SHADER_SOURCEFILE)) {
+    if (TfDebug::IsEnabled(HDST_DUMP_SHADER_SOURCEFILE) ||
+            ( TfDebug::IsEnabled(HDST_DUMP_FAILING_SHADER_SOURCEFILE) &&
+              !shaderFn->IsValid())) {
         std::stringstream fnameStream;
         static size_t debugShaderID = 0;
         fnameStream << "program" << _debugID << "_shader" << debugShaderID++
@@ -352,23 +344,6 @@ HdStGLSLProgram::Link()
         if (TfDebug::IsEnabled(HDST_DUMP_FAILING_SHADER_SOURCE)) {
             std::cout << _DebugLinkSource(_program) << std::flush;
         }
-    }
-
-    // update the program resource allocation.
-    TF_VERIFY(hgi->GetAPIName() == HgiTokens->OpenGL, "TODO Hgi transition");
-    uint32_t glProgram = _program.Get()->GetRawResource();
-    _programResource.SetAllocation(glProgram, 0);
-
-    // create an uniform buffer
-    GLuint uniformBuffer = _uniformBuffer.GetId();
-    if (uniformBuffer == 0) {
-        GlfContextCaps const &caps = GlfContextCaps::GetInstance();
-        if (ARCH_LIKELY(caps.directStateAccessEnabled)) {
-            glCreateBuffers(1, &uniformBuffer);
-        } else {
-            glGenBuffers(1, &uniformBuffer);
-        }
-        _uniformBuffer.SetAllocation(uniformBuffer, 0);
     }
 
     return success;

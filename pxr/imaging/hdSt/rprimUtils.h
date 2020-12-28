@@ -26,6 +26,7 @@
 
 #include "pxr/pxr.h"
 #include "pxr/imaging/hdSt/api.h"
+#include "pxr/imaging/hdSt/resourceRegistry.h"
 #include "pxr/imaging/hd/sceneDelegate.h"
 
 #include <memory>
@@ -49,10 +50,9 @@ using HdBufferSpecVector = std::vector<struct HdBufferSpec>;
 using HdStShaderCodeSharedPtr = std::shared_ptr<class HdStShaderCode>;
 
 using HdComputationSharedPtr = std::shared_ptr<class HdComputation>;
-using HdComputationSharedPtrVector = std::vector<HdComputationSharedPtr>;
 
 using HdStResourceRegistrySharedPtr = 
-    std::shared_ptr<class HdStResourceRegistry>;
+    std::shared_ptr<HdStResourceRegistry>;
 
 // -----------------------------------------------------------------------------
 // Primvar descriptor filtering utilities
@@ -71,8 +71,6 @@ HDST_API
 HdPrimvarDescriptorVector
 HdStGetInstancerPrimvarDescriptors(
     HdStInstancer const * instancer,
-    HdRprim const * prim,
-    HdStDrawItem const * drawItem,
     HdSceneDelegate * delegate);
 
 // -----------------------------------------------------------------------------
@@ -99,7 +97,7 @@ bool HdStIsValidBAR(HdBufferArrayRangeSharedPtr const& range);
 HDST_API
 bool HdStCanSkipBARAllocationOrUpdate(
     HdBufferSourceSharedPtrVector const& sources,
-    HdComputationSharedPtrVector const& computations,
+    HdStComputationSharedPtrVector const& computations,
     HdBufferArrayRangeSharedPtr const& curRange,
     HdDirtyBits dirtyBits);
 
@@ -140,6 +138,15 @@ void HdStUpdateDrawItemBAR(
     HdRprimSharedData *sharedData,
     HdRenderIndex &renderIndex);
 
+// Returns true if primvar with primvarName exists within primvar descriptor 
+// vector primvars and primvar has a valid value
+HDST_API
+bool HdStIsPrimvarExistentAndValid(
+    HdRprim *prim,
+    HdSceneDelegate *delegate,
+    HdPrimvarDescriptorVector const& primvars,
+    TfToken const& primvarName);
+
 // -----------------------------------------------------------------------------
 // Constant primvar processing utilities
 // -----------------------------------------------------------------------------
@@ -152,6 +159,7 @@ bool HdStShouldPopulateConstantPrimvars(
 
 // Given prim information it will create sources representing
 // constant primvars and hand it to the resource registry.
+// If transforms are dirty, updates the optional bool.
 HDST_API
 void HdStPopulateConstantPrimvars(
     HdRprim *prim,
@@ -159,7 +167,29 @@ void HdStPopulateConstantPrimvars(
     HdSceneDelegate *delegate,
     HdDrawItem *drawItem,
     HdDirtyBits *dirtyBits,
-    HdPrimvarDescriptorVector const& constantPrimvars);
+    HdPrimvarDescriptorVector const& constantPrimvars,
+    bool *hasMirroredTransform = nullptr);
+
+// -----------------------------------------------------------------------------
+// Instancer processing utilities
+// -----------------------------------------------------------------------------
+
+// Updates drawItem bindings for changes to instance topology/primvars.
+HDST_API
+void HdStUpdateInstancerData(
+    HdRenderIndex &renderIndex,
+    HdRprim *prim,
+    HdStDrawItem *drawItem,
+    HdRprimSharedData *sharedData,
+    HdDirtyBits rprimDirtyBits);
+
+// Returns true if primvar with primvarName exists among instance primvar
+// descriptors.
+HDST_API
+bool HdStIsInstancePrimvarExistentAndValid(
+    HdRenderIndex &renderIndex,
+    HdRprim *prim,
+    TfToken const& primvarName);
 
 // -----------------------------------------------------------------------------
 // Topological visibility processing utility
@@ -178,6 +208,56 @@ void HdStProcessTopologyVisibility(
     HdStResourceRegistrySharedPtr const &resourceRegistry,
     SdfPath const& rprimId);
 
+//
+// De-duplicating and sharing immutable primvar data.
+// 
+// Primvar data is identified using a hash computed from the
+// sources of the primvar data, of which there are generally
+// two kinds:
+//   - data provided by the scene delegate
+//   - data produced by computations
+// 
+// Immutable and mutable buffer data is managed using distinct
+// heaps in the resource registry. Aggregation of buffer array
+// ranges within each heap is managed separately.
+// 
+// We attempt to balance the benefits of sharing vs efficient
+// varying update using the following simple strategy:
+//
+//  - When populating the first repr for an rprim, allocate
+//    the primvar range from the immutable heap and attempt
+//    to deduplicate the data by looking up the primvarId
+//    in the primvar instance registry.
+//
+//  - When populating an additional repr for an rprim using
+//    an existing immutable primvar range, compute an updated
+//    primvarId and allocate from the immutable heap, again
+//    attempting to deduplicate.
+//
+//  - Otherwise, migrate the primvar data to the mutable heap
+//    and abandon further attempts to deduplicate.
+//
+//  - The computation of the primvarId for an rprim is cumulative
+//    and includes the new sources of data being committed
+//    during each successive update.
+//
+//  - Once we have migrated a primvar allocation to the mutable
+//    heap we will no longer spend time computing a primvarId.
+//
+
+HDST_API
+bool HdStIsEnabledSharedVertexPrimvar();
+
+HDST_API
+uint64_t HdStComputeSharedPrimvarId(
+    uint64_t baseId,
+    HdBufferSourceSharedPtrVector const &sources,
+    HdStComputationSharedPtrVector const &computations);
+
+HDST_API
+void HdStGetBufferSpecsFromCompuations(
+    HdStComputationSharedPtrVector const& computations,
+    HdBufferSpecVector *bufferSpecs);
 
 PXR_NAMESPACE_CLOSE_SCOPE
 

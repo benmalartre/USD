@@ -27,9 +27,9 @@
 #include "pxr/imaging/hgiGL/conversions.h"
 #include "pxr/imaging/hgiGL/diagnostic.h"
 #include "pxr/imaging/hgiGL/shaderFunction.h"
+#include "pxr/imaging/hgiGL/shaderGenerator.h"
 
 PXR_NAMESPACE_OPEN_SCOPE
-
 
 HgiGLShaderFunction::HgiGLShaderFunction(
     HgiShaderFunctionDesc const& desc)
@@ -47,7 +47,11 @@ HgiGLShaderFunction::HgiGLShaderFunction(
         glObjectLabel(GL_SHADER, _shaderId, -1, _descriptor.debugName.c_str());
     }
 
-    const char* src = desc.shaderCode.c_str();
+    HgiGLShaderGenerator shaderGenerator {desc};
+    std::stringstream ss;
+    shaderGenerator.Execute(ss);
+    std::string shaderStr = ss.str();
+    const char* src = shaderStr.c_str();
     glShaderSource(_shaderId, 1, &src, nullptr);
     glCompileShader(_shaderId);
 
@@ -63,6 +67,7 @@ HgiGLShaderFunction::HgiGLShaderFunction(
         _shaderId = 0;
     }
 
+    _descriptor.shaderCode = nullptr;
     HGIGL_POST_PENDING_GL_ERRORS();
 }
 
@@ -84,6 +89,12 @@ std::string const&
 HgiGLShaderFunction::GetCompileErrors()
 {
     return _errors;
+}
+
+size_t
+HgiGLShaderFunction::GetByteSizeOfResource() const
+{
+    return 0; // Can only query program binary size, not individual shaders.
 }
 
 uint64_t

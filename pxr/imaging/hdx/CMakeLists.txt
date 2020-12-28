@@ -31,24 +31,18 @@ pxr_library(hdx
         hgiInterop
         cameraUtil
         sdf
-        ${GLEW_LIBRARY}
         ${optionalLibs}
 
     INCLUDE_DIRS
-        ${GLEW_INCLUDE_DIR}
         ${optionalIncludeDirs}
 
     PUBLIC_CLASSES
         aovInputTask
-        colorizeTask
         colorizeSelectionTask
         colorChannelTask
         colorCorrectionTask
-        drawTargetRenderPass
         drawTargetTask
-        drawTargetResolveTask
         fullscreenShader
-        fullscreenShaderGL
         hgiConversions
         oitBufferAccessor
         oitRenderTask
@@ -88,6 +82,7 @@ pxr_library(hdx
         shaders/fullscreen.glslfx
         shaders/renderPass.glslfx
         shaders/renderPassShader.glslfx
+        shaders/renderPassDiscardUnselectedShader.glslfx
         shaders/renderPassIdShader.glslfx
         shaders/renderPassPickingShader.glslfx
         shaders/renderPassShadowShader.glslfx
@@ -98,6 +93,9 @@ pxr_library(hdx
         shaders/oitResolveImageShader.glslfx
         shaders/outline.glslfx
         textures/StinsonBeach.exr
+
+    DOXYGEN_FILES
+        overview.dox
 )
 
 if (X11_FOUND)
@@ -204,7 +202,7 @@ pxr_build_test(testHdxUnpickablesAsOccluders
         unitTestUtils.cpp
         testenv/testHdxUnpickablesAsOccluders.cpp
 )
-pxr_build_test(testHdxPickSubprims
+pxr_build_test(testHdxPickTarget
     LIBRARIES
         hdx
         hd
@@ -216,6 +214,20 @@ pxr_build_test(testHdxPickSubprims
         tf
     CPPFILES
         unitTestUtils.cpp
-        testenv/testHdxPickSubprims.cpp
+        testenv/testHdxPickTarget.cpp
+)
+pxr_build_test(testHdxPickResolveMode
+    LIBRARIES
+        hdx
+        hd
+        hdSt
+        sdf
+        glf
+        garch
+        arch
+        tf
+    CPPFILES
+        unitTestUtils.cpp
+        testenv/testHdxPickResolveMode.cpp
 )
 endif()

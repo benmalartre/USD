@@ -62,7 +62,12 @@ UsdLuxListAPI::Get(const UsdStagePtr &stage, const SdfPath &path)
 
 
 /* virtual */
-UsdSchemaType UsdLuxListAPI::_GetSchemaType() const {
+UsdSchemaKind UsdLuxListAPI::_GetSchemaKind() const {
+    return UsdLuxListAPI::schemaKind;
+}
+
+/* virtual */
+UsdSchemaKind UsdLuxListAPI::_GetSchemaType() const {
     return UsdLuxListAPI::schemaType;
 }
 
@@ -70,8 +75,10 @@ UsdSchemaType UsdLuxListAPI::_GetSchemaType() const {
 UsdLuxListAPI
 UsdLuxListAPI::Apply(const UsdPrim &prim)
 {
-    return UsdAPISchemaBase::_ApplyAPISchema<UsdLuxListAPI>(
-            prim, _schemaTokens->ListAPI);
+    if (prim.ApplyAPI<UsdLuxListAPI>()) {
+        return UsdLuxListAPI(prim);
+    }
+    return UsdLuxListAPI();
 }
 
 /* static */

@@ -75,7 +75,12 @@ UsdShadeMaterial::Define(
 }
 
 /* virtual */
-UsdSchemaType UsdShadeMaterial::_GetSchemaType() const {
+UsdSchemaKind UsdShadeMaterial::_GetSchemaKind() const {
+    return UsdShadeMaterial::schemaKind;
+}
+
+/* virtual */
+UsdSchemaKind UsdShadeMaterial::_GetSchemaType() const {
     return UsdShadeMaterial::schemaType;
 }
 
@@ -196,7 +201,11 @@ PXR_NAMESPACE_CLOSE_SCOPE
 // ===================================================================== //
 // --(BEGIN CUSTOM CODE)--
 
+#include "pxr/base/tf/token.h"
+
 #include "pxr/usd/pcp/mapExpression.h"
+
+#include "pxr/usd/sdf/path.h"
 
 #include "pxr/usd/usd/editContext.h"
 #include "pxr/usd/usd/specializes.h"
@@ -204,9 +213,15 @@ PXR_NAMESPACE_CLOSE_SCOPE
 #include "pxr/usd/usd/variantSets.h"
 
 #include "pxr/usd/usdShade/connectableAPI.h"
+#include "pxr/usd/usdShade/connectableAPIBehavior.h"
 #include "pxr/usd/usdShade/materialBindingAPI.h"
+#include "pxr/usd/usdShade/output.h"
 #include "pxr/usd/usdShade/tokens.h"
 #include "pxr/usd/usdShade/utils.h"
+
+#include <string>
+#include <utility>
+#include <vector>
 
 PXR_NAMESPACE_OPEN_SCOPE
 
@@ -494,22 +509,25 @@ _GetOutputName(const TfToken &baseName, const TfToken &renderContext)
     return TfToken(SdfPath::JoinIdentifier(renderContext, baseName));
 }
 
-bool
-UsdShadeMaterial::_ComputeNamedOutputSource(
-    const TfToken &baseName, 
-    const TfToken &renderContext,
-    UsdShadeConnectableAPI *source,
-    TfToken *sourceName,
-    UsdShadeAttributeType *sourceType) const
+UsdShadeAttributeVector
+UsdShadeMaterial::_ComputeNamedOutputSources(
+        const TfToken &baseName,
+        const TfToken &renderContext) const
 {
     const TfToken outputName = _GetOutputName(baseName, renderContext);
     UsdShadeOutput output = GetOutput(outputName);
     if (output) {
         if (renderContext == UsdShadeTokens->universalRenderContext && 
             !output.GetAttr().IsAuthored()) {
-            return false;
-        } else if (output.GetConnectedSource(source, sourceName, sourceType)) {
-            return true;
+            return {};
+        }
+
+        UsdShadeAttributeVector valueAttrs =
+            UsdShadeUtils::GetValueProducingAttributes(output);
+        // If we didn't find any connected attributes we will check the
+        // universal context below
+        if (!valueAttrs.empty()) {
+            return valueAttrs;
         }
     }
 
@@ -518,41 +536,79 @@ UsdShadeMaterial::_ComputeNamedOutputSource(
                 baseName, UsdShadeTokens->universalRenderContext);
         UsdShadeOutput universalOutput = GetOutput(universalOutputName);
         if (TF_VERIFY(universalOutput)) {
-            if (renderContext == UsdShadeTokens->universalRenderContext && 
-                !universalOutput.GetAttr().IsAuthored()) {
-                return false;
-            } else if (universalOutput.GetConnectedSource(source, sourceName, 
-                    sourceType)) {
-                return true;
-            }
+            return UsdShadeUtils::GetValueProducingAttributes(universalOutput);
         }
     }
 
-    return false;
+    return {};
 }
 
 UsdShadeShader 
 UsdShadeMaterial::_ComputeNamedOutputShader(
     const TfToken &baseName,
     const TfToken &renderContext,
-    TfToken *sourceName, 
+    TfToken *sourceName,
     UsdShadeAttributeType *sourceType) const
 {
-    UsdShadeConnectableAPI source;
-    TfToken srcName; 
-    UsdShadeAttributeType srcType;
-    if (_ComputeNamedOutputSource(baseName, renderContext, 
-                                  &source, &srcName, &srcType)) {
-        if (source.IsNodeGraph()) {
-            source = UsdShadeNodeGraph(source.GetPrim()).ComputeOutputSource(
-                srcName, &srcName, &srcType);
-        }
-        if (sourceName)
-            *sourceName = srcName;
-        if (sourceType)
-            *sourceType = srcType;
+    UsdShadeAttributeVector valueAttrs =
+        _ComputeNamedOutputSources(baseName, renderContext);
+
+    if (valueAttrs.empty()) {
+        return UsdShadeShader();
     }
-    return source;
+
+    // XXX To remove this limitation we need to change the APIs for the
+    //     Compute*Source calls to forward multiple result attributes
+    if (valueAttrs.size() > 1) {
+        TF_WARN("Multiple connected sources for output %s:%s on material %s. "
+                "Only the first will be consider as a terminal.",
+                renderContext.GetText(), baseName.GetText(),
+                GetPath().GetText());
+    }
+
+    if (sourceName || sourceType) {
+        TfToken srcName;
+        UsdShadeAttributeType srcType;
+        std::tie(srcName, srcType) =
+            UsdShadeUtils::GetBaseNameAndType(valueAttrs[0].GetName());
+        if (sourceName) {
+            *sourceName = srcName;
+        }
+        if (sourceType) {
+            *sourceType = srcType;
+        }
+    }
+
+    return UsdShadeShader(valueAttrs[0].GetPrim());
+}
+
+std::vector<UsdShadeOutput>
+UsdShadeMaterial::_GetOutputsForTerminalName(const TfToken& terminalName) const
+{
+    std::vector<UsdShadeOutput> outputs;
+
+    UsdShadeOutput universalOutput = GetOutput(
+        _GetOutputName(terminalName, UsdShadeTokens->universalRenderContext));
+    if (universalOutput) {
+        outputs.push_back(std::move(universalOutput));
+    }
+
+    for (const UsdShadeOutput& output : GetOutputs()) {
+        // For an output to be considered specific to a renderContext, its base
+        // name should be of the form "<renderContext>:...", so there must be
+        // at least two components to the base name.
+        const std::vector<std::string> baseNameComponents =
+            SdfPath::TokenizeIdentifier(output.GetBaseName());
+        if (baseNameComponents.size() < 2u) {
+            continue;
+        }
+
+        if (baseNameComponents.back() == terminalName) {
+            outputs.push_back(output);
+        }
+    }
+
+    return outputs;
 }
 
 UsdShadeOutput 
@@ -566,6 +622,12 @@ UsdShadeOutput
 UsdShadeMaterial::GetSurfaceOutput(const TfToken &renderContext) const
 {
     return GetOutput(_GetOutputName(UsdShadeTokens->surface, renderContext));
+}
+
+std::vector<UsdShadeOutput>
+UsdShadeMaterial::GetSurfaceOutputs() const
+{
+    return _GetOutputsForTerminalName(UsdShadeTokens->surface);
 }
 
 UsdShadeShader 
@@ -591,6 +653,12 @@ UsdShadeMaterial::GetDisplacementOutput(const TfToken &renderContext) const
     return GetOutput(_GetOutputName(UsdShadeTokens->displacement, renderContext));
 }
 
+std::vector<UsdShadeOutput>
+UsdShadeMaterial::GetDisplacementOutputs() const
+{
+    return _GetOutputsForTerminalName(UsdShadeTokens->displacement);
+}
+
 UsdShadeShader 
 UsdShadeMaterial::ComputeDisplacementSource(
     const TfToken &renderContext,
@@ -614,6 +682,12 @@ UsdShadeMaterial::GetVolumeOutput(const TfToken &renderContext) const
     return GetOutput(_GetOutputName(UsdShadeTokens->volume, renderContext));
 }
 
+std::vector<UsdShadeOutput>
+UsdShadeMaterial::GetVolumeOutputs() const
+{
+    return _GetOutputsForTerminalName(UsdShadeTokens->volume);
+}
+
 UsdShadeShader 
 UsdShadeMaterial::ComputeVolumeSource(
     const TfToken &renderContext,
@@ -622,6 +696,34 @@ UsdShadeMaterial::ComputeVolumeSource(
 {
     return _ComputeNamedOutputShader(UsdShadeTokens->volume, renderContext, 
             sourceName, sourceType);
+}
+
+class UsdShadeMaterial_ConnectableAPIBehavior : public UsdShadeNodeGraph::ConnectableAPIBehavior
+{
+    bool
+    CanConnectInputToSource(const UsdShadeInput &input,
+                            const UsdAttribute &source,
+                            std::string *reason) override
+    {
+        // TODO: In the future we will only allows connections whose path
+        // contains the Material's path as a prefix (i.e. encapsulation)
+        // Note that UsdLuxLight and UsdLuxLightFilter already implement
+        // this behavior so this should be reimplemented as a shared behavior
+        // that can be used by any connectables that need it.
+        return true;
+    }
+
+    bool IsContainer() const
+    {
+        // Material does act as a namespace container for connected nodes
+        return true;
+    }
+};
+
+TF_REGISTRY_FUNCTION(UsdShadeConnectableAPI)
+{
+    UsdShadeRegisterConnectableAPIBehavior<UsdShadeMaterial,
+        UsdShadeMaterial_ConnectableAPIBehavior>();
 }
 
 

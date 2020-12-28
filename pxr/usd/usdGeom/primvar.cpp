@@ -70,10 +70,15 @@ UsdGeomPrimvar::IsValidPrimvarName(const TfToken& name)
 }
 
 /* static */
-bool
-UsdGeomPrimvar::IsPrimvarRelatedPropertyName(const TfToken& name)
+TfToken
+UsdGeomPrimvar::StripPrimvarsName(const TfToken& name)
 {
-    return TfStringStartsWith(name, _tokens->primvarsPrefix);
+    std::string const & fullName = name.GetString();
+
+    std::pair<std::string, bool> res =
+        SdfPath::StripPrefixNamespace(fullName, _tokens->primvarsPrefix);
+
+    return res.second ? TfToken(res.first) : name;
 }
 
 /* static */

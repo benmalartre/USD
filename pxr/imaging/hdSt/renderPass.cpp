@@ -21,8 +21,6 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-#include "pxr/imaging/glf/glew.h"
-
 #include "pxr/imaging/hdSt/renderPass.h"
 
 #include "pxr/imaging/glf/contextCaps.h"
@@ -49,8 +47,6 @@
 
 #include "pxr/base/gf/frustum.h"
 
-#include "pxr/imaging/glf/diagnostic.h"
-
 
 // XXX We do not want to include specific HgiXX backends, but we need to do
 // this temporarily until Storm has transitioned fully to Hgi.
@@ -64,7 +60,6 @@ _ExecuteDraw(
     HdStRenderPassStateSharedPtr const& stRenderPassState,
     HdStResourceRegistrySharedPtr const& resourceRegistry)
 {
-    cmdBuffer->PrepareDraw(stRenderPassState, resourceRegistry);
     cmdBuffer->ExecuteDraw(stRenderPassState, resourceRegistry);
 }
 
@@ -103,13 +98,83 @@ HdSt_RenderPass::_Prepare(TfTokenVector const &renderTags)
     _PrepareDrawItems(renderTags);
 }
 
+static
+const GfVec3i &
+_GetFramebufferSize(const HgiGraphicsCmdsDesc &desc)
+{
+    for (const HgiTextureHandle &color : desc.colorTextures) {
+        return color->GetDescriptor().dimensions;
+    }
+    if (desc.depthTexture) {
+        return desc.depthTexture->GetDescriptor().dimensions;
+    }
+    
+    static const GfVec3i fallback(0);
+    return fallback;
+}
+
+static
+GfVec4i
+_FlipViewport(const GfVec4i &viewport,
+              const GfVec3i &framebufferSize)
+{
+    const int height = framebufferSize[1];
+    if (height > 0) {
+        return GfVec4i(viewport[0],
+                       height - (viewport[1] + viewport[3]),
+                       viewport[2],
+                       viewport[3]);
+    } else {
+        return viewport;
+    }
+}
+
+static
+GfVec4i
+_ToVec4i(const GfVec4f &v)
+{
+    return GfVec4i(int(v[0]), int(v[1]), int(v[2]), int(v[3]));
+}
+
+static
+GfVec4i
+_ToVec4i(const GfRect2i &r)
+{
+    return GfVec4i(r.GetMinX(),  r.GetMinY(),
+                   r.GetWidth(), r.GetHeight());
+}
+
+static
+GfVec4i
+_ComputeViewport(HdRenderPassStateSharedPtr const &renderPassState,
+                 const HgiGraphicsCmdsDesc &desc,
+                 const bool flip)
+{
+    const CameraUtilFraming &framing = renderPassState->GetFraming();
+    if (framing.IsValid()) {
+        // Use data window for clients using the new camera framing
+        // API.
+        const GfVec4i viewport = _ToVec4i(framing.dataWindow);
+        if (flip) {
+            // Note that in OpenGL, the coordinates for the viewport
+            // are y-Up but the camera framing is y-Down.
+            return _FlipViewport(viewport, _GetFramebufferSize(desc));
+        } else {
+            return viewport;
+        }
+    }
+
+    // For clients not using the new camera framing API, fallback
+    // to the viewport they specified.
+    return _ToVec4i(renderPassState->GetViewport());
+}
+
 void
 HdSt_RenderPass::_Execute(HdRenderPassStateSharedPtr const &renderPassState,
                           TfTokenVector const& renderTags)
 {
     HD_TRACE_FUNCTION();
     HF_MALLOC_TAG_FUNCTION();
-    GLF_GROUP_FUNCTION();
 
     // Downcast render pass state
     HdStRenderPassStateSharedPtr stRenderPassState =
@@ -128,28 +193,31 @@ HdSt_RenderPass::_Execute(HdRenderPassStateSharedPtr const &renderPassState,
         GetRenderIndex()->GetResourceRegistry());
     TF_VERIFY(resourceRegistry);
 
+    _cmdBuffer.PrepareDraw(stRenderPassState, resourceRegistry);
+
     // Create graphics work to render into aovs.
-    HgiGraphicsCmdsDesc desc = stRenderPassState->MakeGraphicsCmdsDesc();
+    const HgiGraphicsCmdsDesc desc =
+        stRenderPassState->MakeGraphicsCmdsDesc(GetRenderIndex());
     HgiGraphicsCmdsUniquePtr gfxCmds = _hgi->CreateGraphicsCmds(desc);
-
-    // XXX When there are no aovBindings we get a null work object.
-    // This would ideally never happen, but currently happens for some
-    // custom prims that spawn an imagingGLengine  with a task controller that
-    // has no aovBindings.
- 
-    if (gfxCmds) {
-        HdRprimCollection const &collection = GetRprimCollection();
-        std::string passName = "HdSt_RenderPass: " +
-            collection.GetMaterialTag().GetString();
-        gfxCmds->PushDebugGroup(passName.c_str());
+    if (!TF_VERIFY(gfxCmds)) {
+        return;
     }
+    HdRprimCollection const &collection = GetRprimCollection();
+    std::string passName = "HdSt_RenderPass: " +
+        collection.GetMaterialTag().GetString();
+    gfxCmds->PushDebugGroup(passName.c_str());
 
-    // Draw
+    gfxCmds->SetViewport(
+        _ComputeViewport(
+            renderPassState,
+            desc,
+            /* flip = */ _hgi->GetAPIName() == HgiTokens->OpenGL));
+
     HdStCommandBuffer* cmdBuffer = &_cmdBuffer;
     HgiGLGraphicsCmds* glGfxCmds = 
         dynamic_cast<HgiGLGraphicsCmds*>(gfxCmds.get());
 
-    if (gfxCmds && glGfxCmds) {
+    if (glGfxCmds) {
         // XXX Tmp code path to allow non-hgi code to insert functions into
         // HgiGL ops-stack. Will be removed once Storms uses Hgi everywhere
         auto executeDrawOp = [cmdBuffer, stRenderPassState, resourceRegistry] {
@@ -178,7 +246,6 @@ void
 HdSt_RenderPass::_PrepareDrawItems(TfTokenVector const& renderTags)
 {
     HD_TRACE_FUNCTION();
-    GLF_GROUP_FUNCTION();
 
     HdChangeTracker const &tracker = GetRenderIndex()->GetChangeTracker();
     HdRprimCollection const &collection = GetRprimCollection();
@@ -219,7 +286,6 @@ void
 HdSt_RenderPass::_PrepareCommandBuffer(TfTokenVector const& renderTags)
 {
     HD_TRACE_FUNCTION();
-    GLF_GROUP_FUNCTION();
 
     // -------------------------------------------------------------------
     // SCHEDULE PREPARATION

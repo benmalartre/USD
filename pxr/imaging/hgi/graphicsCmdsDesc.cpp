@@ -23,15 +23,15 @@
 //
 #include "pxr/imaging/hgi/graphicsCmdsDesc.h"
 
+#include <ostream>
+
 PXR_NAMESPACE_OPEN_SCOPE
 
 bool operator==(
     const HgiGraphicsCmdsDesc& lhs,
     const HgiGraphicsCmdsDesc& rhs) 
 {
-    return  lhs.width == rhs.width &&
-            lhs.height == rhs.height &&
-            lhs.depthAttachmentDesc == rhs.depthAttachmentDesc &&
+    return  lhs.depthAttachmentDesc == rhs.depthAttachmentDesc &&
             lhs.colorAttachmentDescs == rhs.colorAttachmentDescs &&
             lhs.depthTexture == rhs.depthTexture &&
             lhs.depthResolveTexture == rhs.depthResolveTexture &&
@@ -51,15 +51,15 @@ std::ostream& operator<<(
     const HgiGraphicsCmdsDesc& desc)
 {
     out << "HgiGraphicsCmdsDesc: {";
-    out << "width: " << desc.width << ", ";
-    out << "height: " << desc.height << ", ";
 
     for (HgiAttachmentDesc const& a : desc.colorAttachmentDescs) {
         out << a;
     }
     
     for (size_t i=0; i<desc.colorTextures.size(); i++) {
-        out << "colorTexture" << i << ", ";
+        out << "colorTexture" << i << " ";
+        out << "dimensions:" << 
+            desc.colorTextures[i]->GetDescriptor().dimensions << ", ";
     }
 
     for (size_t i=0; i<desc.colorResolveTextures.size(); i++) {
@@ -68,7 +68,8 @@ std::ostream& operator<<(
 
     if (desc.depthTexture) {
         out << desc.depthAttachmentDesc;
-        out << "depthTexture";
+        out << "depthTexture ";
+        out << "dimensions:" << desc.depthTexture->GetDescriptor().dimensions;
     }
 
     if (desc.depthResolveTexture) {

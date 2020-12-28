@@ -371,17 +371,7 @@ namespace {
 
         if (resultLayer->GetPrimAtPath(stitchPath)) {
             const double startTimeCode = _GetStartTimeCode(clipLayer);
-            const double endTimeCode = _GetEndTimeCode(clipLayer);
-            const double timeSpent = endTimeCode - startTimeCode;
-
-            // if it is our first clip
-            if (currentClipActive.empty()) {
-                currentClipActive.push_back(GfVec2d(startTimeCode, 
-                                                    clipIndex));
-            } else {
-                currentClipActive.push_back(GfVec2d(startTimeCode+timeSpent,
-                                                    clipIndex));
-            }
+            currentClipActive.push_back(GfVec2d(startTimeCode, clipIndex));
             _SetValue(resultLayer, stitchPath, UsdClipsAPIInfoKeys->active, 
                       currentClipActive, clipSet);
         }
@@ -727,6 +717,7 @@ namespace {
                              const SdfPath& clipPath, 
                              const double startTimeCode,
                              const double endTimeCode,
+                             const bool interpolateMissingClipValues,
                              const TfToken& clipSet)
     {
         TfErrorMark errorMark;
@@ -735,6 +726,12 @@ namespace {
                       clipLayers, clipPath, clipSet);
         _SetTimeCodeRange(resultLayer, clipPath, 
                           startTimeCode, endTimeCode, clipSet);
+
+        if (interpolateMissingClipValues) {
+            _SetValue(resultLayer, clipPath,
+                      UsdClipsAPIInfoKeys->interpolateMissingClipValues,
+                      interpolateMissingClipValues, clipSet);
+        }
 
         return errorMark.IsClean();
     }
@@ -831,6 +828,7 @@ UsdUtilsStitchClips(const SdfLayerHandle& resultLayer,
                     const SdfPath& clipPath, 
                     const double startTimeCode,
                     const double endTimeCode,
+                    const bool interpolateMissingClipValues,
                     const TfToken& clipSet)
 {
     // XXX: See comment in UsdUtilsStitchClipsTopology above.
@@ -868,6 +866,7 @@ UsdUtilsStitchClips(const SdfLayerHandle& resultLayer,
         || !_UsdUtilsStitchClipsImpl(resultLayer, topologyLayer, 
                                      clipLayers, clipPath, 
                                      startTimeCode, endTimeCode,
+                                     interpolateMissingClipValues,
                                      clipSet)) {
         if (!topologyPreExisting) {
             TfDeleteFile(topologyLayer->GetIdentifier());
@@ -906,6 +905,7 @@ UsdUtilsStitchClipsTemplate(const SdfLayerHandle& resultLayer,
                             const double endTime,
                             const double stride,
                             const double activeOffset,
+                            const bool interpolateMissingClipValues,
                             const TfToken& clipSet)
 {
     // XXX: See comment in UsdUtilsStitchClipsTopology above.
@@ -939,6 +939,9 @@ UsdUtilsStitchClipsTemplate(const SdfLayerHandle& resultLayer,
     clipSetDict[UsdClipsAPIInfoKeys->manifestAssetPath] = SdfAssetPath(topologyId);
     if (activeOffset != std::numeric_limits<double>::max()) {
         clipSetDict[UsdClipsAPIInfoKeys->templateActiveOffset] = activeOffset; 
+    }
+    if (interpolateMissingClipValues) {
+        clipSetDict[UsdClipsAPIInfoKeys->interpolateMissingClipValues] = true;
     }
 
     VtDictionary clips;

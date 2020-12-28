@@ -35,7 +35,6 @@
 #include "pxr/usd/pcp/utils.h"
 #include "pxr/usd/sdf/changeList.h"
 #include "pxr/usd/sdf/layer.h"
-#include "pxr/usd/sdf/layerUtils.h"
 #include "pxr/usd/ar/resolverContextBinder.h"
 #include "pxr/base/trace/trace.h"
 
@@ -1108,8 +1107,7 @@ PcpChanges::DidChange(const TfSpan<const PcpCache*>& caches,
             SdfPathVector depPaths;
 
             for (auto cache : caches) {
-                PcpCacheChanges::PathEditMap& renameChanges =
-                    _GetRenameChanges(cache);
+                _PathEditMap& renameChanges = _GetRenameChanges(cache);
 
                 // Do every path.
                 for (size_t i = 0, n = oldPaths.size(); i != n; ++i) {
@@ -1327,10 +1325,9 @@ PcpChanges::DidMaybeFixAsset(
     std::string* debugSummary = TfDebug::IsEnabled(PCP_CHANGES) ? &summary : 0;
 
     // Load the layer.
-    std::string resolvedAssetPath(assetPath);
     TfErrorMark m;
-    SdfLayerRefPtr layer = SdfFindOrOpenRelativeToLayer(
-        srcLayer, &resolvedAssetPath);
+    SdfLayerRefPtr layer = SdfLayer::FindOrOpenRelativeToLayer(
+        srcLayer, assetPath);
     m.Clear();
     
     PCP_APPEND_DEBUG("  Asset @%s@ %s\n",
@@ -1507,17 +1504,14 @@ PcpChanges::DidChangePaths(
     const SdfPath& oldPath,
     const SdfPath& newPath)
 {
-    // XXX: Do we need to handle rename chains?  I.e. A renamed to B
-    //      then renamed to C.  If so then we may need to handle one
-    //      oldPath appearing multiple times, e.g. A -> B -> C and
-    //      D -> B -> E, where B appears in two chains.
-
     TF_DEBUG(PCP_CHANGES).Msg("PcpChanges::DidChangePaths: @%s@<%s> to <%s>\n",
                               cache->GetLayerStackIdentifier().rootLayer->
                                   GetIdentifier().c_str(),
                               oldPath.GetText(), newPath.GetText());
 
-    _GetCacheChanges(cache).didChangePath[oldPath] = newPath;
+    // Changes are ordered. A chain of A -> B; B -> C is different than a 
+    // parallel move B -> C; A -> B
+    _GetCacheChanges(cache).didChangePath.emplace_back(oldPath, newPath);
 }
 
 void
@@ -1610,7 +1604,7 @@ PcpChanges::_GetCacheChanges(const PcpCache* cache)
     return _cacheChanges[const_cast<PcpCache*>(cache)];
 }
 
-PcpCacheChanges::PathEditMap&
+PcpChanges::_PathEditMap&
 PcpChanges::_GetRenameChanges(const PcpCache* cache)
 {
     return _renameChanges[const_cast<PcpCache*>(cache)];
@@ -1667,15 +1661,23 @@ void
 PcpChanges::_OptimizePathChanges(
     const PcpCache* cache,
     PcpCacheChanges* changes,
-    PcpCacheChanges::PathEditMap* pathChanges)
+    const _PathEditMap* pathChanges)
 {
-    // Discard any path change that's also in changes->didChangePath.
-    typedef std::pair<SdfPath, SdfPath> PathPair;
-    std::vector<PathPair> sdOnly;
-    std::set_difference(pathChanges->begin(), pathChanges->end(),
-                        changes->didChangePath.begin(),
-                        changes->didChangePath.end(),
-                        std::back_inserter(sdOnly));
+    // XXX: DidChangePaths handles rename chains. I.e. A renamed to B
+    //      then renamed to C. pathChanges is a map but we may need to handle 
+    //      one oldPath appearing multiple times in didChangePath, e.g. 
+    //      A -> B -> C and D -> B -> E, where B appears in two chains.
+
+    // Copy the path changes and discard any that are also in 
+    // changes->didChangePath.
+    _PathEditMap sdOnly(*pathChanges);
+    for (const auto &pathPair : changes->didChangePath) {
+        auto it = sdOnly.find(pathPair.first);
+        // Note that we check for exact matches of mapping oldPath to newPath.
+        if (it != sdOnly.end() && it->second == pathPair.second) {
+            sdOnly.erase(it);
+        }
+    }
 
     std::string summary;
     std::string* debugSummary = TfDebug::IsEnabled(PCP_CHANGES) ? &summary : 0;
@@ -1745,7 +1747,6 @@ PcpChanges::_LoadSublayerForChange(
         cache->GetLayerStackIdentifier().pathResolverContext);
 
     // Load the layer.
-    std::string resolvedAssetPath(sublayerPath);
     SdfLayerRefPtr sublayer;
 
     const SdfLayer::FileFormatArguments sublayerArgs = 
@@ -1753,8 +1754,8 @@ PcpChanges::_LoadSublayerForChange(
             sublayerPath, cache->GetFileFormatTarget());
 
     // Note the possible conversions from SdfLayerHandle to SdfLayerRefPtr below.
-    if (SdfLayer::IsAnonymousLayerIdentifier(resolvedAssetPath)) {
-        sublayer = SdfLayer::Find(resolvedAssetPath, sublayerArgs);
+    if (SdfLayer::IsAnonymousLayerIdentifier(sublayerPath)) {
+        sublayer = SdfLayer::Find(sublayerPath, sublayerArgs);
     }
     else {
         // Don't bother trying to open a sublayer if we're removing it;
@@ -1762,14 +1763,13 @@ PcpChanges::_LoadSublayerForChange(
         // it's invalid, which we'll deal with below.
         if (sublayerChange == _SublayerAdded) {
             TfErrorMark m;
-            sublayer = SdfFindOrOpenRelativeToLayer(
-                layer, &resolvedAssetPath, sublayerArgs);
+            sublayer = SdfLayer::FindOrOpenRelativeToLayer(
+                layer, sublayerPath, sublayerArgs);
             m.Clear();
         }
         else {
-            resolvedAssetPath = SdfComputeAssetPathRelativeToLayer(
-                layer, sublayerPath);
-            sublayer = SdfLayer::Find(resolvedAssetPath, sublayerArgs);
+            sublayer = SdfLayer::FindRelativeToLayer(
+                layer, sublayerPath, sublayerArgs);
         }
     }
     

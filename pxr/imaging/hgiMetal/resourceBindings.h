@@ -50,6 +50,9 @@ public:
     HGIMETAL_API
     void BindResources(id<MTLRenderCommandEncoder> renderEncoder);
 
+    HGIMETAL_API
+    void BindResources(id<MTLComputeCommandEncoder> computeEncoder);
+
 private:
     HgiMetalResourceBindings() = delete;
     HgiMetalResourceBindings & operator=(const HgiMetalResourceBindings&) = delete;

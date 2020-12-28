@@ -91,13 +91,6 @@ HdStShaderCode::GetShaderData() const
     return EMPTY;
 }
 
-/*virtual*/
-HdStShaderCode::TextureDescriptorVector
-HdStShaderCode::GetTextures() const
-{
-    return HdStShaderCode::TextureDescriptorVector();
-}
-
 /* virtual */
 HdStShaderCode::NamedTextureHandleVector const &
 HdStShaderCode::GetNamedTextureHandles() const
@@ -136,9 +129,10 @@ HdStShaderCode::ResourceContext::AddSources(
 void
 HdStShaderCode::ResourceContext::AddComputation(
     HdBufferArrayRangeSharedPtr const &range,
-    HdComputationSharedPtr const &computation)
+    HdComputationSharedPtr const &computation,
+    HdStComputeQueue const queue)
 {
-    _registry->AddComputation(range, computation);
+    _registry->AddComputation(range, computation, queue);
 }
 
 HdStShaderCode::ResourceContext::ResourceContext(

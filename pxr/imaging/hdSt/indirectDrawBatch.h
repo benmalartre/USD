@@ -29,7 +29,6 @@
 #include "pxr/imaging/hdSt/api.h"
 #include "pxr/imaging/hdSt/dispatchBuffer.h"
 #include "pxr/imaging/hdSt/drawBatch.h"
-#include "pxr/imaging/hdSt/persistentBuffer.h"
 
 #include <vector>
 
@@ -55,7 +54,8 @@ public:
 
     // HdSt_DrawBatch overrides
     HDST_API
-    bool Validate(bool deepValidation) override;
+    ValidationResult
+    Validate(bool deepValidation) override;
 
     /// Prepare draw commands and apply view frustum culling for this batch.
     HDST_API
@@ -95,15 +95,16 @@ protected:
 
 private:
     void _ValidateCompatibility(
-        HdStBufferArrayRangeGLSharedPtr const& constantBar,
-        HdStBufferArrayRangeGLSharedPtr const& indexBar,
-        HdStBufferArrayRangeGLSharedPtr const& topologyVisibilityBar,
-        HdStBufferArrayRangeGLSharedPtr const& elementBar,
-        HdStBufferArrayRangeGLSharedPtr const& fvarBar,
-        HdStBufferArrayRangeGLSharedPtr const& vertexBar,
+        HdStBufferArrayRangeSharedPtr const& constantBar,
+        HdStBufferArrayRangeSharedPtr const& indexBar,
+        HdStBufferArrayRangeSharedPtr const& topologyVisibilityBar,
+        HdStBufferArrayRangeSharedPtr const& elementBar,
+        HdStBufferArrayRangeSharedPtr const& fvarBar,
+        HdStBufferArrayRangeSharedPtr const& varyingBar,
+        HdStBufferArrayRangeSharedPtr const& vertexBar,
         int instancerNumLevels,
-        HdStBufferArrayRangeGLSharedPtr const& instanceIndexBar,
-        std::vector<HdStBufferArrayRangeGLSharedPtr> const& instanceBars) const;
+        HdStBufferArrayRangeSharedPtr const& instanceIndexBar,
+        std::vector<HdStBufferArrayRangeSharedPtr> const& instanceBars) const;
 
     // Culling requires custom resource binding.
     class _CullingProgram : public _DrawingProgram
@@ -142,18 +143,19 @@ private:
     void _BeginGPUCountVisibleInstances(
         HdStResourceRegistrySharedPtr const &resourceRegistry);
 
-    // GLsync is not defined in gl.h. It's defined in spec as an opaque pointer:
-    typedef struct __GLsync *GLsync;
-    void _EndGPUCountVisibleInstances(GLsync resultSync, size_t * result);
+    void _EndGPUCountVisibleInstances(
+        HdStResourceRegistrySharedPtr const &resourceRegistry, 
+        size_t * result);
 
     HdStDispatchBufferSharedPtr _dispatchBuffer;
     HdStDispatchBufferSharedPtr _dispatchBufferCullInput;
 
-    std::vector<GLuint> _drawCommandBuffer;
+    std::vector<uint32_t> _drawCommandBuffer;
     bool _drawCommandBufferDirty;
     size_t _bufferArraysHash;
+    size_t _barElementOffsetsHash;
 
-    HdStPersistentBufferSharedPtr _resultBuffer;
+    HdStBufferResourceSharedPtr _resultBuffer;
 
     size_t _numVisibleItems;
     size_t _numTotalVertices;
@@ -170,10 +172,6 @@ private:
 
     int _instanceCountOffset;
     int _cullInstanceCountOffset;
-
-    // We'll use this fence to signal when GPU frustum culling is
-    // complete if we need to read back result data from the GPU.
-    GLsync _cullResultSync;
 };
 
 

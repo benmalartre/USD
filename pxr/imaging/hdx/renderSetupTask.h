@@ -32,6 +32,8 @@
 #include "pxr/imaging/hd/enums.h"
 #include "pxr/imaging/hd/renderPassState.h"
 
+#include "pxr/imaging/cameraUtil/framing.h"
+
 #include "pxr/base/gf/vec2f.h"
 #include "pxr/base/gf/vec4f.h"
 #include "pxr/base/gf/vec4d.h"
@@ -102,8 +104,12 @@ private:
     HdRenderPassStateSharedPtr _renderPassState;
     HdStRenderPassShaderSharedPtr _colorRenderPassShader;
     HdStRenderPassShaderSharedPtr _idRenderPassShader;
-    GfVec4d _viewport;
     SdfPath _cameraId;
+    CameraUtilFraming _framing;
+    std::pair<bool, CameraUtilConformWindowPolicy> _overrideWindowPolicy;
+    // Used when client did not specify the camera framing (more expressive
+    // and preferred).
+    GfVec4d _viewport;
     HdRenderPassAovBindingVector _aovBindings;
 
     static HdStShaderCodeSharedPtr _overrideShader;
@@ -141,6 +147,7 @@ struct HdxRenderTaskParams
         , enableIdRender(false)
         , alphaThreshold(0.0)
         , enableSceneMaterials(true)
+        , enableSceneLights(true)
         , depthBiasUseDefault(true)
         , depthBiasEnable(false)
         , depthBiasConstantFactor(0.0f)
@@ -165,7 +172,9 @@ struct HdxRenderTaskParams
         , enableAlphaToCoverage(true)
         , cullStyle(HdCullStyleBackUnlessDoubleSided)
         , aovBindings()
+        , resolveAovMultiSample(true)
         , camera()
+        , overrideWindowPolicy{false, CameraUtilFit}
         , viewport(0.0)
         {}
 
@@ -181,6 +190,7 @@ struct HdxRenderTaskParams
     bool enableIdRender;
     float alphaThreshold;
     bool enableSceneMaterials;
+    bool enableSceneLights;
 
     // Depth Bias Raster State
     // When use default is true - state
@@ -224,9 +234,19 @@ struct HdxRenderTaskParams
     // XXX: As a transitional API, if this is empty it indicates the renderer
     // should write color and depth to the GL framebuffer.
     HdRenderPassAovBindingVector aovBindings;
+    
+    // If true (default), multi-sampled AOVs will be resolved at the end of a
+    // render pass.
+    bool resolveAovMultiSample;
 
     // RasterState index objects
     SdfPath camera;
+
+    CameraUtilFraming framing;
+
+    std::pair<bool, CameraUtilConformWindowPolicy> overrideWindowPolicy;
+
+    // Only used if framing is invalid.
     GfVec4d viewport;
 };
 

@@ -78,10 +78,19 @@ pxr_library(usdviewq
         preferencesUI.ui
         primLegendUI.ui
         propertyLegendUI.ui
+
+    DOXYGEN_FILES
+        README.md
+        blackBoxTesting.md
 )
 
 install(DIRECTORY
     icons
+    DESTINATION lib/python/pxr/Usdviewq
+)
+
+install(DIRECTORY
+    fonts
     DESTINATION lib/python/pxr/Usdviewq
 )
 

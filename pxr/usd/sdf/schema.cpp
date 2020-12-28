@@ -731,6 +731,7 @@ SdfSchemaBase::_RegisterStandardFields()
     _DoRegisterField(SdfFieldKeys->Default, VtValue())
         .ValueValidator(&_ValidateIsSceneDescriptionValue);
     _DoRegisterField(SdfFieldKeys->DisplayGroup, "");
+    _DoRegisterField(SdfFieldKeys->DisplayGroupOrder, VtStringArray());
     _DoRegisterField(SdfFieldKeys->DisplayName, "");
     _DoRegisterField(SdfFieldKeys->DisplayUnit,
                    TfEnum(SdfDimensionlessUnitDefault));
@@ -877,6 +878,8 @@ SdfSchemaBase::_RegisterStandardFields()
         .MetadataField(SdfFieldKeys->AssetInfo,
                        SdfMetadataDisplayGroupTokens->core)
         .MetadataField(SdfFieldKeys->CustomData,
+                       SdfMetadataDisplayGroupTokens->core)
+        .MetadataField(SdfFieldKeys->DisplayGroupOrder,
                        SdfMetadataDisplayGroupTokens->core)
         .MetadataField(SdfFieldKeys->Documentation,
                        SdfMetadataDisplayGroupTokens->core)
@@ -1594,7 +1597,7 @@ SdfSchemaBase::_UpdateMetadataFromPlugins(
             continue;
         
         // Register new fields
-        for (const std::pair<std::string, JsValue>& field : fields) {
+        for (const std::pair<const std::string, JsValue>& field : fields) {
             const TfToken fieldName(field.first);
 
             // Validate field

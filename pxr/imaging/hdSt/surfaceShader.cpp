@@ -21,13 +21,11 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-#include "pxr/imaging/glf/glew.h"
+#include "pxr/imaging/garch/glApi.h"
 
 #include "pxr/imaging/hdSt/surfaceShader.h"
 #include "pxr/imaging/hdSt/resourceBinder.h"
 #include "pxr/imaging/hdSt/resourceRegistry.h"
-#include "pxr/imaging/hdSt/textureResource.h"
-#include "pxr/imaging/hdSt/textureResourceHandle.h"
 #include "pxr/imaging/hdSt/textureBinder.h"
 #include "pxr/imaging/hdSt/textureHandle.h"
 #include "pxr/imaging/hdSt/materialParam.h"
@@ -41,6 +39,7 @@
 
 #include "pxr/imaging/glf/contextCaps.h"
 
+#include "pxr/base/arch/hash.h"
 #include "pxr/base/tf/envSetting.h"
 #include "pxr/base/tf/staticTokens.h"
 
@@ -71,7 +70,6 @@ HdStSurfaceShader::HdStSurfaceShader()
  , _isValidComputedHash(false)
  , _computedTextureSourceHash(0)
  , _isValidComputedTextureSourceHash(false)
- , _textureDescriptors()
  , _materialTag()
 {
 }
@@ -136,12 +134,6 @@ HdStSurfaceShader::GetShaderData() const
 {
     return _paramArray;
 }
-/*virtual*/
-HdStShaderCode::TextureDescriptorVector
-HdStSurfaceShader::GetTextures() const
-{
-    return _textureDescriptors;
-}
 
 HdStShaderCode::NamedTextureHandleVector const &
 HdStSurfaceShader::GetNamedTextureHandles() const
@@ -155,45 +147,6 @@ HdStSurfaceShader::BindResources(const int program,
                                  HdSt_ResourceBinder const &binder,
                                  HdRenderPassState const &state)
 {
-    for (auto const & it : _textureDescriptors) {
-        HdBinding binding = binder.GetBinding(it.name);
-
-        if (!TF_VERIFY(it.handle)) {
-            continue;
-        }
-        HdStTextureResourceSharedPtr resource = it.handle->GetTextureResource();
-
-        // XXX: put this into resource binder.
-        if (binding.GetType() == HdBinding::TEXTURE_2D) {
-            int samplerUnit = binding.GetTextureUnit();
-            glActiveTexture(GL_TEXTURE0 + samplerUnit);
-            glBindTexture(GL_TEXTURE_2D, resource->GetTexelsTextureId());
-            glBindSampler(samplerUnit, resource->GetTexelsSamplerId());
-        } else if (binding.GetType() == HdBinding::TEXTURE_FIELD) {
-            int samplerUnit = binding.GetTextureUnit();
-            glActiveTexture(GL_TEXTURE0 + samplerUnit);
-            glBindTexture(GL_TEXTURE_3D, resource->GetTexelsTextureId());
-            glBindSampler(samplerUnit, resource->GetTexelsSamplerId());
-        } else if (binding.GetType() == HdBinding::TEXTURE_UDIM_ARRAY) {
-            int samplerUnit = binding.GetTextureUnit();
-            glActiveTexture(GL_TEXTURE0 + samplerUnit);
-            glBindTexture(GL_TEXTURE_2D_ARRAY, resource->GetTexelsTextureId());
-            glBindSampler(samplerUnit, resource->GetTexelsSamplerId());
-        } else if (binding.GetType() == HdBinding::TEXTURE_UDIM_LAYOUT) {
-            int samplerUnit = binding.GetTextureUnit();
-            glActiveTexture(GL_TEXTURE0 + samplerUnit);
-            glBindTexture(GL_TEXTURE_1D, resource->GetLayoutTextureId());
-        } else if (binding.GetType() == HdBinding::TEXTURE_PTEX_TEXEL) {
-            int samplerUnit = binding.GetTextureUnit();
-            glActiveTexture(GL_TEXTURE0 + samplerUnit);
-            glBindTexture(GL_TEXTURE_2D_ARRAY, resource->GetTexelsTextureId());
-        } else if (binding.GetType() == HdBinding::TEXTURE_PTEX_LAYOUT) {
-            int samplerUnit = binding.GetTextureUnit();
-            glActiveTexture(GL_TEXTURE0 + samplerUnit);
-            glBindTexture(GL_TEXTURE_BUFFER, resource->GetLayoutTextureId());
-        }
-    }
-
     const bool bindlessTextureEnabled =
         GlfContextCaps::GetInstance().bindlessTextureEnabled;
 
@@ -211,39 +164,6 @@ HdStSurfaceShader::UnbindResources(const int program,
                                    HdRenderPassState const &state)
 {
     binder.UnbindShaderResources(this);
-
-    for (auto const & it : _textureDescriptors) {
-        HdBinding binding = binder.GetBinding(it.name);
-        // XXX: put this into resource binder.
-        if (binding.GetType() == HdBinding::TEXTURE_2D) {
-            int samplerUnit = binding.GetTextureUnit();
-            glActiveTexture(GL_TEXTURE0 + samplerUnit);
-            glBindTexture(GL_TEXTURE_2D, 0);
-            glBindSampler(samplerUnit, 0);
-        } else if (binding.GetType() == HdBinding::TEXTURE_FIELD) {
-            int samplerUnit = binding.GetTextureUnit();
-            glActiveTexture(GL_TEXTURE0 + samplerUnit);
-            glBindTexture(GL_TEXTURE_3D, 0);
-            glBindSampler(samplerUnit, 0);
-        } else if (binding.GetType() == HdBinding::TEXTURE_UDIM_ARRAY) {
-            int samplerUnit = binding.GetTextureUnit();
-            glActiveTexture(GL_TEXTURE0 + samplerUnit);
-            glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
-            glBindSampler(samplerUnit, 0);
-        } else if (binding.GetType() == HdBinding::TEXTURE_UDIM_LAYOUT) {
-            int samplerUnit = binding.GetTextureUnit();
-            glActiveTexture(GL_TEXTURE0 + samplerUnit);
-            glBindTexture(GL_TEXTURE_1D, 0);
-        } else if (binding.GetType() == HdBinding::TEXTURE_PTEX_TEXEL) {
-            int samplerUnit = binding.GetTextureUnit();
-            glActiveTexture(GL_TEXTURE0 + samplerUnit);
-            glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
-        } else if (binding.GetType() == HdBinding::TEXTURE_PTEX_LAYOUT) {
-            int samplerUnit = binding.GetTextureUnit();
-            glActiveTexture(GL_TEXTURE0 + samplerUnit);
-            glBindTexture(GL_TEXTURE_BUFFER, 0);
-        }
-    }
 
     const bool bindlessTextureEnabled =
         GlfContextCaps::GetInstance().bindlessTextureEnabled;
@@ -309,19 +229,12 @@ HdStSurfaceShader::_ComputeTextureSourceHash() const
 
     size_t hash = 0;
 
-    // Old texture system
-    for (const HdStShaderCode::TextureDescriptor &desc : _textureDescriptors) {
-        boost::hash_combine(hash, desc.name);
-        boost::hash_combine(hash, desc.textureSourcePath);
-    }
-
-    // New texture system
     for (const HdStShaderCode::NamedTextureHandle &namedHandle :
              _namedTextureHandles) {
 
         // Use name, texture object and sampling parameters.
         boost::hash_combine(hash, namedHandle.name);
-        boost::hash_combine(hash, namedHandle.textureSourcePath);
+        boost::hash_combine(hash, namedHandle.hash);
     }
     
     return hash;
@@ -347,13 +260,6 @@ HdStSurfaceShader::SetParams(const HdSt_MaterialParamVector &params)
     _params = params;
     _primvarNames = _CollectPrimvarNames(_params);
     _isValidComputedHash = false;
-}
-
-void
-HdStSurfaceShader::SetTextureDescriptors(const TextureDescriptorVector &texDesc)
-{
-    _textureDescriptors = texDesc;
-    _isValidComputedTextureSourceHash = false;
 }
 
 void
@@ -481,13 +387,13 @@ TF_DEFINE_PRIVATE_TOKENS(
 );
 
 static TfTokenVector const &
-_GetExtraWhitelistedShaderPrimvarNames()
+_GetExtraIncludedShaderPrimvarNames()
 {
     static const TfTokenVector primvarNames = {
         HdTokens->displayColor,
         HdTokens->displayOpacity,
 
-        // Whitelist a few ad hoc primvar names that
+        // Include a few ad hoc primvar names that
         // are used by the built-in material shading system.
 
         _tokens->ptexFaceOffset,
@@ -515,7 +421,7 @@ _GetExtraWhitelistedShaderPrimvarNames()
 static TfTokenVector
 _CollectPrimvarNames(const HdSt_MaterialParamVector &params)
 {
-    TfTokenVector primvarNames = _GetExtraWhitelistedShaderPrimvarNames();
+    TfTokenVector primvarNames = _GetExtraIncludedShaderPrimvarNames();
 
     for (HdSt_MaterialParam const &param: params) {
         if (param.IsFallback()) {

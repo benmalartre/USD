@@ -62,7 +62,12 @@ UsdRiLightFilterAPI::Get(const UsdStagePtr &stage, const SdfPath &path)
 
 
 /* virtual */
-UsdSchemaType UsdRiLightFilterAPI::_GetSchemaType() const {
+UsdSchemaKind UsdRiLightFilterAPI::_GetSchemaKind() const {
+    return UsdRiLightFilterAPI::schemaKind;
+}
+
+/* virtual */
+UsdSchemaKind UsdRiLightFilterAPI::_GetSchemaType() const {
     return UsdRiLightFilterAPI::schemaType;
 }
 
@@ -70,8 +75,10 @@ UsdSchemaType UsdRiLightFilterAPI::_GetSchemaType() const {
 UsdRiLightFilterAPI
 UsdRiLightFilterAPI::Apply(const UsdPrim &prim)
 {
-    return UsdAPISchemaBase::_ApplyAPISchema<UsdRiLightFilterAPI>(
-            prim, _schemaTokens->RiLightFilterAPI);
+    if (prim.ApplyAPI<UsdRiLightFilterAPI>()) {
+        return UsdRiLightFilterAPI(prim);
+    }
+    return UsdRiLightFilterAPI();
 }
 
 /* static */

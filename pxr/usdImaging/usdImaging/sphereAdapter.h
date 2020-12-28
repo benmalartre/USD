@@ -40,15 +40,16 @@ class UsdGeomSphere;
 ///
 /// Delegate support for UsdGeomSphere.
 ///
-class UsdImagingSphereAdapter : public UsdImagingGprimAdapter {
+class UsdImagingSphereAdapter : public UsdImagingGprimAdapter
+{
 public:
-    typedef UsdImagingGprimAdapter BaseAdapter;
+    using BaseAdapter = UsdImagingGprimAdapter;
 
     UsdImagingSphereAdapter()
         : UsdImagingGprimAdapter()
     {}
     USDIMAGING_API
-    virtual ~UsdImagingSphereAdapter();
+    ~UsdImagingSphereAdapter() override;
 
     USDIMAGING_API
     SdfPath Populate(
@@ -59,6 +60,11 @@ public:
 
     USDIMAGING_API
     bool IsSupported(UsdImagingIndexProxy const* index) const override;
+
+    USDIMAGING_API
+    HdDirtyBits ProcessPropertyChange(UsdPrim const& prim,
+                                      SdfPath const& cachePath,
+                                      TfToken const& propertyName) override;
 
     // ---------------------------------------------------------------------- //
     /// \name Parallel Setup and Resolve
@@ -72,28 +78,28 @@ public:
         UsdImagingInstancerContext const* instancerContext = nullptr) 
             const override;
 
-    /// Thread Safe.
+    // ---------------------------------------------------------------------- //
+    /// \name Data access
+    // ---------------------------------------------------------------------- //
+
     USDIMAGING_API
-    void UpdateForTime(
-        UsdPrim const& prim,
-        SdfPath const& cachePath, 
-        UsdTimeCode time,
-        HdDirtyBits requestedBits,
-        UsdImagingInstancerContext const* instancerContext = nullptr) 
-            const override;
+    VtValue GetTopology(UsdPrim const& prim,
+                        SdfPath const& cachePath,
+                        UsdTimeCode time) const override;
 
     // Override the implemetation in GprimAdapter since we don't fetch the
     // points attribute for implicit primitives.
     USDIMAGING_API
     VtValue GetPoints(
         UsdPrim const& prim,
-        SdfPath const& cachePath,
         UsdTimeCode time) const override;
 
+    // Used by the legacyEngine.
     USDIMAGING_API
     static VtValue GetMeshPoints(UsdPrim const& prim, 
                                  UsdTimeCode time);
 
+    // Used by the legacyEngine.
     USDIMAGING_API
     static VtValue GetMeshTopology();
 };

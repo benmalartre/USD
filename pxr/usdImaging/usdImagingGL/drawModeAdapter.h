@@ -40,9 +40,8 @@ class UsdImagingGLDrawModeAdapter : public UsdImagingPrimAdapter
 public:
     using BaseAdapter = UsdImagingPrimAdapter;
 
-    UsdImagingGLDrawModeAdapter()
-        : UsdImagingPrimAdapter()
-    {}
+    USDIMAGINGGL_API
+    UsdImagingGLDrawModeAdapter();
 
     USDIMAGINGGL_API
     ~UsdImagingGLDrawModeAdapter() override;
@@ -63,9 +62,9 @@ public:
     // render index compatibility at a later point than adapter lookup.
     bool IsSupported(UsdImagingIndexProxy const* index) const override;
 
-    // Cards prims can take effect on master prims, so we need to let the
+    // Cards mode can be applied to instance prims, so we need to let the
     // UsdImagingInstanceAdapter know we want special handling.
-    bool CanPopulateMaster() const override;
+    bool CanPopulateUsdInstance() const override;
 
     // ---------------------------------------------------------------------- //
     /// \name Parallel Setup and Resolve
@@ -111,11 +110,57 @@ public:
                              SdfPath const& cachePath,
                              UsdImagingIndexProxy* index) override;
 
-    USDIMAGING_API
+    USDIMAGINGGL_API
     void MarkMaterialDirty(UsdPrim const& prim,
                            SdfPath const& cachePath,
                            UsdImagingIndexProxy* index) override;
 
+    // ---------------------------------------------------------------------- //
+    /// \name Data access
+    // ---------------------------------------------------------------------- //
+
+    USDIMAGINGGL_API
+    VtValue Get(UsdPrim const& prim,
+                SdfPath const& cachePath,
+                TfToken const& key,
+                UsdTimeCode time) const override;
+
+    USDIMAGINGGL_API
+    HdCullStyle GetCullStyle(UsdPrim const& prim,
+                             SdfPath const& cachePath,
+                             UsdTimeCode time) const override;
+
+    USDIMAGINGGL_API
+    VtValue GetTopology(UsdPrim const& prim,
+                        SdfPath const& cachePath,
+                        UsdTimeCode time) const override;
+
+    USDIMAGINGGL_API
+    GfRange3d GetExtent(UsdPrim const& prim, 
+                        SdfPath const& cachePath, 
+                        UsdTimeCode time) const override;
+
+    USDIMAGINGGL_API
+    bool GetDoubleSided(UsdPrim const& prim, 
+                        SdfPath const& cachePath, 
+                        UsdTimeCode time) const override;
+
+    USDIMAGINGGL_API
+    GfMatrix4d GetTransform(UsdPrim const& prim, 
+                            SdfPath const& cachePath,
+                            UsdTimeCode time,
+                            bool ignoreRootTransform = false) const override;
+
+    USDIMAGINGGL_API
+    SdfPath GetMaterialId(UsdPrim const& prim, 
+                        SdfPath const& cachePath, 
+                        UsdTimeCode time) const override;
+
+    USDIMAGING_API
+    VtValue GetMaterialResource(UsdPrim const& prim, 
+                                SdfPath const& cachePath, 
+                                UsdTimeCode time) const override;
+  
 protected:
     USDIMAGINGGL_API
     void _RemovePrim(SdfPath const& cachePath,
@@ -128,10 +173,24 @@ private:
                                GfRange3d const& extents, uint8_t axes_mask) 
         const;
 
+    void _ComputeGeometryData(UsdPrim const& prim,
+                              SdfPath const& cachePath,
+                              UsdTimeCode time,
+                              TfToken const& drawMode,
+                              VtValue* topology, 
+                              VtValue* points, 
+                              GfRange3d* extent,
+                              VtValue* uv,
+                              VtValue* assign) const;
+
     // Check whether the given cachePath is a path to the draw mode material.
     bool _IsMaterialPath(SdfPath const& path) const;
+
     // Check whether the given cachePath is a path to a draw mode texture.
     bool _IsTexturePath(SdfPath const& path) const;
+
+    // Return true if prim has a time varying extent or extentsHint attribute.
+    bool _HasVaryingExtent(UsdPrim const& prim) const;
 
     // Check if any of the cards texture attributes are marked as time-varying.
     void _CheckForTextureVariability(UsdPrim const& prim,
@@ -139,9 +198,9 @@ private:
                                      HdDirtyBits *timeVaryingBits) const;
 
     // Computes the extents of the given prim, using UsdGeomBBoxCache.
-    // The extents are computed at UsdTimeCode::EarliestTime() (and are not
-    // animated), and they are computed for purposes default/proxy/render.
-    GfRange3d _ComputeExtent(UsdPrim const& prim) const;
+    // The extents are computed for purposes default/proxy/render.
+    GfRange3d _ComputeExtent(UsdPrim const& prim,
+                             const UsdTimeCode& timecode) const;
 
     // Generate geometry for "origin" draw mode.
     void _GenerateOriginGeometry(VtValue* topo, VtValue* points,
@@ -176,6 +235,10 @@ private:
     // Map from cachePath to what drawMode it was populated as.
     using _DrawModeMap = TfHashMap<SdfPath, TfToken, SdfPath::Hash>;
     _DrawModeMap _drawModeMap;
+
+    // The default value of model:drawModeColor, fetched from the schema
+    // registry and stored for quick access...
+    GfVec3f _schemaColor;
 };
 
 

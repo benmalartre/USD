@@ -12,6 +12,7 @@ Advanced Build Configuration
 - [USD Developer Options](#usd-developer-options)
 - [Optimization Options](#optimization-options)
 - [Linker Options](#linker-options)
+- [Build Issues FAQ](#build-issues-faq)
 
 ## Building With Build Script
 
@@ -103,7 +104,7 @@ Support for Python can optionally be disabled by specifying the cmake flag
 Support for Python 3 can be enabled by specifying the cmake flag
 ```PXR_USE_PYTHON_3=ON```.
 
-##### OpenGL and GLEW
+##### OpenGL
 
 Support for OpenGL can optionally be disabled by specifying the cmake flag
 ```PXR_ENABLE_GL_SUPPORT=FALSE```.  This will skip components and libraries
@@ -113,11 +114,21 @@ that depend on GL, including:
 
 ##### Metal
 
-To build USD with Metal enabled requires macOS Mojave (10.14) or newer.
+Building USD with Metal enabled requires macOS Mojave (10.14) or newer.
 Support for Metal can optionally be disabled by specifying the cmake flag
 ```PXR_ENABLE_METAL_SUPPORT=FALSE```.  This will skip components and libraries
 that depend on Metal, including:
 - Hydra imaging
+
+##### Vulkan
+
+Building USD with Vulkan enabled requires the Vulkan SDK and glslang to
+be installed. The VULKAN_SDK environment variable must point to the
+location of the SDK. The glslang compiler headers must be locatable during
+the build process.
+
+Support for Vulkan can optionally be enabled by specifying the cmake flag
+```PXR_ENABLE_VULKAN_SUPPORT=TRUE```.
 
 ##### OSL (OpenShadingLanguage)
 
@@ -306,6 +317,20 @@ of the environment variable using the following CMake option:
 
 By doing this, USD will check the ```CUSTOM_USD_PLUGINPATHS``` environment variable for paths, instead of the default
 ```PXR_PLUGINPATH_NAME``` one.
+
+The values specified in ```PXR_PLUGINPATH_NAME``` or ```PXR_INSTALL_LOCATION```
+have the following characteristics:
+
+- Values may contain any number of paths.
+
+- Paths ending with slash ('/') have 'plugInfo.json' appended automatically.
+
+- '*' may be used anywhere to match any character except slash.
+
+- '**' may be used anywhere to match any character including slash.
+
+- Paths follow Unix '$PATH'-like conventions; when duplicate definitions exist
+  in the path, the first one found is used.
 
 ##### Shared library prefix
 
@@ -550,3 +575,32 @@ to get the path to the library. We also link 'usd_m' separately so cmake
 will add usd_m's interface link libraries, etc. This second instance
 doesn't increase the resulting file size because all symbols will be
 found in the first (-WHOLEARCHIVE) instance.
+
+###### Avoiding linking statically to Python
+
+The default build with python support will link to the python static lib for
+your interpreter. This is to support running python code from C++. If that is
+not desirable, python static linking can be disabled using the flag
+
+```
+-DPXR_PY_UNDEFINED_DYNAMIC_LOOKUP=ON
+```
+
+The primary motivating case for this is generating wheel packages for PyPI, but
+the parameter was made more generic in case it has other uses in the future. It
+is useful when we want to take advantage of python's approach to ABI
+compatibility.
+
+Note that this flag has no effect on Windows, see 
+[here for more info](https://docs.python.org/3/extending/windows.html)
+    
+
+## Build Issues FAQ
+
+1. Boost_NO_BOOST_CMAKE: 
+We currently set Boost_NO_BOOST_CMAKE=ON explicitly in USD builds for all 
+platforms to avoid issues with Boost config files (introduced in Boost version 
+1.70) and python, program options component requirements. If the user wants 
+to use Boost specified config files for their USD build, specify 
+-DBoost_NO_BOOST_CMAKE=OFF when running cmake.
+

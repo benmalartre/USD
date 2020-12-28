@@ -62,7 +62,12 @@ UsdSkelBindingAPI::Get(const UsdStagePtr &stage, const SdfPath &path)
 
 
 /* virtual */
-UsdSchemaType UsdSkelBindingAPI::_GetSchemaType() const {
+UsdSchemaKind UsdSkelBindingAPI::_GetSchemaKind() const {
+    return UsdSkelBindingAPI::schemaKind;
+}
+
+/* virtual */
+UsdSchemaKind UsdSkelBindingAPI::_GetSchemaType() const {
     return UsdSkelBindingAPI::schemaType;
 }
 
@@ -70,8 +75,10 @@ UsdSchemaType UsdSkelBindingAPI::_GetSchemaType() const {
 UsdSkelBindingAPI
 UsdSkelBindingAPI::Apply(const UsdPrim &prim)
 {
-    return UsdAPISchemaBase::_ApplyAPISchema<UsdSkelBindingAPI>(
-            prim, _schemaTokens->SkelBindingAPI);
+    if (prim.ApplyAPI<UsdSkelBindingAPI>()) {
+        return UsdSkelBindingAPI(prim);
+    }
+    return UsdSkelBindingAPI();
 }
 
 /* static */

@@ -23,9 +23,8 @@
 // language governing permissions and limitations under the Apache License.
 //
 #include "pxr/pxr.h"
-#include "pxr/imaging/glf/glew.h"
 
-#include "pxr/imaging/hdSt/bufferArrayRangeGL.h"
+#include "pxr/imaging/hdSt/bufferArrayRange.h"
 #include "pxr/imaging/hdSt/subdivision3.h"
 #include "pxr/imaging/hdSt/subdivision.h"
 
@@ -101,35 +100,35 @@ class HdSt_Osd3Subdivision : public HdSt_Subdivision {
 public:
     /// Construct HdSt_Subdivision. It takes an ownership of farmesh.
     HdSt_Osd3Subdivision();
-    virtual ~HdSt_Osd3Subdivision();
+    ~HdSt_Osd3Subdivision() override;
 
-    virtual int GetNumVertices() const override;
+    int GetNumVertices() const override;
 
-    virtual void RefineCPU(HdBufferSourceSharedPtr const &source,
-                           bool varying,
-                           void *vertexBuffer) override;
+    void RefineCPU(HdBufferSourceSharedPtr const &source,
+                   bool varying,
+                   void *vertexBuffer) override;
 
-    virtual void RefineGPU(HdBufferArrayRangeSharedPtr const &range,
-                           TfToken const &name) override;
+    void RefineGPU(HdBufferArrayRangeSharedPtr const &range,
+                   TfToken const &name) override;
 
     // computation factory methods
-    virtual HdBufferSourceSharedPtr CreateTopologyComputation(
+    HdBufferSourceSharedPtr CreateTopologyComputation(
         HdSt_MeshTopology *topology,
         bool adaptive,
         int level,
         SdfPath const &id) override;
 
-    virtual HdBufferSourceSharedPtr CreateIndexComputation(
+    HdBufferSourceSharedPtr CreateIndexComputation(
         HdSt_MeshTopology *topology,
         HdBufferSourceSharedPtr const &osdTopology) override;
 
-    virtual HdBufferSourceSharedPtr CreateRefineComputation(
+    HdBufferSourceSharedPtr CreateRefineComputation(
         HdSt_MeshTopology *topology,
         HdBufferSourceSharedPtr const &source,
         bool varying,
         HdBufferSourceSharedPtr const &osdTopology) override;
 
-    virtual HdComputationSharedPtr CreateRefineComputationGPU(
+    HdComputationSharedPtr CreateRefineComputationGPU(
         HdSt_MeshTopology *topology,
         TfToken const &name,
         HdType dataType) override;
@@ -162,8 +161,10 @@ private:
 #endif
 };
 
-class HdSt_Osd3IndexComputation : public HdSt_OsdIndexComputation {
-    struct PtexFaceInfo {
+class HdSt_Osd3IndexComputation : public HdSt_OsdIndexComputation
+{
+    struct PtexFaceInfo
+    {
         int coarseFaceId;
         GfVec4i coarseEdgeIds;
     };
@@ -173,7 +174,7 @@ public:
                             HdSt_MeshTopology *topology,
                             HdBufferSourceSharedPtr const &osdTopology);
     /// overrides
-    virtual bool Resolve();
+    bool Resolve() override;
 
 private:
     void _PopulateUniformPrimitiveBuffer(
@@ -186,7 +187,8 @@ private:
     HdSt_Osd3Subdivision *_subdivision;
 };
 
-class HdSt_Osd3TopologyComputation : public HdSt_OsdTopologyComputation {
+class HdSt_Osd3TopologyComputation : public HdSt_OsdTopologyComputation
+{
 public:
     HdSt_Osd3TopologyComputation(HdSt_Osd3Subdivision *subdivision,
                                HdSt_MeshTopology *topology,
@@ -195,10 +197,10 @@ public:
                                SdfPath const &id);
 
     /// overrides
-    virtual bool Resolve();
+    bool Resolve() override;
 
 protected:
-    virtual bool _CheckValid() const;
+    bool _CheckValid() const override;
 
 private:
     HdSt_Osd3Subdivision *_subdivision;
@@ -320,8 +322,8 @@ HdSt_Osd3Subdivision::RefineGPU(HdBufferArrayRangeSharedPtr const &range,
 
     // filling coarse vertices has been done at resource registry.
 
-    HdStBufferArrayRangeGLSharedPtr range_ =
-        std::static_pointer_cast<HdStBufferArrayRangeGL> (range);
+    HdStBufferArrayRangeSharedPtr range_ =
+        std::static_pointer_cast<HdStBufferArrayRange> (range);
 
     // vertex buffer wrapper for OpenSubdiv API
     HdSt_OsdRefineComputationGPU::VertexBuffer vertexBuffer(

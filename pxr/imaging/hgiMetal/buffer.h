@@ -49,7 +49,13 @@ public:
     ~HgiMetalBuffer() override;
 
     HGIMETAL_API
+    size_t GetByteSizeOfResource() const override;
+
+    HGIMETAL_API
     uint64_t GetRawResource() const override;
+    
+    HGIMETAL_API
+    void* GetCPUStagingAddress() override;
 
     id<MTLBuffer> GetBufferId() const {return _bufferId;}
 

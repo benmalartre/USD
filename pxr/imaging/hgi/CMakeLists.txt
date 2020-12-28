@@ -11,18 +11,23 @@ pxr_library(hgi
         attachmentDesc
         blitCmds
         buffer
+        cmds
+        computeCmds
+        computePipeline
         graphicsCmds
         graphicsCmdsDesc
+        graphicsPipeline
         hgi
-        pipeline
         resourceBindings
         sampler
         shaderFunction
+        shaderFunctionDesc
+        shaderGenerator
         shaderProgram
+        shaderSection
         texture
         tokens
         types
-        cmds
 
     PUBLIC_HEADERS
         api.h

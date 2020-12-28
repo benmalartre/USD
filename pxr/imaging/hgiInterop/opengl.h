@@ -25,6 +25,7 @@
 #define PXR_IMAGING_HGIINTEROP_HGIINTEROPOPENGL_H
 
 #include "pxr/pxr.h"
+#include "pxr/base/gf/vec4i.h"
 #include "pxr/imaging/hgi/texture.h"
 #include "pxr/imaging/hgiInterop/api.h"
 
@@ -45,11 +46,13 @@ public:
     HGIINTEROP_API
     ~HgiInteropOpenGL();
 
-    /// Copy/Present provided color (and optional depth) textures to app.
+    /// Composite provided color (and optional depth) textures over app's
+    /// framebuffer contents.
     HGIINTEROP_API
-    void CopyToInterop(
+    void CompositeToInterop(
         HgiTextureHandle const &color,
-        HgiTextureHandle const &depth);
+        HgiTextureHandle const &depth,
+        GfVec4i const& viewport);
 
 private:
     uint32_t _vs;

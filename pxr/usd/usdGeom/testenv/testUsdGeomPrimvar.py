@@ -39,8 +39,12 @@ class TestUsdGeomPrimvarsAPI(unittest.TestCase):
         # Add three Primvars
         u1 = gp_pv.CreatePrimvar('u_1', Sdf.ValueTypeNames.FloatArray)
         self.assertFalse( u1.NameContainsNamespaces() )
+        self.assertEqual(UsdGeom.Primvar.StripPrimvarsName(u1.GetName()), "u_1")
         # Make sure it's OK to manually specify the classifier namespace
         v1 = gp_pv.CreatePrimvar('primvars:v_1', Sdf.ValueTypeNames.FloatArray)
+        self.assertEqual(UsdGeom.Primvar.StripPrimvarsName(v1.GetName()), "v_1")
+        noPrimvarsPrefixName = "noPrimvarPrefixName"
+        self.assertEqual(UsdGeom.Primvar.StripPrimvarsName(noPrimvarsPrefixName), noPrimvarsPrefixName)
         self.assertFalse( v1.NameContainsNamespaces() )
         _3dpmats = gp_pv.CreatePrimvar('projMats', Sdf.ValueTypeNames.Matrix4dArray,
                                     "constant", nPasses)
@@ -77,21 +81,21 @@ class TestUsdGeomPrimvarsAPI(unittest.TestCase):
         self.assertEqual(len(datas), 5)
         self.assertTrue( IsPrimvar(datas[0]) )
         self.assertTrue(UsdGeom.Primvar.IsValidPrimvarName(datas[0].GetName()))
-        self.assertTrue(UsdGeom.Primvar.IsPrimvarRelatedPropertyName(datas[0].GetName()))
+        self.assertTrue(UsdGeom.PrimvarsAPI.CanContainPropertyName(datas[0].GetName()))
         self.assertTrue( IsPrimvar(datas[1]) )
         self.assertTrue(UsdGeom.Primvar.IsValidPrimvarName(datas[1].GetName()))
-        self.assertTrue(UsdGeom.Primvar.IsPrimvarRelatedPropertyName(datas[1].GetName()))
+        self.assertTrue(UsdGeom.PrimvarsAPI.CanContainPropertyName(datas[1].GetName()))
         # For variety, test the explicit Attribute extractor
         self.assertTrue( IsPrimvar(datas[2].GetAttr()) )
         self.assertTrue(UsdGeom.Primvar.IsValidPrimvarName(datas[2].GetAttr().GetName()))
-        self.assertTrue(UsdGeom.Primvar.IsPrimvarRelatedPropertyName(datas[2].GetAttr().GetName()))
+        self.assertTrue(UsdGeom.PrimvarsAPI.CanContainPropertyName(datas[2].GetAttr().GetName()))
         self.assertFalse( IsPrimvar(p.GetAttribute("myColor")) )
         self.assertFalse(UsdGeom.Primvar.IsValidPrimvarName("myColor"))
-        self.assertFalse(UsdGeom.Primvar.IsPrimvarRelatedPropertyName("myColor"))
+        self.assertFalse(UsdGeom.PrimvarsAPI.CanContainPropertyName("myColor"))
         # Here we're testing that the speculative constructor fails properly
         self.assertFalse( IsPrimvar(UsdGeom.Primvar(p.GetAttribute("myColor"))) )
         self.assertFalse(UsdGeom.Primvar.IsValidPrimvarName(datas[0].GetIndicesAttr().GetName()))
-        self.assertTrue(UsdGeom.Primvar.IsPrimvarRelatedPropertyName(datas[0].GetIndicesAttr().GetName()))
+        self.assertTrue(UsdGeom.PrimvarsAPI.CanContainPropertyName(datas[0].GetIndicesAttr().GetName()))
         # And here that the speculative constructor succeeds properly
         self.assertTrue( IsPrimvar(UsdGeom.Primvar(p.GetAttribute(v1.GetName()))) )
 

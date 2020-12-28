@@ -59,8 +59,7 @@ public:
     /// Constructor. instancerId, if specified, is the instancer which uses
     /// this mesh as a prototype.
     HDST_API
-    HdStMesh(SdfPath const& id,
-             SdfPath const& instancerId = SdfPath());
+    HdStMesh(SdfPath const& id);
 
     HDST_API
     virtual ~HdStMesh();
@@ -122,8 +121,7 @@ protected:
 
     void _UpdateDrawItemGeometricShader(HdSceneDelegate *sceneDelegate,
                                         HdStDrawItem *drawItem,
-                                        const HdMeshReprDesc &desc,
-                                        size_t drawItemIdForDesc);
+                                        const HdMeshReprDesc &desc);
 
     void _UpdateShadersForAllReprs(HdSceneDelegate *sceneDelegate,
                                    bool updateMaterialShader,
@@ -134,13 +132,13 @@ protected:
                            HdDirtyBits *dirtyBits,
                            const HdMeshReprDesc &desc);
 
-    void _PopulateAdjacency(HdStResourceRegistrySharedPtr const &resourceRegistry);
+    void _PopulateAdjacency(
+        HdStResourceRegistrySharedPtr const &resourceRegistry);
 
     void _PopulateVertexPrimvars(HdSceneDelegate *sceneDelegate,
                                  HdStDrawItem *drawItem,
                                  HdDirtyBits *dirtyBits,
-                                 bool requireSmoothNormals,
-                                 HdBufferSourceSharedPtr *outPoints);
+                                 bool requireSmoothNormals);
 
     void _PopulateFaceVaryingPrimvars(HdSceneDelegate *sceneDelegate,
                                       HdStDrawItem *drawItem,
@@ -150,12 +148,9 @@ protected:
     void _PopulateElementPrimvars(HdSceneDelegate *sceneDelegate,
                                   HdStDrawItem *drawItem,
                                   HdDirtyBits *dirtyBits,
-                                  bool requireFlatNormals,
-                                  HdBufferSourceSharedPtr const &points);
+                                  bool requireFlatNormals);
 
     int _GetRefineLevelForDesc(const HdMeshReprDesc &desc) const;
-
-    HdType _GetPointsDataTypeFromBar(HdStDrawItem *drawItem) const;
 
 private:
     enum DrawingCoord {
@@ -179,9 +174,10 @@ private:
     HdTopology::ID _vertexPrimvarId;
     HdDirtyBits _customDirtyBitsInUse;
 
+    HdType _pointsDataType;
     HdInterpolation _sceneNormalsInterpolation;
     HdCullStyle _cullStyle;
-
+    bool _hasMirroredTransform : 1;
     bool _doubleSided : 1;
     bool _flatShadingEnabled : 1;
     bool _displacementEnabled : 1;
@@ -189,6 +185,7 @@ private:
     bool _sceneNormals : 1;
     bool _hasVaryingTopology : 1;  // The prim's topology has changed since
                                    // the prim was created
+    bool _displayOpacity : 1;
 };
 
 

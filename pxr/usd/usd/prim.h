@@ -428,8 +428,15 @@ public:
 
     /// Author an opinion for propertyOrder metadata on this prim at the current
     /// EditTarget.
-    USD_API
-    void SetPropertyOrder(const TfTokenVector &order) const;
+    void SetPropertyOrder(const TfTokenVector &order) const {
+        SetMetadata(SdfFieldKeys->PropertyOrder, order);
+    }
+
+    /// Remove the opinion for propertyOrder metadata on this prim at the current
+    /// EditTarget.
+    void ClearPropertyOrder() const {
+        ClearMetadata(SdfFieldKeys->PropertyOrder);
+    }
 
     /// Remove all scene description for the property with the
     /// given \p propName <em>in the current UsdEditTarget</em>.
@@ -480,6 +487,20 @@ private:
     USD_API
     bool _HasAPI(const TfType& schemaType, bool validateSchemaType,
                  const TfToken &instanceName) const;
+
+    // Private implementation for all ApplyAPI methods. This does no input
+    // validation as the public methods are expected to have already done either
+    // compile time or runtime validation already.
+    USD_API
+    bool _ApplyAPI(const TfType& schemaType,
+                   const TfToken& instanceName = TfToken()) const;
+
+    // Private implementation for all RemoveAPI methods. This does no input
+    // validation as the public methods are expected to have already done either
+    // compile time or runtime validation already.
+    USD_API
+    bool _RemoveAPI(const TfType& schemaType,
+                    const TfToken& instanceName = TfToken()) const;
 
 public:
     /// Return true if the prim's schema type, is or inherits schema type T.
@@ -544,11 +565,11 @@ public:
         static_assert(!std::is_same<UsdAPISchemaBase, T>::value,
                       "Provided type must not be UsdAPISchemaBase.");
         static_assert(
-            (T::schemaType == UsdSchemaType::SingleApplyAPI
-            || T::schemaType == UsdSchemaType::MultipleApplyAPI),
+            (T::schemaType == UsdSchemaKind::SingleApplyAPI
+            || T::schemaType == UsdSchemaKind::MultipleApplyAPI),
             "Provided schema type must be an applied API schema.");
 
-        if (T::schemaType != UsdSchemaType::MultipleApplyAPI
+        if (T::schemaType != UsdSchemaKind::MultipleApplyAPI
             && !instanceName.IsEmpty()) {
             TF_CODING_ERROR("HasAPI: single application API schemas like %s do "
                 "not contain an application instanceName ( %s ).",
@@ -571,6 +592,225 @@ public:
     USD_API
     bool HasAPI(const TfType& schemaType,
                 const TfToken& instanceName=TfToken()) const;
+
+    /// Applies a <b>single-apply</b> API schema with the given C++ type 
+    /// 'SchemaType' to this prim in the current edit target. 
+    /// 
+    /// This information is stored by adding the API schema's name token to the 
+    /// token-valued, listOp metadata \em apiSchemas on this prim.
+    /// 
+    /// Returns true upon success or if the API schema is already applied in 
+    /// the current edit target.
+    /// 
+    /// An error is issued and false returned for any of the following 
+    /// conditions:
+    /// \li this prim is not a valid prim for editing
+    /// \li this prim is valid, but cannot be reached or overridden in the 
+    /// current edit target
+    /// \li the schema name cannot be added to the apiSchemas listOp metadata
+    template <typename SchemaType>
+    bool ApplyAPI() const {
+        static_assert(std::is_base_of<UsdAPISchemaBase, SchemaType>::value,
+            "Provided type must derive UsdAPISchemaBase.");
+        static_assert(!std::is_same<UsdAPISchemaBase, SchemaType>::value,
+            "Provided type must not be UsdAPISchemaBase.");
+        static_assert(SchemaType::schemaType == UsdSchemaKind::SingleApplyAPI,
+            "Provided schema type must be an single apply API schema.");
+
+        static TfType schemaType = TfType::Find<SchemaType>();
+        return _ApplyAPI(schemaType);
+    }
+
+    /// Applies a </b>multiple-apply</b> API schema with the given C++ type 
+    /// 'SchemaType' and instance name \p instanceName to this prim in the 
+    /// current edit target. 
+    /// 
+    /// This information is stored in the token-valued, listOp metadata
+    /// \em apiSchemas on this prim. For example, if SchemaType is
+    /// 'UsdCollectionAPI' and \p instanceName is 'plasticStuff', the name 
+    /// 'CollectionAPI:plasticStuff' is added to the 'apiSchemas' listOp 
+    /// metadata. 
+    /// 
+    /// Returns true upon success or if the API schema is already applied with
+    /// this \p instanceName in the current edit target.
+    /// 
+    /// An error is issued and false returned for any of the following 
+    /// conditions:
+    /// \li \p instanceName is empty
+    /// \li this prim is not a valid prim for editing
+    /// \li this prim is valid, but cannot be reached or overridden in the 
+    /// current edit target
+    /// \li the schema name cannot be added to the apiSchemas listOp metadata
+    template <typename SchemaType>
+    bool ApplyAPI(const TfToken &instanceName) const {
+        static_assert(std::is_base_of<UsdAPISchemaBase, SchemaType>::value,
+            "Provided type must derive UsdAPISchemaBase.");
+        static_assert(!std::is_same<UsdAPISchemaBase, SchemaType>::value,
+            "Provided type must not be UsdAPISchemaBase.");
+        static_assert(SchemaType::schemaType == UsdSchemaKind::MultipleApplyAPI,
+            "Provided schema type must be a multiple apply API schema.");
+
+        if (instanceName.IsEmpty()) {
+            TF_CODING_ERROR("ApplyAPI: for mutiple apply API schema %s, a "
+                            "non-empty instance name must be provided.",
+                TfType::GetCanonicalTypeName(typeid(SchemaType)).c_str());
+            return false;
+        }
+
+        static TfType schemaType = TfType::Find<SchemaType>();
+        return _ApplyAPI(schemaType, instanceName);
+    }
+
+    /// Applies an API schema with the given TfType \p schemaType on this prim
+    /// in the current edit target.
+    /// 
+    /// The \p schemaType must be an applied API schema type. If the 
+    /// \p schemaType is a multiple-apply schema, \p instanceName must
+    /// be non-empty while for single-apply schema, \p instanceName must be
+    /// empty. A error is issued and false returned if these conditions are
+    /// not met.
+    ///
+    /// This function behaves exactly like the templated ApplyAPI functions 
+    /// except for the runtime schemaType validation which happens at compile 
+    /// time for the templated functions. This method is provided for python 
+    /// clients. Use of the templated ApplyAPI is preferred.
+    USD_API
+    bool ApplyAPI(const TfType& schemaType,
+                  const TfToken& instanceName=TfToken()) const;
+
+
+    /// Removes a <b>single-apply</b> API schema with the given C++ type 
+    /// 'SchemaType' from this prim in the current edit target. 
+    /// 
+    /// This is done by removing the API schema's name token from the 
+    /// token-valued, listOp metadata \em apiSchemas on this prim as well as 
+    /// authoring an explicit deletion of schema name from the listOp.
+    /// 
+    /// Returns true upon success or if the API schema is already deleted in 
+    /// the current edit target.
+    /// 
+    /// An error is issued and false returned for any of the following 
+    /// conditions:
+    /// \li this prim is not a valid prim for editing
+    /// \li this prim is valid, but cannot be reached or overridden in the 
+    /// current edit target
+    /// \li the schema name cannot be deleted in the apiSchemas listOp metadata
+    template <typename SchemaType>
+    bool RemoveAPI() const {
+        static_assert(std::is_base_of<UsdAPISchemaBase, SchemaType>::value,
+            "Provided type must derive UsdAPISchemaBase.");
+        static_assert(!std::is_same<UsdAPISchemaBase, SchemaType>::value,
+            "Provided type must not be UsdAPISchemaBase.");
+        static_assert(SchemaType::schemaType == UsdSchemaKind::SingleApplyAPI,
+            "Provided schema type must be an single apply API schema.");
+
+        static TfType schemaType = TfType::Find<SchemaType>();
+        return _RemoveAPI(schemaType);
+    }
+
+    /// Removes a </b>multiple-apply</b> API schema with the given C++ type 
+    /// 'SchemaType' and instance name \p instanceName from this prim in the 
+    /// current edit target. 
+    /// 
+    /// This is done by removing the instanced schema name token from the 
+    /// token-valued, listOp metadata \em apiSchemas on this prim as well as 
+    /// authoring an explicit deletion of the name from the listOp. For example,
+    /// if SchemaType is 'UsdCollectionAPI' and \p instanceName is 
+    /// 'plasticStuff', the name 'CollectionAPI:plasticStuff' is deleted 
+    /// from the 'apiSchemas' listOp  metadata. 
+    /// 
+    /// Returns true upon success or if the API schema with this \p instanceName
+    /// is already deleted in the current edit target.
+    /// 
+    /// An error is issued and false returned for any of the following 
+    /// conditions:
+    /// \li \p instanceName is empty
+    /// \li this prim is not a valid prim for editing
+    /// \li this prim is valid, but cannot be reached or overridden in the 
+    /// current edit target
+    /// \li the schema name cannot be deleted in the apiSchemas listOp metadata
+    template <typename SchemaType>
+    bool RemoveAPI(const TfToken &instanceName) const {
+        static_assert(std::is_base_of<UsdAPISchemaBase, SchemaType>::value,
+            "Provided type must derive UsdAPISchemaBase.");
+        static_assert(!std::is_same<UsdAPISchemaBase, SchemaType>::value,
+            "Provided type must not be UsdAPISchemaBase.");
+        static_assert(SchemaType::schemaType == UsdSchemaKind::MultipleApplyAPI,
+            "Provided schema type must be a multiple apply API schema.");
+
+        static TfType schemaType = TfType::Find<SchemaType>();
+        return _RemoveAPI(schemaType, instanceName);
+    }
+
+    /// Removes an API schema with the given TfType \p schemaType from this prim
+    /// in the current edit target.
+    /// 
+    /// The \p schemaType must be an applied API schema type. If the 
+    /// \p schemaType is a multiple-apply schema, \p instanceName must
+    /// be non-empty while for single-apply schema, \p instanceName must be
+    /// empty. A error is issued and false returned if these conditions are
+    /// not met.
+    ///
+    /// This function behaves exactly like the templated RemoveAPI functions 
+    /// except for the runtime schemaType validation which happens at compile 
+    /// time for the templated functions. This method is provided for python 
+    /// clients. Use of the templated RemoveAPI is preferred.
+    USD_API
+    bool RemoveAPI(const TfType& schemaType,
+                   const TfToken& instanceName=TfToken()) const;
+
+    /// Adds the applied API schema name token \p appliedSchemaName to the 
+    /// \em apiSchemas metadata for this prim at the current edit target. For
+    /// multiple-apply schemas the name token should include the instance name
+    /// for the applied schema, for example 'CollectionAPI:plasticStuff'.
+    ///
+    /// The name will only be added if the \ref SdfListOp "list operation" at
+    /// the edit target does not already have this applied schema in its 
+    /// explicit, prepended, or appended lists and is always added to the end 
+    /// of either the prepended or explicit items.
+    /// 
+    /// Returns true upon success or if the API schema is already applied in 
+    /// the current edit target.
+    /// 
+    /// An error is issued and false returned for any of the following 
+    /// conditions:
+    /// \li this prim is not a valid prim for editing
+    /// \li this prim is valid, but cannot be reached or overridden in the 
+    /// current edit target
+    /// \li the schema name cannot be added to the apiSchemas listOp metadata
+    ///
+    /// Unlike ApplyAPI this method does not require that the name token 
+    /// refer to a valid API schema type. ApplyAPI is the preferred method
+    /// for applying valid API schemas.
+    USD_API
+    bool AddAppliedSchema(const TfToken &appliedSchemaName) const;
+
+    /// Removes the applied API schema name token \p appliedSchemaName from the 
+    /// \em apiSchemas metadata for this prim at the current edit target. For
+    /// multiple-apply schemas the name token should include the instance name
+    /// for the applied schema, for example 'CollectionAPI:plasticStuff'
+    ///
+    /// For an explicit \ref SdfListOp "list operation", this removes the 
+    /// applied schema name from the explicit items list if it was present. For 
+    /// a non-explicit \ref SdfListOp "list operation", this will remove any 
+    /// occurrence of the applied schema name from the prepended and appended 
+    /// item as well as adding it to the deleted items list.
+    /// 
+    /// Returns true upon success or if the API schema is already deleted in 
+    /// the current edit target.
+    /// 
+    /// An error is issued and false returned for any of the following 
+    /// conditions:
+    /// \li this prim is not a valid prim for editing
+    /// \li this prim is valid, but cannot be reached or overridden in the 
+    /// current edit target
+    /// \li the schema name cannot be deleted in the apiSchemas listOp metadata
+    ///
+    /// Unlike RemoveAPI this method does not require that the name token 
+    /// refer to a valid API schema type. RemoveAPI is the preferred method 
+    /// for removing valid API schemas.
+    USD_API
+    bool RemoveAppliedSchema(const TfToken &appliedSchemaName) const;
 
     // --------------------------------------------------------------------- //
     /// \name Prim Children
@@ -618,6 +858,22 @@ public:
     /// and #UsdPrimDefaultPredicate for more information.
     inline SiblingRange
     GetFilteredChildren(const Usd_PrimFlagsPredicate &predicate) const;
+
+    /// Return the names of the child prims in the order they appear when
+    /// iterating over GetChildren.  
+    USD_API
+    TfTokenVector GetChildrenNames() const;
+
+    /// Return the names of the child prims in the order they appear when
+    /// iterating over GetAllChildren.  
+    USD_API
+    TfTokenVector GetAllChildrenNames() const;
+
+    /// Return the names of the child prims in the order they appear when
+    /// iterating over GetFilteredChildren(\p predicate).  
+    USD_API
+    TfTokenVector GetFilteredChildrenNames(
+        const Usd_PrimFlagsPredicate &predicate) const;
 
     /// Return this prim's active, loaded, defined, non-abstract descendants as
     /// an iterable range.  Equivalent to:
@@ -668,6 +924,26 @@ public:
     /// and \c UsdPrimRange for more general Stage traversal behaviors.
     inline SubtreeRange
     GetFilteredDescendants(const Usd_PrimFlagsPredicate &predicate) const;
+
+    /// Return the strongest opinion for the metadata used to reorder children 
+    /// of this prim. Due to how reordering of prim children is composed,
+    /// this value cannot be relied on to get the actual order of the prim's 
+    /// children. Use GetChidrenNames, GetAllChildrenNames, 
+    /// GetFilteredChildrenNames to get the true child order if needed.
+    USD_API
+    TfTokenVector GetChildrenReorder() const;
+
+    /// Author an opinion for the metadata used to reorder children of this 
+    /// prim at the current EditTarget.
+    void SetChildrenReorder(const TfTokenVector &order) const {
+        SetMetadata(SdfFieldKeys->PrimOrder, order);
+    }
+
+    /// Remove the opinion for the metadata used to reorder children of this 
+    /// prim at the current EditTarget.
+    void ClearChildrenReorder() const {
+        ClearMetadata(SdfFieldKeys->PrimOrder);
+    }
 
 public:
     // --------------------------------------------------------------------- //
@@ -1154,11 +1430,11 @@ public:
         return HasAuthoredMetadata(SdfFieldKeys->Instanceable);
     }
 
-    /// Return true if this prim is an instance of a master, false
+    /// Return true if this prim is an instance of a prototype, false
     /// otherwise.
     ///
-    /// If this prim is an instance, calling GetMaster() will return
-    /// the UsdPrim for the corresponding master prim.
+    /// If this prim is an instance, calling GetPrototype() will return
+    /// the UsdPrim for the corresponding prototype prim.
     bool IsInstance() const { return _Prim()->IsInstance(); }
 
     /// Return true if this prim is an instance proxy, false otherwise.
@@ -1168,39 +1444,105 @@ public:
         return Usd_IsInstanceProxy(_Prim(), _ProxyPrimPath());
     }
 
-    /// Return true if this prim is a master prim, false otherwise.
-    bool IsMaster() const { return _Prim()->IsMaster(); }
-
-    /// Return true if this prim is located in a subtree of prims
-    /// rooted at a master prim, false otherwise.
+    /// Return true if the given \p path identifies a prototype prim,
+    /// false otherwise.
     ///
-    /// If this function returns true, this prim is either a master prim
-    /// or a descendent of a master prim.
-    bool IsInMaster() const { 
+    /// This function will return false for prim and property paths
+    /// that are descendants of a prototype prim path.
+    ///
+    /// \sa IsPathInPrototype
+    USD_API
+    static bool IsPrototypePath(const SdfPath& path);
+
+    /// Return true if the given \p path identifies a prototype prim or
+    /// a prim or property descendant of a prototype prim, false otherwise.
+    ///
+    /// \sa IsPrototypePath
+    USD_API
+    static bool IsPathInPrototype(const SdfPath& path);
+
+    /// Return true if this prim is an instancing prototype prim,
+    /// false otherwise.
+    ///
+    /// \sa IsInPrototype
+    bool IsPrototype() const { return _Prim()->IsPrototype(); }
+
+    /// Return true if this prim is a prototype prim or a descendant
+    /// of a prototype prim, false otherwise.
+    ///
+    /// \sa IsPrototype
+    bool IsInPrototype() const { 
         return (IsInstanceProxy() ? 
-            _PrimPathIsInMaster() : _Prim()->IsInMaster());
+            IsPathInPrototype(GetPrimPath()) : _Prim()->IsInPrototype());
     }
 
     /// If this prim is an instance, return the UsdPrim for the corresponding
-    /// master. Otherwise, return an invalid UsdPrim.
+    /// prototype. Otherwise, return an invalid UsdPrim.
     USD_API
-    UsdPrim GetMaster() const;
+    UsdPrim GetPrototype() const;
 
     /// If this prim is an instance proxy, return the UsdPrim for the
-    /// corresponding prim in the instance's master. Otherwise, return an
+    /// corresponding prim in the instance's prototype. Otherwise, return an
     /// invalid UsdPrim.
-    UsdPrim GetPrimInMaster() const {
+    UsdPrim GetPrimInPrototype() const {
         if (IsInstanceProxy()) {
             return UsdPrim(_Prim(), SdfPath());
         }
         return UsdPrim();
     }
 
-    /// If this prim is a master prim, returns all prims that are instances of 
-    /// this master. Otherwise, returns an empty vector.
+    /// Return true if the given \p path identifies a prototype prim,
+    /// false otherwise.
     ///
-    /// Note that this function will return prims in masters for instances that 
-    /// are nested beneath other instances.
+    /// This function will return false for prim and property paths
+    /// that are descendants of a prototype prim path.
+    ///
+    /// \deprecated Use UsdPrim::IsPrototypePath instead
+    USD_API
+    static bool IsMasterPath(const SdfPath& path);
+
+    /// Return true if the given \p path identifies a prototype prim or
+    /// a prim or property descendant of a prototype prim, false otherwise.
+    ///
+    /// \deprecated Use UsdPrim::IsPathInPrototype instead
+    USD_API
+    static bool IsPathInMaster(const SdfPath& path);
+
+    /// Return true if this prim is an instancing prototype prim,
+    /// false otherwise.
+    ///
+    /// \deprecated Use UsdPrim::IsPrototype instead.
+    bool IsMaster() const { return IsPrototype(); }
+
+    /// Return true if this prim is a prototype prim or a descendant
+    /// of a prototype prim, false otherwise.
+    ///
+    /// \deprecated Use UsdPrim::IsInPrototype instead.
+    bool IsInMaster() const { 
+        return IsInPrototype();
+    }
+
+    /// If this prim is an instance, return the UsdPrim for the corresponding
+    /// prototype. Otherwise, return an invalid UsdPrim.
+    ///
+    /// \deprecated Use UsdPrim::GetPrototype instead.
+    USD_API
+    UsdPrim GetMaster() const;
+
+    /// If this prim is an instance proxy, return the UsdPrim for the
+    /// corresponding prim in the instance's prototype. Otherwise, return an
+    /// invalid UsdPrim.
+    ///
+    /// \deprecated Use UsdPrim::GetPrimInPrototype instead.
+    UsdPrim GetPrimInMaster() const {
+        return GetPrimInPrototype();
+    }
+
+    /// If this prim is a prototype prim, returns all prims that are instances
+    /// of this prototype. Otherwise, returns an empty vector.
+    ///
+    /// Note that this function will return prims in prototypes for instances
+    /// that are nested beneath other instances.
     USD_API
     std::vector<UsdPrim> GetInstances() const;
     /// @}
@@ -1222,11 +1564,11 @@ public:
     /// UsdPrim::ComputeExpandedPrimIndex to compute a prim index that includes 
     /// all possible sites that could contribute opinions.
     ///
-    /// This prim index will be empty for master prims. This ensures that these 
-    /// prims do not provide any attribute or metadata values. For all other 
-    /// prims in masters, this is the prim index that was chosen to be shared 
-    /// with all other instances. In either case, the prim index's path will 
-    /// not be the same as the prim's path.
+    /// This prim index will be empty for prototype prims. This ensures that
+    /// these prims do not provide any attribute or metadata values. For all
+    /// other prims in prototypes, this is the prim index that was chosen to
+    /// be shared with all other instances. In either case, the prim index's
+    /// path will not be the same as the prim's path.
     ///
     /// Prim indexes may be invalidated by changes to the UsdStage and cannot
     /// detect if they are expired. Clients should avoid keeping copies of the 
@@ -1309,17 +1651,12 @@ private:
     std::vector<UsdRelationship>
     _GetRelationships(bool onlyAuthored, bool applyOrder=false) const;
 
-    // Helper for determining whether this prim is in a master based
-    // on prim path.
-    USD_API
-    bool _PrimPathIsInMaster() const;
-
     friend const PcpPrimIndex &Usd_PrimGetSourcePrimIndex(const UsdPrim&);
     // Return a const reference to the source PcpPrimIndex for this prim.
     //
-    // For all prims in masters (which includes the master prim itself), 
+    // For all prims in prototypes (which includes the prototype prim itself), 
     // this is the prim index for the instance that was chosen to serve
-    // as the master for all other instances.  This prim index will not
+    // as the prototype for all other instances.  This prim index will not
     // have the same path as the prim's path.
     //
     // This is a private helper but is also wrapped out to Python

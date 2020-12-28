@@ -68,10 +68,25 @@ HgiMetalBuffer::~HgiMetalBuffer()
     }
 }
 
+size_t
+HgiMetalBuffer::GetByteSizeOfResource() const
+{
+    return _descriptor.byteSize;
+}
+
 uint64_t
 HgiMetalBuffer::GetRawResource() const
 {
     return (uint64_t) _bufferId;
 }
 
+void*
+HgiMetalBuffer::GetCPUStagingAddress()
+{
+    if (_bufferId) {
+        return [_bufferId contents];
+    }
+
+    return nullptr;
+}
 PXR_NAMESPACE_CLOSE_SCOPE

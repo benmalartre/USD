@@ -337,6 +337,14 @@ struct HdTupleType {
     }
 };
 
+// Support TfHash.
+template <class HashState>
+void
+TfHashAppend(HashState &h, HdTupleType const &tt)
+{
+    h.Append(tt.type, tt.count);
+}
+
 /// Returns a direct pointer to the data held by a VtValue.
 /// Returns nullptr if the VtValue is empty or holds a type unknown to Hd.
 HD_API
@@ -409,11 +417,20 @@ enum HdFormat
     HdFormatFloat32Vec3,
     HdFormatFloat32Vec4,
 
+    // UInt16 - a 2-byte unsigned integer
+    HdFormatUInt16,
+    HdFormatUInt16Vec2,
+    HdFormatUInt16Vec3,
+    HdFormatUInt16Vec4,
+
     // Int32 - a 4-byte signed integer
     HdFormatInt32,
     HdFormatInt32Vec2,
     HdFormatInt32Vec3,
     HdFormatInt32Vec4,
+
+    // Depth-stencil format
+    HdFormatFloat32UInt8,
 
     HdFormatCount
 };

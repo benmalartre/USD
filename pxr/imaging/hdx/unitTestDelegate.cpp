@@ -28,16 +28,12 @@
 #include "pxr/imaging/hd/engine.h"
 #include "pxr/imaging/hd/mesh.h"
 #include "pxr/imaging/hd/sprim.h"
-#include "pxr/imaging/hd/texture.h"
-#include "pxr/imaging/hd/textureResource.h"
 
 #include "pxr/imaging/hd/camera.h"
 #include "pxr/imaging/hdSt/drawTarget.h"
-#include "pxr/imaging/hdSt/drawTargetAttachmentDescArray.h"
 #include "pxr/imaging/hdSt/light.h"
 
 #include "pxr/imaging/hdx/drawTargetTask.h"
-#include "pxr/imaging/hdx/drawTargetResolveTask.h"
 #include "pxr/imaging/hdx/pickTask.h"
 #include "pxr/imaging/hdx/renderTask.h"
 #include "pxr/imaging/hdx/selectionTask.h"
@@ -45,11 +41,15 @@
 #include "pxr/imaging/hdx/shadowTask.h"
 #include "pxr/imaging/hdx/shadowMatrixComputation.h"
 
-#include "pxr/imaging/glf/drawTarget.h"
 #include "pxr/imaging/pxOsd/tokens.h"
 
 PXR_NAMESPACE_OPEN_SCOPE
 
+TF_DEFINE_PRIVATE_TOKENS(
+    _tokens,
+
+    (renderBufferDescriptor)
+);    
 
 static void
 _CreateGrid(int nx, int ny, VtVec3fArray *points,
@@ -99,44 +99,6 @@ public:
     }
 private:
     GfMatrix4d _shadowMatrix;
-};
-
-class DrawTargetTextureResource : public HdTextureResource
-{
-public:
-    DrawTargetTextureResource(GlfDrawTargetRefPtr const &drawTarget)
-        : _drawTarget(drawTarget) {
-    }
-    virtual ~DrawTargetTextureResource() {
-    };
-
-    virtual HdTextureType GetTextureType() const override {
-        return HdTextureType::Uv;
-    }
-
-    virtual GLuint GetTexelsTextureId() {
-        return _drawTarget->GetAttachment("color")->GetGlTextureName();
-    }
-    virtual GLuint GetTexelsSamplerId() {
-        return 0;
-    }
-    virtual uint64_t GetTexelsTextureHandle() {
-        return 0;
-    }
-
-    virtual GLuint GetLayoutTextureId() {
-        return 0;
-    }
-    virtual uint64_t GetLayoutTextureHandle() {
-        return 0;
-    }
-
-    size_t GetMemoryUsed() override {
-        return 0;
-    }
-
-private:
-    GlfDrawTargetRefPtr _drawTarget;
 };
 
 }
@@ -242,7 +204,7 @@ Hdx_UnitTestDelegate::SetLight(SdfPath const &id, TfToken const &key,
         GetRenderIndex().GetChangeTracker().MarkSprimDirty(
             id, HdLight::DirtyParams|HdLight::DirtyShadowParams);
         cache[HdLightTokens->shadowParams] = shadowParams;
-    } else if (key == HdLightTokens->transform) {
+    } else if (key == HdTokens->transform) {
         GetRenderIndex().GetChangeTracker().MarkSprimDirty(
             id, HdLight::DirtyTransform);
     } else if (key == HdLightTokens->shadowCollection) {
@@ -257,26 +219,60 @@ Hdx_UnitTestDelegate::AddDrawTarget(SdfPath const &id)
     GetRenderIndex().InsertSprim(HdPrimTypeTokens->drawTarget, this, id);
     _ValueCache &cache = _valueCacheMap[id];
 
-    HdStDrawTargetAttachmentDescArray attachments;
-    attachments.AddAttachment("color",
-                              HdFormatUNorm8Vec4,
-                              VtValue(GfVec4f(1,1,0,1)),
-                              HdWrapRepeat,
-                              HdWrapRepeat,
-                              HdMinFilterLinear,
-                              HdMagFilterLinear);
+    HdRenderPassAovBindingVector aovBindings;
 
+    {
+        const TfToken attachmentName("color");
+        
+        const SdfPath path = id.AppendProperty(attachmentName);
+        GetRenderIndex().InsertBprim(
+            HdPrimTypeTokens->renderBuffer, this, path);
+        
+        HdRenderBufferDescriptor desc;
+        desc.dimensions = GfVec3i(256, 256, 1);
+        desc.format = HdFormatUNorm8Vec4;
+        desc.multiSampled = true;
+        
+        _ValueCache &cache = _valueCacheMap[path];
+        cache[_tokens->renderBufferDescriptor] = desc;
+        
+        HdRenderPassAovBinding aovBinding;
+        aovBinding.aovName = attachmentName;
+        aovBinding.renderBufferId = path;
+        aovBinding.clearValue = VtValue(GfVec4f(1,1,0,1));
+        aovBindings.push_back(aovBinding);
+    }
+    
+    {
+        const TfToken attachmentName("depth");
+        
+        const SdfPath path = id.AppendProperty(attachmentName);
+        GetRenderIndex().InsertBprim(
+            HdPrimTypeTokens->renderBuffer, this, path);
+        
+        HdRenderBufferDescriptor desc;
+        desc.dimensions = GfVec3i(256, 256, 1);
+        desc.format = HdFormatFloat32;
+        desc.multiSampled = true;
+        
+        _ValueCache &cache = _valueCacheMap[path];
+        cache[_tokens->renderBufferDescriptor] = desc;
+        
+        HdRenderPassAovBinding aovBinding;
+        aovBinding.aovName = attachmentName;
+        aovBinding.renderBufferId = path;
+        aovBinding.clearValue = VtValue(GfVec4f(1,1,1,1));
+        aovBindings.push_back(aovBinding);
+    }
+    
+    cache[HdStDrawTargetTokens->aovBindings] = VtValue(aovBindings);
+
+    cache[HdStDrawTargetTokens->resolution]      = VtValue(GfVec2i(256, 256));
     cache[HdStDrawTargetTokens->enable]          = VtValue(true);
     cache[HdStDrawTargetTokens->camera]          = VtValue(SdfPath());
-    cache[HdStDrawTargetTokens->resolution]      = VtValue(GfVec2i(256, 256));
-    cache[HdStDrawTargetTokens->attachments]     = VtValue(attachments);
-    cache[HdStDrawTargetTokens->depthClearValue] = VtValue(1.0f);
     cache[HdStDrawTargetTokens->collection]      =
         VtValue(HdRprimCollection(HdTokens->geometry, 
             HdReprSelector(HdReprTokens->hull)));
-
-    GetRenderIndex().InsertBprim(HdPrimTypeTokens->texture, this, id);
-    _drawTargets[id] = _DrawTarget();
 
     GetRenderIndex().GetChangeTracker().MarkStateDirty(
         HdStDrawTargetTokens->drawTargetSet);
@@ -297,12 +293,12 @@ Hdx_UnitTestDelegate::SetDrawTarget(SdfPath const &id, TfToken const &key,
     } else if (key == HdStDrawTargetTokens->resolution) {
         GetRenderIndex().GetChangeTracker().MarkSprimDirty(
             id, HdStDrawTarget::DirtyDTResolution);
-    } else if (key == HdStDrawTargetTokens->attachments) {
+    } else if (key == HdStDrawTargetTokens->aovBindings) {
         GetRenderIndex().GetChangeTracker().MarkSprimDirty(
-            id, HdStDrawTarget::DirtyDTAttachment);
-    } else if (key == HdStDrawTargetTokens->depthClearValue) {
+            id, HdStDrawTarget::DirtyDTAovBindings);
+    } else if (key == HdStDrawTargetTokens->depthPriority) {
         GetRenderIndex().GetChangeTracker().MarkSprimDirty(
-            id, HdStDrawTarget::DirtyDTDepthClearValue);
+            id, HdStDrawTarget::DirtyDTDepthPriority);
     } else if (key == HdStDrawTargetTokens->collection) {
         GetRenderIndex().GetChangeTracker().MarkSprimDirty(
             id, HdStDrawTarget::DirtyDTCollection);
@@ -377,12 +373,6 @@ Hdx_UnitTestDelegate::AddDrawTargetTask(SdfPath const &id)
 }
 
 void
-Hdx_UnitTestDelegate::AddDrawTargetResolveTask(SdfPath const &id)
-{
-    GetRenderIndex().InsertTask<HdxDrawTargetResolveTask>(this, id);
-}
-
-void
 Hdx_UnitTestDelegate::AddPickTask(SdfPath const &id)
 {
     GetRenderIndex().InsertTask<HdxPickTask>(this, id);
@@ -428,11 +418,12 @@ Hdx_UnitTestDelegate::AddInstancer(SdfPath const &id,
 
     HdRenderIndex& index = GetRenderIndex();
     // add instancer
-    index.InsertInstancer(this, id, parentId);
+    index.InsertInstancer(this, id);
     _instancers[id] = _Instancer();
     _instancers[id].rootTransform = rootTransform;
 
     if (!parentId.IsEmpty()) {
+        _instancerBindings[id] = parentId;
         _instancers[parentId].prototypes.push_back(id);
     }
 }
@@ -474,7 +465,7 @@ Hdx_UnitTestDelegate::AddMesh(SdfPath const &id,
                              bool doubleSided)
 {
     HdRenderIndex& index = GetRenderIndex();
-    index.InsertRprim(HdPrimTypeTokens->mesh, this, id, instancerId);
+    index.InsertRprim(HdPrimTypeTokens->mesh, this, id);
 
     _meshes[id] = _Mesh(scheme, orientation, transform,
                         points, numVerts, verts, PxOsdSubdivTags(),
@@ -484,6 +475,7 @@ Hdx_UnitTestDelegate::AddMesh(SdfPath const &id,
                         HdInterpolationConstant,
                         guide, doubleSided);
     if (!instancerId.IsEmpty()) {
+        _instancerBindings[id] = instancerId;
         _instancers[instancerId].prototypes.push_back(id);
     }
 }
@@ -506,13 +498,14 @@ Hdx_UnitTestDelegate::AddMesh(SdfPath const &id,
                              bool doubleSided)
 {
     HdRenderIndex& index = GetRenderIndex();
-    index.InsertRprim(HdPrimTypeTokens->mesh, this, id, instancerId);
+    index.InsertRprim(HdPrimTypeTokens->mesh, this, id);
 
     _meshes[id] = _Mesh(scheme, orientation, transform,
                         points, numVerts, verts, subdivTags,
                         color, colorInterpolation, opacity,
                         opacityInterpolation, guide, doubleSided);
     if (!instancerId.IsEmpty()) {
+        _instancerBindings[id] = instancerId;
         _instancers[instancerId].prototypes.push_back(id);
     }
 }
@@ -888,6 +881,15 @@ Hdx_UnitTestDelegate::GetMaterialResource(SdfPath const &materialId)
 }
 
 /*virtual*/
+SdfPath
+Hdx_UnitTestDelegate::GetInstancerId(SdfPath const& primId)
+{
+    SdfPath instancerId;
+    TfMapLookup(_instancerBindings, primId, &instancerId);
+    return instancerId;
+}
+
+/*virtual*/
 VtValue
 Hdx_UnitTestDelegate::GetCameraParamValue(SdfPath const &cameraId,
                                           TfToken const &paramName)
@@ -901,28 +903,24 @@ Hdx_UnitTestDelegate::GetCameraParamValue(SdfPath const &cameraId,
     return VtValue();
 }
 
-HdTextureResourceSharedPtr
-Hdx_UnitTestDelegate::GetTextureResource(SdfPath const& textureId)
+HdRenderBufferDescriptor
+Hdx_UnitTestDelegate::GetRenderBufferDescriptor(SdfPath const &id)
 {
-    if (_drawTargets.find(textureId) != _drawTargets.end()) {
-        HdStDrawTarget const *drawTarget = static_cast<HdStDrawTarget const *> (
-                        GetRenderIndex().GetSprim(HdPrimTypeTokens->drawTarget,
-                                                  textureId));
-
-        if (drawTarget != nullptr) {
-            HdTextureResourceSharedPtr texResource(
-                new DrawTargetTextureResource(
-                    drawTarget->GetGlfDrawTarget()));
-            return texResource;
-        }
+    _ValueCache *vcache = TfMapLookupPtr(_valueCacheMap, id);
+    if (!vcache) {
+        return HdRenderBufferDescriptor();
     }
-    return HdTextureResourceSharedPtr();
-}
+    
+    VtValue ret;
+    if (!TfMapLookup(*vcache, _tokens->renderBufferDescriptor, &ret)) {
+        return HdRenderBufferDescriptor();
+    }
 
-HdTextureResource::ID
-Hdx_UnitTestDelegate::GetTextureResourceID(SdfPath const& textureId)
-{
-    return SdfPath::Hash()(textureId);
+    if (!ret.IsHolding<HdRenderBufferDescriptor>()) {
+        return HdRenderBufferDescriptor();
+    }
+
+    return ret.UncheckedGet<HdRenderBufferDescriptor>();
 }
 
 TfTokenVector

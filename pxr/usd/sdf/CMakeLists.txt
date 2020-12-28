@@ -89,6 +89,7 @@ pxr_library(sdf
         api.h
         accessorHelpers.h
         declareSpec.h
+        layerHints.h
         schemaTypeRegistration.h
 
     PRIVATE_CLASSES
@@ -157,6 +158,9 @@ pxr_library(sdf
 
     RESOURCE_FILES
         plugInfo.json
+
+    DOXYGEN_FILES
+        overview.dox
 )
 
 # Validate that the checked in generated code matches the sources. This requires
@@ -218,6 +222,13 @@ pxr_build_test(testSdfHardToReach
         testenv/testSdfHardToReach.cpp
 )
 
+pxr_build_test(testSdfLayerHints
+    LIBRARIES
+        sdf
+    CPPFILES
+        testenv/testSdfLayerHints.cpp
+)
+
 pxr_build_test(testSdfMetaDataPlugInfo
     LIBRARIES
         sdf
@@ -255,6 +266,11 @@ pxr_install_test_dir(
 pxr_install_test_dir(
     SRC testenv/testSdfCustomLayerData.testenv
     DEST testSdfCustomLayerData/testSdfCustomLayerData.testenv
+)
+
+pxr_install_test_dir(
+    SRC testenv/testSdfLayerHints.testenv
+    DEST testSdfLayerHints/testSdfLayerHints.testenv
 )
 
 pxr_install_test_dir(
@@ -318,6 +334,10 @@ pxr_register_test(testSdfFileFormat
 pxr_register_test(testSdfLayer
     PYTHON
     COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testSdfLayer"
+)
+
+pxr_register_test(testSdfLayerHints
+    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testSdfLayerHints"
 )
 
 pxr_register_test(testSdfLayerMuting

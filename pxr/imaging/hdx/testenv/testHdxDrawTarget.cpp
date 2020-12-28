@@ -21,9 +21,9 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-#include "pxr/pxr.h"
 
-#include "pxr/imaging/glf/glew.h"
+#include "pxr/imaging/garch/glApi.h"
+
 #include "pxr/imaging/glf/contextCaps.h"
 #include "pxr/imaging/glf/diagnostic.h"
 #include "pxr/imaging/glf/drawTarget.h"
@@ -39,7 +39,6 @@
 #include "pxr/imaging/hdSt/renderDelegate.h"
 
 #include "pxr/imaging/hdx/drawTargetTask.h"
-#include "pxr/imaging/hdx/drawTargetResolveTask.h"
 #include "pxr/imaging/hdx/simpleLightTask.h"
 #include "pxr/imaging/hdx/renderSetupTask.h"
 #include "pxr/imaging/hdx/renderTask.h"
@@ -67,7 +66,7 @@ int main(int argc, char *argv[])
 
     // prepare GL context
     GlfTestGLContext::RegisterGLContextCallbacks();
-    GlfGlewInit();
+    GarchGLApiLoad();
     GlfSharedGLContextScopeHolder sharedContext;
     GlfContextCaps::InitInstance();
 
@@ -102,16 +101,13 @@ int main(int argc, char *argv[])
     SdfPath simpleLightTask("/simpleLightTask");
     SdfPath renderSetupTask("/renderSetupTask");
     SdfPath renderTask("/renderTask");
-    SdfPath drawTargetResolveTask("/drawTargetResolveTask");
     delegate->AddSimpleLightTask(simpleLightTask);
     delegate->AddDrawTargetTask(drawTargetTask);
-    delegate->AddDrawTargetResolveTask(drawTargetResolveTask);
     delegate->AddRenderSetupTask(renderSetupTask);
     delegate->AddRenderTask(renderTask);
     HdTaskSharedPtrVector tasks;
     tasks.push_back(index->GetTask(simpleLightTask));
     tasks.push_back(index->GetTask(drawTargetTask));
-    tasks.push_back(index->GetTask(drawTargetResolveTask));
     tasks.push_back(index->GetTask(renderSetupTask));
     tasks.push_back(index->GetTask(renderTask));
 
@@ -178,16 +174,22 @@ int main(int argc, char *argv[])
     textureNode.identifier = TfToken("UsdUVTexture");
     textureNode.parameters[TfToken("fallback")] = VtValue(GfVec3f(1));
 
-    // For the file path, HdSt doesn't really care what it is since it is going
-    // to do a lookup of the prim via GetTextureResource on the sceneDelegate.
-    // The file path cannot be empty though, because if it is empty HdSt will
-    // use the fallback value of the texture node.
+    // A texture associated with a render buffer can be used by setting
+    // the file parameter to an SdfPath (instead of SdfAssetPath) that
+    // contains the prim path of the render buffer.
     //
-    // Note that we do not author an SdfPath or std::string here so that
-    // the HdSceneDelegate::GetTextureResource API is used rather than the
-    // storm texture system.
+    // We point to the render buffer that serves as color attachment of
+    // the draw target.
     textureNode.parameters[TfToken("file")] = 
         VtValue(drawTargetAttachmentId);
+    textureNode.parameters[TfToken("wrapS")] =
+        VtValue(TfToken("repeat"));
+    textureNode.parameters[TfToken("wrapT")] =
+        VtValue(TfToken("repeat"));
+    textureNode.parameters[TfToken("minFilter")] =
+        VtValue(TfToken("linear"));
+    textureNode.parameters[TfToken("magFilter")] =
+        VtValue(TfToken("linear"));
 
     // Insert connection between texture node and terminal
     HdMaterialRelationship rel;

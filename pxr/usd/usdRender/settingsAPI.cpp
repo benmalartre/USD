@@ -62,7 +62,12 @@ UsdRenderSettingsAPI::Get(const UsdStagePtr &stage, const SdfPath &path)
 
 
 /* virtual */
-UsdSchemaType UsdRenderSettingsAPI::_GetSchemaType() const {
+UsdSchemaKind UsdRenderSettingsAPI::_GetSchemaKind() const {
+    return UsdRenderSettingsAPI::schemaKind;
+}
+
+/* virtual */
+UsdSchemaKind UsdRenderSettingsAPI::_GetSchemaType() const {
     return UsdRenderSettingsAPI::schemaType;
 }
 
@@ -70,8 +75,10 @@ UsdSchemaType UsdRenderSettingsAPI::_GetSchemaType() const {
 UsdRenderSettingsAPI
 UsdRenderSettingsAPI::Apply(const UsdPrim &prim)
 {
-    return UsdAPISchemaBase::_ApplyAPISchema<UsdRenderSettingsAPI>(
-            prim, _schemaTokens->RenderSettingsAPI);
+    if (prim.ApplyAPI<UsdRenderSettingsAPI>()) {
+        return UsdRenderSettingsAPI(prim);
+    }
+    return UsdRenderSettingsAPI();
 }
 
 /* static */

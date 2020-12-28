@@ -21,14 +21,18 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/imaging/garch/glApi.h"
+
 #include "pxr/imaging/hdx/oitBufferAccessor.h"
 
-#include "pxr/imaging/glf/glew.h"
 #include "pxr/imaging/glf/contextCaps.h"
 
-#include "pxr/imaging/hdSt/bufferArrayRangeGL.h"
-#include "pxr/imaging/hdSt/bufferResourceGL.h"
+#include "pxr/imaging/hdSt/bufferArrayRange.h"
+#include "pxr/imaging/hdSt/bufferResource.h"
 #include "pxr/imaging/hdSt/renderPassShader.h"
+
+// XXX todo tmp needed until we remove direct gl calls below.
+#include "pxr/imaging/hgiGL/buffer.h"
 
 #include "pxr/imaging/hdx/tokens.h"
 
@@ -149,8 +153,8 @@ HdxOitBufferAccessor::InitializeOitBuffersIfNecessary()
     // The shader determines what elements in each buffer are used based on
     // finding -1 in the counter buffer. We can skip clearing the other buffers.
 
-    HdStBufferArrayRangeGLSharedPtr stCounterBar =
-        std::dynamic_pointer_cast<HdStBufferArrayRangeGL>(
+    HdStBufferArrayRangeSharedPtr stCounterBar =
+        std::dynamic_pointer_cast<HdStBufferArrayRange>(
             _GetBar(HdxTokens->oitCounterBufferBar));
 
     if (!stCounterBar) {
@@ -159,21 +163,29 @@ HdxOitBufferAccessor::InitializeOitBuffersIfNecessary()
         return;
     }
 
-    HdStBufferResourceGLSharedPtr stCounterResource = 
+    HdStBufferResourceSharedPtr stCounterResource = 
         stCounterBar->GetResource(HdxTokens->hdxOitCounterBuffer);
 
     GlfContextCaps const &caps = GlfContextCaps::GetInstance();
     const GLint clearCounter = -1;
 
-    // Old versions of glew may be missing glClearNamedBufferData
-    if (ARCH_LIKELY(caps.directStateAccessEnabled) && glClearNamedBufferData) {
-        glClearNamedBufferData(stCounterResource->GetId(),
+    // XXX todo add a Clear() fn on HdStBufferResource so that we do not have
+    // to use direct gl calls. below.
+    HgiBufferHandle& buffer = stCounterResource->GetId();
+    HgiGLBuffer* glBuffer = dynamic_cast<HgiGLBuffer*>(buffer.Get());
+    if (!glBuffer) {
+        TF_CODING_ERROR("Todo: Add HdStBufferResource::Clear");
+        return;
+    }
+
+    if (ARCH_LIKELY(caps.directStateAccessEnabled)) {
+        glClearNamedBufferData(glBuffer->GetBufferId(),
                                 GL_R32I,
                                 GL_RED_INTEGER,
                                 GL_INT,
                                 &clearCounter);
     } else {
-        glBindBuffer(GL_SHADER_STORAGE_BUFFER, stCounterResource->GetId());
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, glBuffer->GetBufferId());
         glClearBufferData(
             GL_SHADER_STORAGE_BUFFER, GL_R32I, GL_RED_INTEGER, GL_INT,
             &clearCounter);

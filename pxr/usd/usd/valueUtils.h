@@ -25,7 +25,6 @@
 #define PXR_USD_USD_VALUE_UTILS_H
 
 #include "pxr/pxr.h"
-#include "pxr/usd/usd/clip.h"
 #include "pxr/usd/usd/common.h"
 
 #include "pxr/usd/sdf/abstractData.h"
@@ -100,6 +99,82 @@ Usd_ClearValueIfBlocked(VtValue* value)
     return false;
 }
 
+/// Helper function for setting a value into an SdfAbstractDataValue
+/// for generic programming.
+template <class T>
+inline bool
+Usd_SetValue(SdfAbstractDataValue *dv, T const &val)
+{ 
+    return dv->StoreValue(val); 
+}
+
+/// \overload
+/// Helper function for setting a value into a VtValue
+/// for generic programming.
+template <class T>
+inline bool
+Usd_SetValue(VtValue *value, T const &val)
+{ 
+    *value = val; 
+    return true;
+}
+
+/// \overload
+/// Helper function for setting a value into a T* from a VtValue
+/// for generic programming.
+template <class T,
+          typename = std::enable_if_t<
+              !std::is_same<T, SdfAbstractDataValue>::value &&
+              !std::is_same<T, VtValue>::value>>
+inline bool
+Usd_SetValue(T* value, VtValue const &val)
+{
+    if (val.IsHolding<T>()) {
+        *value = val.UncheckedGet<T>();
+        return true;
+    }
+    return false;
+}
+
+enum class Usd_DefaultValueResult 
+{
+    None = 0,
+    Found,
+    Blocked,
+};
+
+template <class T, class Source>
+Usd_DefaultValueResult 
+Usd_HasDefault(const Source& source, const SdfPath& specPath, T* value)
+{
+
+    if (!value) {
+        // Caller is not interested in the value, so avoid fetching it.
+        std::type_info const &ti =
+            source->GetFieldTypeid(specPath, SdfFieldKeys->Default);
+        if (ti == typeid(void)) {
+            return Usd_DefaultValueResult::None;
+        }
+        else if (ti == typeid(SdfValueBlock)) {
+            return Usd_DefaultValueResult::Blocked;
+        }
+        else {
+            return Usd_DefaultValueResult::Found;
+        }
+    }
+    else {
+        // Caller requests the value.
+        if (source->HasField(specPath, SdfFieldKeys->Default, value)) {
+            if (Usd_ClearValueIfBlocked(value)) {
+                return Usd_DefaultValueResult::Blocked;
+            }
+            return Usd_DefaultValueResult::Found;
+        }
+        // fall-through
+    }
+    return Usd_DefaultValueResult::None;
+}
+
 template <class T>
 inline bool
 Usd_QueryTimeSample(
@@ -107,15 +182,6 @@ Usd_QueryTimeSample(
     double time, Usd_InterpolatorBase* interpolator, T* result)
 {
     return layer->QueryTimeSample(path, time, result);
-}
-
-template <class T>
-inline bool
-Usd_QueryTimeSample(
-    const Usd_ClipRefPtr& clip, const SdfPath& path,
-    double time, Usd_InterpolatorBase* interpolator, T* result)
-{
-    return clip->QueryTimeSample(path, time, interpolator, result);
 }
 
 /// Merges sample times in \p additionalTimeSamples into the vector pointed to 

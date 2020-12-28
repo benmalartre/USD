@@ -25,12 +25,29 @@
 #include "pxr/imaging/hd/bufferArrayRange.h"
 
 #include "pxr/base/gf/frustum.h"
+#include "pxr/base/tf/hash.h"
 
-#include <boost/functional/hash.hpp>
 #include <iostream>
 
 PXR_NAMESPACE_OPEN_SCOPE
 
+static size_t _GetVersion(HdBufferArrayRangeSharedPtr const &bar)
+{
+    if (bar) {
+        return bar->GetVersion();
+    } else {
+        return 0;
+    }
+}
+
+static size_t _GetElementOffset(HdBufferArrayRangeSharedPtr const &bar)
+{
+    if (bar) {
+        return bar->GetElementOffset();
+    } else {
+        return 0;
+    }
+}
 
 HdDrawItem::HdDrawItem(HdRprimSharedData const *sharedData)
     : _sharedData(sharedData)
@@ -43,39 +60,53 @@ HdDrawItem::~HdDrawItem()
     /*NOTHING*/
 }
 
+template <class HashState>
+void
+TfHashAppend(HashState &h, HdDrawItem const &di)
+{
+    h.Append(_GetVersion(di.GetTopologyRange()));
+    h.Append(_GetVersion(di.GetConstantPrimvarRange()));
+    h.Append(_GetVersion(di.GetVertexPrimvarRange()));
+    h.Append(_GetVersion(di.GetVaryingPrimvarRange()));
+    h.Append(_GetVersion(di.GetElementPrimvarRange()));
+    h.Append(_GetVersion(di.GetFaceVaryingPrimvarRange()));
+    h.Append(_GetVersion(di.GetTopologyVisibilityRange()));
+
+    int const instancerNumLevels = di.GetInstancePrimvarNumLevels();
+    for (int i = 0; i < instancerNumLevels; ++i) {
+        h.Append(_GetVersion(di.GetInstancePrimvarRange(i)));
+    }
+    h.Append(_GetVersion(di.GetInstanceIndexRange()));
+
+    h.Append(di._GetBufferArraysHash());
+}
+
 size_t
 HdDrawItem::GetBufferArraysHash() const
 {
-    size_t hash = 0;
-    boost::hash_combine(hash,
-                        GetTopologyRange() ?
-                        GetTopologyRange()->GetVersion() : 0);
-    boost::hash_combine(hash,
-                        GetConstantPrimvarRange() ?
-                        GetConstantPrimvarRange()->GetVersion() : 0);
-    boost::hash_combine(hash,
-                        GetVertexPrimvarRange() ?
-                        GetVertexPrimvarRange()->GetVersion() : 0);
-    boost::hash_combine(hash,
-                        GetElementPrimvarRange() ?
-                        GetElementPrimvarRange()->GetVersion() : 0);
-    boost::hash_combine(hash,
-                        GetFaceVaryingPrimvarRange() ?
-                        GetFaceVaryingPrimvarRange()->GetVersion() : 0);
-    boost::hash_combine(hash,
-                        GetTopologyVisibilityRange() ?
-                        GetTopologyVisibilityRange()->GetVersion() : 0);
-    int instancerNumLevels = GetInstancePrimvarNumLevels();
-    for (int i = 0; i < instancerNumLevels; ++i) {
-        boost::hash_combine(hash,
-                            GetInstancePrimvarRange(i) ?
-                            GetInstancePrimvarRange(i)->GetVersion(): 0);
-    }
-    boost::hash_combine(hash,
-                        GetInstanceIndexRange() ?
-                        GetInstanceIndexRange()->GetVersion(): 0);
+    return TfHash()(*this);
+}
 
-    boost::hash_combine(hash, _GetBufferArraysHash());
+size_t
+HdDrawItem::GetElementOffsetsHash() const
+{
+    size_t hash = TfHash::Combine(
+        _GetElementOffset(GetTopologyRange()),
+        _GetElementOffset(GetConstantPrimvarRange()),
+        _GetElementOffset(GetVertexPrimvarRange()),
+        _GetElementOffset(GetVaryingPrimvarRange()),
+        _GetElementOffset(GetElementPrimvarRange()),
+        _GetElementOffset(GetFaceVaryingPrimvarRange()),
+        _GetElementOffset(GetTopologyVisibilityRange()));
+    
+    int const instancerNumLevels = GetInstancePrimvarNumLevels();
+    for (int i = 0; i < instancerNumLevels; ++i) {
+        hash = TfHash::Combine(hash,
+                               _GetElementOffset(GetInstancePrimvarRange(i)));
+    }
+    hash = TfHash::Combine(hash,
+                           _GetElementOffset(GetInstanceIndexRange()),
+                           _GetElementOffsetsHash());
 
     return hash;
 }
@@ -116,6 +147,11 @@ std::ostream &operator <<(std::ostream &out,
         out << "        numElements=" << self.GetVertexPrimvarRange()->GetNumElements() << "\n";
         out << *self.GetVertexPrimvarRange();
     }
+    if (self.GetVaryingPrimvarRange()) {
+        out << "    Varying Primvars:\n";
+        out << "        numElements=" << self.GetVaryingPrimvarRange()->GetNumElements() << "\n";
+        out << *self.GetVaryingPrimvarRange();
+    }
     if (self.GetFaceVaryingPrimvarRange()) {
         out << "    Fvar Primvars:\n";
         out << "        numElements=" << self.GetFaceVaryingPrimvarRange()->GetNumElements() << "\n";
@@ -130,6 +166,12 @@ std::ostream &operator <<(std::ostream &out,
 
 size_t
 HdDrawItem::_GetBufferArraysHash() const
+{
+    return 0;
+}
+
+size_t
+HdDrawItem::_GetElementOffsetsHash() const
 {
     return 0;
 }

@@ -21,12 +21,14 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-#include "pxr/imaging/glf/glew.h"
+#include "pxr/imaging/garch/glApi.h"
 
 #include "pxr/imaging/hdSt/samplerObject.h"
-
+#include "pxr/imaging/hdSt/ptexTextureObject.h"
+#include "pxr/imaging/hdSt/resourceRegistry.h"
 #include "pxr/imaging/hdSt/samplerObjectRegistry.h"
 #include "pxr/imaging/hdSt/textureObject.h"
+#include "pxr/imaging/hdSt/udimTextureObject.h"
 #include "pxr/imaging/hdSt/hgiConversions.h"
 
 #include "pxr/imaging/glf/diagnostic.h"
@@ -54,7 +56,13 @@ HdStSamplerObject::_GetHgi() const
         return nullptr;
     }
 
-    Hgi * const hgi = _samplerObjectRegistry->GetHgi();
+    HdStResourceRegistry * const registry =
+        _samplerObjectRegistry->GetResourceRegistry();
+    if (!TF_VERIFY(registry)) {
+        return nullptr;
+    }
+
+    Hgi * const hgi = registry->GetHgi();
     TF_VERIFY(hgi);
 
     return hgi;
@@ -63,17 +71,11 @@ HdStSamplerObject::_GetHgi() const
 ///////////////////////////////////////////////////////////////////////////////
 // Helpers
 
-// Generate GL sampler
+// Translate to Hgi
 static
-HgiSamplerHandle
-_GenSampler(HdSt_SamplerObjectRegistry * const samplerObjectRegistry,
-            HdSamplerParameters const &samplerParameters,
-            const bool createSampler)
+HgiSamplerDesc
+_ToHgiSamplerDesc(HdSamplerParameters const &samplerParameters)
 {
-    if (!createSampler) {
-        return HgiSamplerHandle();
-    }
-
     HgiSamplerDesc desc;
     desc.debugName = "HdStSamplerObject";
     desc.magFilter = HdStHgiConversions::GetHgiMagFilter(
@@ -87,14 +89,39 @@ _GenSampler(HdSt_SamplerObjectRegistry * const samplerObjectRegistry,
         HdStHgiConversions::GetHgiSamplerAddressMode(samplerParameters.wrapT);
     desc.addressModeW =
         HdStHgiConversions::GetHgiSamplerAddressMode(samplerParameters.wrapR);
-    
-    return samplerObjectRegistry->GetHgi()->CreateSampler(desc);
+
+    return desc;
+}
+
+// Generate GL sampler
+static
+HgiSamplerHandle
+_GenSampler(HdSt_SamplerObjectRegistry * const samplerObjectRegistry,
+            HdSamplerParameters const &samplerParameters,
+            const bool createSampler)
+{
+    if (!createSampler) {
+        return HgiSamplerHandle();
+    }
+
+    HdStResourceRegistry * const registry =
+        samplerObjectRegistry->GetResourceRegistry();
+    if (!TF_VERIFY(registry)) {
+        return HgiSamplerHandle();
+    }
+
+    Hgi * const hgi = registry->GetHgi();
+    if (!TF_VERIFY(hgi)) {
+        return HgiSamplerHandle();
+    }
+
+    return hgi->CreateSampler(_ToHgiSamplerDesc(samplerParameters));
 }
 
 // Get texture sampler handle for bindless textures.
 static
 GLuint64EXT
-_GenGLTextureSamplerHandle(const GLuint textureName,
+_GenGLTextureSamplerHandle(HgiTextureHandle const &textureHandle,
                            HgiSamplerHandle const &samplerHandle,
                            const bool createBindlessHandle)
 {
@@ -102,6 +129,17 @@ _GenGLTextureSamplerHandle(const GLuint textureName,
         return 0;
     }
 
+    HgiTexture * const texture = textureHandle.Get();
+    if (texture == nullptr) {
+        return 0;
+    }
+    HgiGLTexture * const glTexture = dynamic_cast<HgiGLTexture*>(texture);
+    if (glTexture == nullptr) {
+        TF_CODING_ERROR("Only OpenGL textures supported");
+        return 0;
+    }
+
+    GLuint textureName = glTexture->GetTextureId();
     if (textureName == 0) {
         return 0;
     }
@@ -110,7 +148,7 @@ _GenGLTextureSamplerHandle(const GLuint textureName,
     if (sampler == nullptr) {
         return 0;
     }
-    
+
     HgiGLSampler * const glSampler = dynamic_cast<HgiGLSampler*>(sampler);
     if (glSampler == nullptr) {
         TF_CODING_ERROR("Only OpenGL samplers supported");
@@ -125,55 +163,34 @@ _GenGLTextureSamplerHandle(const GLuint textureName,
     const GLuint64EXT result =
         glGetTextureSamplerHandleARB(textureName, samplerName);
 
-    glMakeTextureHandleResidentARB(result);
+    if (!glIsTextureHandleResidentARB(result)) {
+        glMakeTextureHandleResidentARB(result);
+    }
 
     GLF_POST_PENDING_GL_ERRORS();
 
     return result;
 }
 
-// Get texture sampler handle for bindless textures.
-static
-GLuint64EXT 
-_GenGLTextureSamplerHandle(HgiTextureHandle const &textureHandle,
-                           HgiSamplerHandle const &samplerHandle,
-                           const bool createBindlessHandle)
-{
-    if (!createBindlessHandle) {
-        return 0;
-    }
-
-    HgiTexture * const texture = textureHandle.Get();
-    if (texture == nullptr) {
-        return 0;
-    }
-
-    HgiGLTexture * const glTexture = dynamic_cast<HgiGLTexture*>(texture);
-    if (glTexture == nullptr) {
-        TF_CODING_ERROR("Only OpenGL textures supported");
-        return 0;
-    }
-
-    return _GenGLTextureSamplerHandle(
-        glTexture->GetTextureId(), samplerHandle, createBindlessHandle);
-}
-
 // Get texture handle for bindless textures.
 static
 GLuint64EXT
-_GenGlTextureHandle(const GLuint textureName,
+_GenGlTextureHandle(HgiTextureHandle const &texture,
                     const bool createGLTextureHandle)
 {
     if (!createGLTextureHandle) {
         return 0;
     }
 
-    if (textureName == 0) {
+    if (!texture) {
         return 0;
     }
 
+    const GLuint textureName = texture->GetRawResource();
     const GLuint64EXT result = glGetTextureHandleARB(textureName);
-    glMakeTextureHandleResidentARB(result);
+    if (!glIsTextureHandleResidentARB(result)) {
+        glMakeTextureHandleResidentARB(result);
+    }
 
     GLF_POST_PENDING_GL_ERRORS();
 
@@ -298,6 +315,16 @@ HdStFieldSamplerObject::~HdStFieldSamplerObject()
 ///////////////////////////////////////////////////////////////////////////////
 // Ptex sampler
 
+// Wrap modes such as repeat or mirror do not make sense for ptex, so set them
+// to clamp.
+static
+HdSamplerParameters PTEX_SAMPLER_PARAMETERS{
+    HdWrapClamp,
+    HdWrapClamp,
+    HdWrapClamp,
+    HdMinFilterLinear,
+    HdMagFilterLinear};
+
 HdStPtexSamplerObject::HdStPtexSamplerObject(
     HdStPtexTextureObject const &ptexTexture,
     // samplerParameters are ignored are ptex
@@ -305,13 +332,19 @@ HdStPtexSamplerObject::HdStPtexSamplerObject(
     const bool createBindlessHandle,
     HdSt_SamplerObjectRegistry * const samplerObjectRegistry)
   : HdStSamplerObject(samplerObjectRegistry)
+  , _texelsSampler(
+      _GenSampler(
+          samplerObjectRegistry,
+          PTEX_SAMPLER_PARAMETERS,
+          ptexTexture.IsValid()))
   , _texelsGLTextureHandle(
-      _GenGlTextureHandle(
-          ptexTexture.GetTexelGLTextureName(),
+      _GenGLTextureSamplerHandle(
+          ptexTexture.GetTexelTexture(),
+          _texelsSampler,
           createBindlessHandle && ptexTexture.IsValid()))
   , _layoutGLTextureHandle(
       _GenGlTextureHandle(
-          ptexTexture.GetLayoutGLTextureName(),
+          ptexTexture.GetLayoutTexture(),
           createBindlessHandle && ptexTexture.IsValid()))
 {
 }
@@ -334,7 +367,7 @@ HdSamplerParameters UDIM_SAMPLER_PARAMETERS{
     HdWrapClamp,
     HdWrapClamp,
     HdWrapClamp,
-    HdMinFilterLinear,
+    HdMinFilterLinearMipmapLinear,
     HdMagFilterLinear};
 
 HdStUdimSamplerObject::HdStUdimSamplerObject(
@@ -350,12 +383,12 @@ HdStUdimSamplerObject::HdStUdimSamplerObject(
           udimTexture.IsValid()))
   , _texelsGLTextureHandle(
       _GenGLTextureSamplerHandle(
-          udimTexture.GetTexelGLTextureName(),
+          udimTexture.GetTexelTexture(),
           _texelsSampler,
           createBindlessHandle && udimTexture.IsValid()))
   , _layoutGLTextureHandle(
       _GenGlTextureHandle(
-          udimTexture.GetLayoutGLTextureName(),
+          udimTexture.GetLayoutTexture(),
           createBindlessHandle && udimTexture.IsValid()))
 {
 }
@@ -368,5 +401,5 @@ HdStUdimSamplerObject::~HdStUdimSamplerObject()
         hgi->DestroySampler(&_texelsSampler);
     }
 }
-   
+
 PXR_NAMESPACE_CLOSE_SCOPE

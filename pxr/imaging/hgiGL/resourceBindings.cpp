@@ -34,21 +34,23 @@ HgiGLResourceBindings::HgiGLResourceBindings(
     HgiResourceBindingsDesc const& desc)
     : HgiResourceBindings(desc)
 {
-
 }
 
-HgiGLResourceBindings::~HgiGLResourceBindings()
-{
-}
+HgiGLResourceBindings::~HgiGLResourceBindings() = default;
 
 void
 HgiGLResourceBindings::BindResources()
 {
     std::vector<uint32_t> textures(_descriptor.textures.size(), 0);
     std::vector<uint32_t> samplers(textures.size(), 0);
+    std::vector<uint32_t> images(textures.size(), 0);
+
+    bool hasTex = false;
+    bool hasSampler = false;
+    bool hasImage = false;
 
     //
-    // Bind Textures and samplers
+    // Bind Textures, images and samplers
     //
     for (HgiTextureBindDesc const& texDesc : _descriptor.textures) {
         // OpenGL does not support arrays-of-textures bound to a unit.
@@ -59,25 +61,50 @@ HgiGLResourceBindings::BindResources()
         if (textures.size() <= unit) {
             textures.resize(unit+1, 0);
             samplers.resize(unit+1, 0);
+            images.resize(unit+1, 0);
         }
 
-        HgiTextureHandle const& texHandle = texDesc.textures.front();
-        HgiGLTexture* glTexture = static_cast<HgiGLTexture*>(texHandle.Get());
-        textures[texDesc.bindingIndex] = glTexture->GetTextureId();
+        if (texDesc.resourceType == HgiBindResourceTypeSampledImage ||
+            texDesc.resourceType == HgiBindResourceTypeCombinedSamplerImage) {
+            // Texture sampling (for graphics pipeline)
+            hasTex = true;
+            HgiTextureHandle const& texHandle = texDesc.textures.front();
+            HgiGLTexture* glTex = static_cast<HgiGLTexture*>(texHandle.Get());
+            textures[texDesc.bindingIndex] = glTex->GetTextureId();
+        } else if (texDesc.resourceType == HgiBindResourceTypeStorageImage) {
+            // Image load/store (usually for compute pipeline)
+            hasImage = true;
+            HgiTextureHandle const& texHandle = texDesc.textures.front();
+            HgiGLTexture* glTex = static_cast<HgiGLTexture*>(texHandle.Get());
+            images[texDesc.bindingIndex] = glTex->GetTextureId();
+        } else {
+            TF_CODING_ERROR("Unsupported texture bind resource type");
+        }
 
+        // 'StorageImage' types do not need a sampler, so check if we have one.
         if (!texDesc.samplers.empty()) {
+            hasSampler = true;
             HgiSamplerHandle const& smpHandle = texDesc.samplers.front();
             HgiGLSampler* glSmp = static_cast<HgiGLSampler*>(smpHandle.Get());
             samplers[texDesc.bindingIndex] = glSmp->GetSamplerId();
+        } else {
+            // A sampler MUST be provided for sampler image textures (Hgi rule).
+            TF_VERIFY(texDesc.resourceType != HgiBindResourceTypeSampledImage);
         }
     }
 
-    if (!textures.empty()) {
+    if (hasTex) {
         glBindTextures(0, textures.size(), textures.data());
     }
 
-    if (!samplers.empty()) {
+    if (hasSampler) {
         glBindSamplers(0, samplers.size(), samplers.data());
+    }
+
+    // 'texture units' are separate from 'texture image units' in OpenGL.
+    // glBindImageTextures should not reset textures bound with glBindTextures.
+    if (hasImage) {
+        glBindImageTextures(0, images.size(), images.data());
     }
 
     //

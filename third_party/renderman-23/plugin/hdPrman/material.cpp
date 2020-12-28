@@ -25,7 +25,6 @@
 #include "hdPrman/context.h"
 #include "hdPrman/debugCodes.h"
 #include "hdPrman/renderParam.h"
-#include "hdPrman/matfiltConversions.h"
 #include "hdPrman/matfiltConvertPreviewMaterial.h"
 #include "hdPrman/matfiltFilterChain.h"
 #include "hdPrman/matfiltResolveVstructs.h"
@@ -127,42 +126,41 @@ _ConvertToVec3fArray(const VtArray<GfVec3d>& v)
     return out;
 }
 
-// Recursively convert a Matfilt node and its upstream dependencies
+using _PathSet = std::unordered_set<SdfPath, SdfPath::Hash>;
+
+// Recursively convert a HdMaterialNode2 and its upstream dependencies
 // to Riley equivalents.  Avoids adding redundant nodes in the case
 // of multi-path dependencies.
 static bool
 _ConvertNodes(
-    MatfiltNetwork const& network,
+    HdMaterialNetwork2 const& network,
     SdfPath const& nodePath,
-    std::vector<riley::ShadingNode> *result)
+    std::vector<riley::ShadingNode> *result,
+    _PathSet* visitedNodes)
 {
-    // Find matfilt node.
+    // Check if we've processed this node before. If we have, we'll just return.
+    // This is not an error, since we often have multiple connection paths
+    // leading to the same upstream node.
+    if (visitedNodes->count(nodePath) > 0) {
+        return false;
+    }
+    visitedNodes->insert(nodePath);
+
+    // Find HdMaterialNetwork2 node.
     auto iter = network.nodes.find(nodePath);
     if (iter == network.nodes.end()) {
         // This could be caused by a bad connection to a non-existent node.
         TF_WARN("Unknown material node '%s'", nodePath.GetText());
         return false;
     }
-    MatfiltNode const& node = iter->second;
+    HdMaterialNode2 const& node = iter->second;
     // Riley expects nodes to be provided in topological dependency order.
     // Pre-traverse upstream nodes.
     for (auto const& connEntry: node.inputConnections) {
         for (auto const& e: connEntry.second) {
-            // Check if this node was already reached via another
-            // connection path.
-            bool upstreamNodeWasVisited = false;
-            // O(nm) for n nodes and m connections.  We expect n and m
-            // to remain small, but may need to revisit if we see much
-            // larger networks in the future.
-            for (riley::ShadingNode const &sn: *result) {
-                if (e.upstreamNode.GetString() == sn.handle.CStr()) {
-                    upstreamNodeWasVisited = true;
-                    break;
-                }
-            }
-            if (!upstreamNodeWasVisited) {
-                _ConvertNodes(network, e.upstreamNode, result);
-            }
+            // This method will just return if we've visited this upstream node
+            // before
+            _ConvertNodes(network, e.upstreamNode, result, visitedNodes);
         }
     }
     // Find shader registry entry.
@@ -193,13 +191,16 @@ _ConvertNodes(
         return false;
     }
     sn.handle = RtUString(nodePath.GetText());
-    std::string implName = sdrEntry->GetImplementationName();
-    if (sdrEntry->GetSourceType() == _tokens->OSL) {
-        // Explicitly specify the .oso extension to avoid possible
-        // mix-up between C++ and OSL shaders of the same name.
-        implName += ".oso";
+    std::string shaderPath = sdrEntry->GetResolvedImplementationURI();
+    if (shaderPath.empty()){
+        // This can happen if the material accidentally references
+        // a non-shading node type such as a light or light-filter.
+        TF_WARN("Shader '%s' did not provide a valid implementation path.",
+                sdrEntry->GetName().c_str());
+        return false;
     }
-    sn.name = RtUString(implName.c_str());
+        
+    sn.name = RtUString(shaderPath.c_str());
     // Convert params
     for (const auto& param: node.parameters) {
         const SdrShaderProperty* prop = sdrEntry->GetShaderInput(param.first);
@@ -336,6 +337,18 @@ _ConvertNodes(
                 sn.params.SetInteger(name, v);
                 ok = true;
             }
+        } else if (param.second.IsHolding<VtArray<int>>()) {
+            if (propType == SdrPropertyTypes->Float) {
+                const VtArray<float>& v =
+                    param.second.UncheckedGet<VtArray<float>>();
+                sn.params.SetFloatArray(name, v.cdata(), v.size());
+                ok = true;
+            } else if (propType == SdrPropertyTypes->Int) {
+                const VtArray<int>& v =
+                    param.second.UncheckedGet<VtArray<int>>();
+                sn.params.SetIntegerArray(name, v.cdata(), v.size());
+                ok = true;
+            }
         } else if (param.second.IsHolding<TfToken>()) {
             TfToken v = param.second.UncheckedGet<TfToken>();
             sn.params.SetString(name, RtUString(v.GetText()));
@@ -374,7 +387,7 @@ _ConvertNodes(
     for (auto const& connEntry: node.inputConnections) {
         for (auto const& e: connEntry.second) {
             // Find the output & input shader nodes of the connection.
-            MatfiltNode const* upstreamNode =
+            HdMaterialNode2 const* upstreamNode =
                 TfMapLookupPtr(network.nodes, e.upstreamNode);
             if (!upstreamNode) {
                 TF_WARN("Unknown upstream node %s", e.upstreamNode.GetText());
@@ -439,13 +452,15 @@ _ConvertNodes(
             }
         }
     }
+
     result->emplace_back(std::move(sn));
+
     return true;
 }
     
 // Debug helper
 void
-HdPrman_DumpNetwork(MatfiltNetwork const& network, SdfPath const& id)
+HdPrman_DumpNetwork(HdMaterialNetwork2 const& network, SdfPath const& id)
 {
     printf("material network for %s:\n", id.GetText());
     for (auto const& nodeEntry: network.nodes) {
@@ -475,14 +490,14 @@ HdPrman_DumpNetwork(MatfiltNetwork const& network, SdfPath const& id)
     }
 }
     
-// Convert given Matfilt network to Riley material and displacement
+// Convert given HdMaterialNetwork2 to Riley material and displacement
 // shader networks. If the Riley network exists, it will be modified;
 // otherwise it will be created as needed.
 static void
-_ConvertMatfiltNetworkToRman(
+_ConvertHdMaterialNetwork2ToRman(
     HdPrman_Context *context,
     SdfPath const& id,
-    const MatfiltNetwork &network,
+    const HdMaterialNetwork2 &network,
     riley::MaterialId *materialId,
     riley::DisplacementId *displacementId)
 {
@@ -492,7 +507,9 @@ _ConvertMatfiltNetworkToRman(
     nodes.reserve(network.nodes.size());
     bool materialFound = false, displacementFound = false;
     for (auto const& terminal: network.terminals) {
-        if (_ConvertNodes(network, terminal.second.upstreamNode, &nodes)) {
+        _PathSet visitedNodes;
+        if (_ConvertNodes(network, terminal.second.upstreamNode, &nodes,
+                          &visitedNodes)) {
             if (terminal.first == HdMaterialTerminalTokens->surface ||
                 terminal.first == HdMaterialTerminalTokens->volume) {
                 // Create or modify Riley material.
@@ -555,14 +572,14 @@ HdPrmanMaterial::Sync(HdSceneDelegate *sceneDelegate,
         (*dirtyBits & HdMaterial::DirtyParams)) {
         VtValue hdMatVal = sceneDelegate->GetMaterialResource(id);
         if (hdMatVal.IsHolding<HdMaterialNetworkMap>()) {
-            // Convert Hd material to Matfilt network form.
-            MatfiltNetwork matfiltNetwork;
-            MatfiltConvertFromHdMaterialNetworkMap(
-                hdMatVal.UncheckedGet<HdMaterialNetworkMap>(), &matfiltNetwork);
+            // Convert HdMaterial to HdMaterialNetwork2 form.
+            HdMaterialNetwork2 matNetwork2;
+            HdMaterialNetwork2ConvertFromHdMaterialNetworkMap(
+                hdMatVal.UncheckedGet<HdMaterialNetworkMap>(), &matNetwork2);
             // Apply material filter chain to the network.
             if (!_filterChain->empty()) {
                 std::vector<std::string> errors;
-                MatfiltExecFilterChain(*_filterChain, id, matfiltNetwork, {},
+                MatfiltExecFilterChain(*_filterChain, id, matNetwork2, {},
                                            *_sourceTypes, &errors);
                 if (!errors.empty()) {
                     TF_RUNTIME_ERROR("HdPrmanMaterial: %s\n",
@@ -571,10 +588,10 @@ HdPrmanMaterial::Sync(HdSceneDelegate *sceneDelegate,
                 }
             }
             if (TfDebug::IsEnabled(HDPRMAN_MATERIALS)) {
-                HdPrman_DumpNetwork(matfiltNetwork, id);
+                HdPrman_DumpNetwork(matNetwork2, id);
                 }
-            _ConvertMatfiltNetworkToRman(context, id, matfiltNetwork,
-                                         &_materialId, &_displacementId);
+            _ConvertHdMaterialNetwork2ToRman(context, id, matNetwork2,
+                                             &_materialId, &_displacementId);
         } else {
             TF_WARN("HdPrmanMaterial: Expected material resource "
                     "for <%s> to contain HdMaterialNodes, but "
@@ -591,13 +608,6 @@ HdDirtyBits
 HdPrmanMaterial::GetInitialDirtyBitsMask() const
 {
     return HdChangeTracker::AllDirty;
-}
-
-//virtual
-void
-HdPrmanMaterial::Reload()
-{
-    // TODO Is it possible to reload shaders during an rman session?
 }
 
 bool

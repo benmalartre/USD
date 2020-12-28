@@ -44,13 +44,13 @@
 
 #include "pxr/imaging/hdx/selectionTracker.h"
 #include "pxr/imaging/hdx/renderSetupTask.h"
-#include "pxr/imaging/hdx/pickTask.h"
 
 #include "pxr/imaging/hgi/hgi.h"
 
-#include "pxr/imaging/glf/drawTarget.h"
 #include "pxr/imaging/glf/simpleLight.h"
 #include "pxr/imaging/glf/simpleMaterial.h"
+
+#include "pxr/imaging/hgi/hgi.h"
 
 #include "pxr/usd/sdf/path.h"
 #include "pxr/usd/usd/timeCode.h"
@@ -140,9 +140,6 @@ public:
     void Render(const UsdPrim& root, 
                 const UsdImagingGLRenderParams &params);
 
-    USDIMAGINGGL_API
-    void InvalidateBuffers();
-
     /// Returns true if the resulting image is fully converged.
     /// (otherwise, caller may need to call Render() again to refine the result)
     USDIMAGINGGL_API
@@ -170,9 +167,41 @@ public:
     /// @{
     // ---------------------------------------------------------------------
     
+    /// Scene camera API
+    /// Set the scene camera path to use for rendering.
+    USDIMAGINGGL_API
+    void SetCameraPath(SdfPath const& id);
+
+    /// Determines how the filmback of the camera is mapped into
+    /// the pixels of the render buffer and what pixels of the render
+    /// buffer will be rendered into.
+    USDIMAGINGGL_API
+    void SetFraming(CameraUtilFraming const& framing);
+
+    /// Specifies whether to force a window policy when conforming
+    /// the frustum of the camera to match the display window of
+    /// the camera framing.
+    ///
+    /// If set to {false, ...}, the window policy of the specified camera
+    /// will be used.
+    ///
+    /// Note: std::pair<bool, ...> is used instead of std::optional<...>
+    /// because the latter is only available in C++17 or later.
+    USDIMAGINGGL_API
+    void SetOverrideWindowPolicy(
+        const std::pair<bool, CameraUtilConformWindowPolicy> &policy);
+
+    /// Set the size of the render buffers baking the AOVs.
+    /// GUI applications should set this to the size of the window.
+    ///
+    USDIMAGINGGL_API
+    void SetRenderBufferSize(GfVec2i const& size);
+
     /// Set the viewport to use for rendering as (x,y,w,h), where (x,y)
     /// represents the lower left corner of the viewport rectangle, and (w,h)
     /// is the width and height of the viewport in pixels.
+    ///
+    /// \deprecated Use SetFraming and SetRenderBufferSize instead.
     USDIMAGINGGL_API
     void SetRenderViewport(GfVec4d const& viewport);
 
@@ -181,11 +210,6 @@ public:
     /// See comment in SetCameraState for the free cam.
     USDIMAGINGGL_API
     void SetWindowPolicy(CameraUtilConformWindowPolicy policy);
-    
-    /// Scene camera API
-    /// Set the scene camera path to use for rendering.
-    USDIMAGINGGL_API
-    void SetCameraPath(SdfPath const& id);
 
     /// Free camera API
     /// Set camera framing state directly (without pointing to a camera on the 
@@ -269,7 +293,8 @@ public:
     ///
     /// Returns whether a hit occurred and if so, \p outHitPoint will contain
     /// the intersection point in world space (i.e. \p projectionMatrix and
-    /// \p viewMatrix factored back out of the result).
+    /// \p viewMatrix factored back out of the result), and \p outHitNormal
+    /// will contain the world space normal at that point.
     ///
     /// \p outHitPrimPath will point to the gprim selected by the pick.
     /// \p outHitInstancerPath will point to the point instancer (if applicable)
@@ -283,6 +308,7 @@ public:
         const UsdPrim& root,
         const UsdImagingGLRenderParams &params,
         GfVec3d *outHitPoint,
+        GfVec3d *outHitNormal,
         SdfPath *outHitPrimPath = NULL,
         SdfPath *outHitInstancerPath = NULL,
         int *outHitInstanceIndex = NULL,
@@ -338,6 +364,10 @@ public:
     USDIMAGINGGL_API
     bool SetRendererAov(TfToken const& id);
 
+    /// Returns an AOV texture handle for the given token.
+    USDIMAGINGGL_API
+    HgiTextureHandle GetAovTexture(TfToken const& name) const;
+
     /// Returns the list of renderer settings.
     USDIMAGINGGL_API
     UsdImagingGLRendererSettingsList GetRendererSettingsList() const;
@@ -350,6 +380,12 @@ public:
     USDIMAGINGGL_API
     void SetRendererSetting(TfToken const& id,
                                     VtValue const& value);
+
+    /// Enable / disable presenting the render to bound framebuffer.
+    /// An application may choose to manage the AOVs that are rendered into
+    /// itself and skip the engine's presentation.
+    USDIMAGINGGL_API
+    void SetEnablePresentation(bool enabled);
 
     /// @}
 
@@ -423,7 +459,18 @@ public:
 
     /// @}
 
+    // ---------------------------------------------------------------------
+    /// \name HGI
+    /// @{
+    // ---------------------------------------------------------------------
 
+    /// Returns the HGI interface.
+    ///
+    USDIMAGINGGL_API
+    Hgi* GetHgi();
+
+    /// @}
+    
 protected:
 
     /// Open some protected methods for whitebox testing.
@@ -438,17 +485,15 @@ protected:
     void _Execute(const UsdImagingGLRenderParams &params,
                   HdTaskSharedPtrVector tasks);
 
-    // These functions factor batch preparation into separate steps so they
-    // can be reused by both the vectorized and non-vectorized API.
     USDIMAGINGGL_API
-    bool _CanPrepareBatch(const UsdPrim& root, 
-        const UsdImagingGLRenderParams& params);
+    bool _CanPrepare(const UsdPrim& root);
     USDIMAGINGGL_API
-    void _PreSetTime(const UsdPrim& root, 
-        const UsdImagingGLRenderParams& params);
+    void _PreSetTime(const UsdImagingGLRenderParams& params);
     USDIMAGINGGL_API
-    void _PostSetTime(const UsdPrim& root, 
-        const UsdImagingGLRenderParams& params);
+    void _PostSetTime(const UsdImagingGLRenderParams& params);
+
+    USDIMAGINGGL_API
+    void _PrepareRender(const UsdImagingGLRenderParams& params);
 
     // Create a hydra collection given root paths and render params.
     // Returns true if the collection was updated.
@@ -483,29 +528,34 @@ protected:
     UsdImagingDelegate *_GetSceneDelegate() const;
 
     USDIMAGINGGL_API
+    HdEngine *_GetHdEngine();
+
+    USDIMAGINGGL_API
+    HdxTaskController *_GetTaskController() const;
+
+    USDIMAGINGGL_API
+    bool _IsUsingLegacyImpl() const;
+
+    USDIMAGINGGL_API
     HdSelectionSharedPtr _GetSelection() const;
 
-    // _hgi is first field so that it is guaranteed to
-    // be destructed last and thus available while any other
-    // Hydra objects have a pointer to Hgi.
+protected:
+
+// private:
+    // Note that any of the fields below might become private
+    // in the future and subclasses should use the above getters
+    // to access them instead.
+
     HgiUniquePtr _hgi;
     // Similar for HdDriver.
     HdDriver _hgiDriver;
-    HdEngine _engine;
 
-    // ... and the other Hydra resources
+protected:
     HdPluginRenderDelegateUniqueHandle _renderDelegate;
     std::unique_ptr<HdRenderIndex> _renderIndex;
 
     SdfPath const _sceneDelegateId;
 
-private:
-    // Note that the order of construction/destruction matters,
-    // thus the switches between protected and private are necessary
-    // until we have created getters for _taskController, ... as well.
-    std::unique_ptr<UsdImagingDelegate> _sceneDelegate;
-
-protected:
     std::unique_ptr<HdxTaskController> _taskController;
 
     HdxSelectionTrackerSharedPtr _selTracker;
@@ -528,6 +578,12 @@ protected:
     // time we expect this to be null.  When it is not null, none of the other
     // member variables of this class are used.
     std::unique_ptr<UsdImagingGLLegacyEngine> _legacyImpl;
+
+private:
+    void _DestroyHydraObjects();
+
+    std::unique_ptr<UsdImagingDelegate> _sceneDelegate;
+    std::unique_ptr<HdEngine> _engine;
 };
 
 
