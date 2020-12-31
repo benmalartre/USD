@@ -290,10 +290,6 @@ UsdAppUtilsFrameRecorder::Record(
         _imagingEngine.Render(pseudoRoot, renderParams);
     } while (!_imagingEngine.IsConverged());
 
-<<<<<<< HEAD
-    drawTarget->Unbind();
-    return drawTarget->WriteToFile("color", outputImagePath);
-=======
     HgiTextureHandle handle = _imagingEngine.GetAovTexture(HdAovTokens->color);
     if (!handle) {
         TF_CODING_ERROR("No color presentation texture");
@@ -307,7 +303,6 @@ UsdAppUtilsFrameRecorder::Record(
                                buffer,
                                outputImagePath,
                                true);
->>>>>>> dev
 }
 
 
