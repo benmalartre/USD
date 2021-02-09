@@ -28,8 +28,6 @@ pxr_library(hio
 
     PUBLIC_HEADERS
         api.h
-
-    PRIVATE_HEADERS
         rankedTypeMap.h
         stb/stb_image.h
         stb/stb_image_resize.h
