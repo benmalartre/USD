@@ -384,23 +384,18 @@ public:
     HD_API
     virtual TfToken GetMaterialBindingPurpose() const;
 
-    ///
-    /// Returns a token that can be used to select among multiple
-    /// material network implementations.  The default is empty.
-    ///
+
+    /// \deprecated use GetMaterialRenderContexts()
     HD_API
     virtual TfToken GetMaterialNetworkSelector() const;
 
     ///
-    /// Return true to indicate that the render delegate wants rprim primvars
-    /// to be filtered by the scene delegate to reduce the amount of primvars
-    /// that are send to the render delegate. For example the scene delegate
-    /// may check the bound material primvar requirements and send only those
-    /// to the render delegate. Return false to not apply primvar filtering in
-    /// the scene delegate. Defaults to false.
+    /// Returns a list, in decending order of preference, that can be used to
+    /// select among multiple material network implementations. The default 
+    /// list contains an empty token.
     ///
     HD_API
-    virtual bool IsPrimvarFilteringNeeded() const;
+    virtual TfTokenVector GetMaterialRenderContexts() const;
 
     ///
     /// Returns the ordered list of shader source types that the render delegate 

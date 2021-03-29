@@ -34,7 +34,6 @@
 #include "pxr/usdImaging/usdImaging/resolvedAttributeCache.h"
 
 #include "pxr/imaging/hd/changeTracker.h"
-#include "pxr/imaging/hd/texture.h"
 #include "pxr/imaging/hd/selection.h"
 #include "pxr/usd/usd/attribute.h"
 #include "pxr/usd/usd/prim.h"
@@ -295,6 +294,12 @@ public:
         UsdPrim const& usdPrim,
         SdfPath const& cachePath) const;
 
+    /// Return the list of known prototypes of this prim.
+    USDIMAGING_API
+    virtual SdfPathVector GetInstancerPrototypes(
+        UsdPrim const& usdPrim,
+        SdfPath const& cachePath) const;
+
     /// Sample the primvar for the given prim.
     /// \see HdSceneDelegate::SamplePrimvar()
     USDIMAGING_API
@@ -441,12 +446,15 @@ public:
                                    GfMatrix4d *sampleValues);
 
     /// Gets the value of the parameter named key for the given prim (which
-    /// has the given cache path) and given time.
+    /// has the given cache path) and given time. If outIndices is not nullptr 
+    /// and the value has indices, it will return the unflattened value and set 
+    /// outIndices to the value's associated indices.
     USDIMAGING_API
     virtual VtValue Get(UsdPrim const& prim,
                         SdfPath const& cachePath,
                         TfToken const& key,
-                        UsdTimeCode time) const;
+                        UsdTimeCode time, 
+                        VtIntArray *outIndices) const;
 
     /// Gets the cullstyle of a specific path in the scene graph.
     USDIMAGING_API
@@ -544,6 +552,18 @@ public:
             const UsdImagingInstancerContext* instancerContext) const;
 
     USDIMAGING_API
+    virtual size_t
+    SampleExtComputationInput(
+            UsdPrim const& prim,
+            SdfPath const& cachePath,
+            TfToken const& name,
+            UsdTimeCode time,
+            const UsdImagingInstancerContext* instancerContext,
+            size_t maxSampleCount,
+            float *sampleTimes,
+            VtValue *sampleValues);
+
+    USDIMAGING_API
     virtual std::string 
     GetExtComputationKernel(
             UsdPrim const& prim,
@@ -626,14 +646,9 @@ protected:
     USDIMAGING_API
     TfToken _GetMaterialBindingPurpose() const;
 
-    // Returns the material context from the renderer delegate.
+    // Returns the material contexts from the renderer delegate.
     USDIMAGING_API
-    TfToken _GetMaterialNetworkSelector() const;
-
-    // Returns true if render delegate wants primvars to be filtered based.
-    // This will filter the primvars based on the bound material primvar needs.
-    USDIMAGING_API
-    bool _IsPrimvarFilteringNeeded() const;
+    TfTokenVector _GetMaterialRenderContexts() const;
 
     // Returns the shader source type from the render delegate.
     USDIMAGING_API
@@ -672,13 +687,14 @@ protected:
                              HdDirtyBits* dirtyFlags) const;
 
     // Convenience method for adding or updating a primvar descriptor.
-    // Role defaults to empty token (none).
+    // Role defaults to empty token (none). Indexed defaults to false.
     USDIMAGING_API
     void _MergePrimvar(
         HdPrimvarDescriptorVector* vec,
         TfToken const& name,
         HdInterpolation interp,
-        TfToken const& role = TfToken()) const;
+        TfToken const& role = TfToken(), 
+        bool indexed = false) const;
 
     // Convenience method for removing a primvar descriptor.
     USDIMAGING_API

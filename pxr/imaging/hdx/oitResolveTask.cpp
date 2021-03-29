@@ -21,21 +21,14 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-#include "pxr/imaging/garch/glApi.h"
-
-#include "pxr/imaging/glf/contextCaps.h"
-
 #include "pxr/imaging/hdx/oitResolveTask.h"
 #include "pxr/imaging/hdx/tokens.h"
-#include "pxr/imaging/hdx/debugCodes.h"
 #include "pxr/imaging/hdx/package.h"
 
-#include "pxr/imaging/hd/perfLog.h"
 #include "pxr/imaging/hd/renderBuffer.h"
 #include "pxr/imaging/hd/renderDelegate.h"
 #include "pxr/imaging/hd/renderIndex.h"
 #include "pxr/imaging/hd/renderPass.h"
-#include "pxr/imaging/hd/renderPassState.h"
 #include "pxr/imaging/hd/rprimCollection.h"
 #include "pxr/imaging/hd/sceneDelegate.h"
 #include "pxr/imaging/hd/vtBufferSource.h"
@@ -50,7 +43,7 @@
 
 PXR_NAMESPACE_OPEN_SCOPE
 
-typedef std::vector<HdBufferSourceSharedPtr> HdBufferSourceSharedPtrVector;
+using HdBufferSourceSharedPtrVector = std::vector<HdBufferSourceSharedPtr>;
 
 
 HdxOitResolveTask::HdxOitResolveTask(
@@ -61,9 +54,7 @@ HdxOitResolveTask::HdxOitResolveTask(
 {
 }
 
-HdxOitResolveTask::~HdxOitResolveTask()
-{
-}
+HdxOitResolveTask::~HdxOitResolveTask() = default;
 
 void
 HdxOitResolveTask::Sync(
@@ -240,8 +231,9 @@ HdxOitResolveTask::Prepare(HdTaskContext* ctx,
         // We do not use renderDelegate->CreateRenderPassState because
         // ImageShaders always use HdSt
         _renderPassState = std::make_shared<HdStRenderPassState>();
+        _renderPassState->SetEnableDepthTest(false);
         _renderPassState->SetEnableDepthMask(false);
-        _renderPassState->SetColorMask(HdRenderPassState::ColorMaskRGBA);
+        _renderPassState->SetColorMasks({HdRenderPassState::ColorMaskRGBA});
         _renderPassState->SetBlendEnabled(true);
         // We expect pre-multiplied color as input into the OIT resolve shader
         // e.g. vec4(rgb * a, a). Hence the src factor for rgb is "One" since 
@@ -263,10 +255,6 @@ HdxOitResolveTask::Prepare(HdTaskContext* ctx,
         _renderPassShader = std::make_shared<HdStRenderPassShader>(
             HdxPackageOitResolveImageShader());
         _renderPassState->SetRenderPassShader(_renderPassShader);
-
-        // We want OIT to resolve into the resolved aov, not the multi sample
-        // aov. See HdxTaskController::GetRenderingTasks().
-        _renderPassState->SetUseAovMultiSample(false);
 
         _renderPass->Prepare(GetRenderTags());
     }
@@ -325,15 +313,7 @@ HdxOitResolveTask::Execute(HdTaskContext* ctx)
         return;
     }
 
-    _renderPassState->Bind(); 
-
-    glDisable(GL_DEPTH_TEST);
-
     _renderPass->Execute(_renderPassState, GetRenderTags());
-
-    glEnable(GL_DEPTH_TEST);
-
-    _renderPassState->Unbind();
 }
 
 PXR_NAMESPACE_CLOSE_SCOPE

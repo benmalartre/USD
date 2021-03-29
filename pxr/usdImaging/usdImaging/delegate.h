@@ -39,7 +39,6 @@
 #include "pxr/imaging/hd/coordSys.h"
 #include "pxr/imaging/hd/sceneDelegate.h"
 #include "pxr/imaging/hd/selection.h"
-#include "pxr/imaging/hd/texture.h"
 #include "pxr/imaging/hd/version.h"
 
 #include "pxr/imaging/pxOsd/subdivTags.h"
@@ -328,6 +327,10 @@ public:
     USDIMAGING_API
     virtual VtValue Get(SdfPath const& id, TfToken const& key) override;
     USDIMAGING_API
+    virtual VtValue GetIndexedPrimvarValue(SdfPath const& id, 
+                                           TfToken const& key, 
+                                           VtIntArray *outIndices) override;
+    USDIMAGING_API
     HdIdVectorSharedPtr
     virtual GetCoordSysBindings(SdfPath const& id) override;
     USDIMAGING_API
@@ -350,6 +353,9 @@ public:
 
     USDIMAGING_API
     virtual SdfPath GetInstancerId(SdfPath const &primId) override;
+
+    USDIMAGING_API
+    virtual SdfPathVector GetInstancerPrototypes(SdfPath const &instancerId) override;
 
     // Motion samples
     USDIMAGING_API
@@ -427,6 +433,13 @@ public:
                                    TfToken const& input) override;
 
     USDIMAGING_API
+    size_t SampleExtComputationInput(SdfPath const& computationId,
+                                     TfToken const& input,
+                                     size_t maxSampleCount,
+                                     float *sampleTimes,
+                                     VtValue *sampleValues) override;
+
+    USDIMAGING_API
     std::string GetExtComputationKernel(SdfPath const& computationId) override;
 
     USDIMAGING_API
@@ -501,6 +514,9 @@ public:
     bool IsInInvisedPaths(const SdfPath &usdPath) const;
 
 private:
+    // Internal Get 
+    VtValue _Get(SdfPath const& id, TfToken const& key, VtIntArray *outIndices);
+
     // Internal friend class.
     class _Worker;
     friend class UsdImagingIndexProxy;

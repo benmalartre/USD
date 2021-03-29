@@ -78,6 +78,7 @@ class TestUsdLuxLight(unittest.TestCase):
         stage = Usd.Stage.CreateInMemory()
         light = UsdLux.RectLight.Define(stage, '/RectLight')
         self.assertTrue(light)
+        self.assertTrue(light.ConnectableAPI())
 
         # Rect light has the following built-in inputs attributes.
         inputNames = ['color', 
@@ -91,8 +92,10 @@ class TestUsdLuxLight(unittest.TestCase):
                       'specular', 
                       'texture:file', 
                       'width']
-        # GetInputs returns the inputs for all the built-ins.
-        self.assertEqual(light.GetInputs(), 
+        # GetInputs returns only authored inputs by default
+        self.assertEqual(light.GetInputs(), [])
+        # GetInputs(false) returns the inputs for all the built-ins.
+        self.assertEqual(light.GetInputs(onlyAuthored=False), 
                          [light.GetInput(name) for name in inputNames])
         # Verify each input's attribute is prefixed.
         for name in inputNames:
@@ -108,17 +111,27 @@ class TestUsdLuxLight(unittest.TestCase):
         # attribute is created.
         lightInput = light.CreateInput('newInput', Sdf.ValueTypeNames.Float)
         self.assertIn(lightInput, light.GetInputs())
+        # By default GetInputs() returns onlyAuthored inputs, of which
+        # there is now 1.
+        self.assertEqual(len(light.GetInputs()), 1)
+        # Passing onlyAuthored=False will return the authored input
+        # in addition to the builtins.
+        self.assertEqual(len(light.GetInputs(onlyAuthored=False)),
+            len(inputNames)+1)
         self.assertEqual(light.GetInput('newInput'), lightInput)
         self.assertEqual(lightInput.GetAttr(), 
                          light.GetPrim().GetAttribute("inputs:newInput"))
 
-        # Rect light has no built-in outputs.
+        # Rect light has no authored outputs.
         self.assertEqual(light.GetOutputs(), [])
+        # Rect light has no built-in outputs, either.
+        self.assertEqual(light.GetOutputs(onlyAuthored=False), [])
 
         # Create a new output, and verify that the output interface conforming
         # attribute is created.
         lightOutput = light.CreateOutput('newOutput', Sdf.ValueTypeNames.Float)
         self.assertEqual(light.GetOutputs(), [lightOutput])
+        self.assertEqual(light.GetOutputs(onlyAuthored=False), [lightOutput])
         self.assertEqual(light.GetOutput('newOutput'), lightOutput)
         self.assertEqual(lightOutput.GetAttr(), 
                          light.GetPrim().GetAttribute("outputs:newOutput"))
@@ -126,6 +139,7 @@ class TestUsdLuxLight(unittest.TestCase):
         # Do the same with a light filter
         lightFilter = UsdLux.LightFilter.Define(stage, '/LightFilter')
         self.assertTrue(lightFilter)
+        self.assertTrue(lightFilter.ConnectableAPI())
 
         # Light filter has no built-in inputs.
         self.assertEqual(lightFilter.GetInputs(), [])
@@ -141,12 +155,15 @@ class TestUsdLuxLight(unittest.TestCase):
 
         # Light filter has no built-in outputs.
         self.assertEqual(lightFilter.GetOutputs(), [])
+        self.assertEqual(lightFilter.GetOutputs(onlyAuthored=False), [])
 
         # Create a new output, and verify that the output interface conforming
         # attribute is created.
         filterOutput = lightFilter.CreateOutput('newOutput', 
                                                 Sdf.ValueTypeNames.Float)
         self.assertEqual(lightFilter.GetOutputs(), [filterOutput])
+        self.assertEqual(lightFilter.GetOutputs(onlyAuthored=False),
+            [filterOutput])
         self.assertEqual(lightFilter.GetOutput('newOutput'), filterOutput)
         self.assertEqual(filterOutput.GetAttr(), 
                          lightFilter.GetPrim().GetAttribute("outputs:newOutput"))
@@ -171,8 +188,8 @@ class TestUsdLuxLight(unittest.TestCase):
         self.assertFalse(lightOutput.CanConnect(filterGraphOutput))
 
         # From the custom behavior, light inputs can only be connected to 
-        # sources from the light or its descendant (encapsultated) prims.
-        self.assertTrue(lightInput.CanConnect(lightOutput))
+        # sources from immediate descendants (encapsultated) prims of the light.
+        self.assertFalse(lightInput.CanConnect(lightOutput))
         self.assertTrue(lightInput.CanConnect(lightGraphOutput))
         self.assertFalse(lightInput.CanConnect(filterGraphOutput))
 
@@ -181,10 +198,62 @@ class TestUsdLuxLight(unittest.TestCase):
         self.assertFalse(filterOutput.CanConnect(filterGraphOutput))
 
         # From the custom behavior, light filter inputs can only be connected to 
-        # sources from the light filter or its descendant (encapsultated) prims.
-        self.assertTrue(filterInput.CanConnect(filterOutput))
+        # sources from immediate descendants (encapsultated) prims of the light 
+        # filter.
+        self.assertFalse(filterInput.CanConnect(filterOutput))
         self.assertTrue(filterInput.CanConnect(filterGraphOutput))
         self.assertFalse(filterInput.CanConnect(lightGraphOutput))
+
+        # The shaping API can add more connectable attributes to the light 
+        # and implements the same connectable interface functions. We test 
+        # those here.
+        shapingAPI = UsdLux.ShapingAPI.Apply(light.GetPrim())
+        self.assertTrue(shapingAPI)
+        self.assertTrue(shapingAPI.ConnectableAPI())
+        # Verify input attributes match the getter API attributes.
+        self.assertEqual(shapingAPI.GetInput('shaping:cone:angle').GetAttr(), 
+                         shapingAPI.GetShapingConeAngleAttr())
+        self.assertEqual(shapingAPI.GetInput('shaping:focus').GetAttr(), 
+                         shapingAPI.GetShapingFocusAttr())
+        # These inputs have the same connectable behaviors as all light inputs,
+        # i.e. they can only be connected to sources from immediate 
+        # descendant (encapsultated) prims of the light.
+        shapingInput = shapingAPI.GetInput('shaping:focus')
+        self.assertFalse(shapingInput.CanConnect(lightOutput))
+        self.assertTrue(shapingInput.CanConnect(lightGraphOutput))
+        self.assertFalse(shapingInput.CanConnect(filterGraphOutput))
+
+        # The shadow API can add more connectable attributes to the light 
+        # and implements the same connectable interface functions. We test 
+        # those here.
+        shadowAPI = UsdLux.ShadowAPI.Apply(light.GetPrim())
+        self.assertTrue(shadowAPI)
+        self.assertTrue(shadowAPI.ConnectableAPI())
+        # Verify input attributes match the getter API attributes.
+        self.assertEqual(shadowAPI.GetInput('shadow:color').GetAttr(), 
+                         shadowAPI.GetShadowColorAttr())
+        self.assertEqual(shadowAPI.GetInput('shadow:distance').GetAttr(), 
+                         shadowAPI.GetShadowDistanceAttr())
+        # These inputs have the same connectable behaviors as all light inputs,
+        # i.e. they can only be connected to sources from immediate 
+        # descendant (encapsultated) prims of the light.
+        shadowInput = shadowAPI.GetInput('shadow:color')
+        self.assertFalse(shadowInput.CanConnect(lightOutput))
+        self.assertTrue(shadowInput.CanConnect(lightGraphOutput))
+        self.assertFalse(shadowInput.CanConnect(filterGraphOutput))
+
+        # Even though the shadow and shaping API schemas provide connectable
+        # attributes and an interface for the ConnectableAPI, the typed schema
+        # of the prim is still what provides its connectable behavior. Here
+        # we verify that applying these APIs to a prim whose type is not 
+        # connectable does NOT cause the prim to conform to the Connectable API.
+        nonConnectablePrim = stage.DefinePrim("/Sphere", "Sphere")
+        shadowAPI = UsdLux.ShadowAPI.Apply(nonConnectablePrim)
+        self.assertTrue(shadowAPI)
+        self.assertFalse(shadowAPI.ConnectableAPI())
+        shapingAPI = UsdLux.ShapingAPI.Apply(nonConnectablePrim)
+        self.assertTrue(shapingAPI)
+        self.assertFalse(shapingAPI.ConnectableAPI())
 
     def test_DomeLight_OrientToStageUpAxis(self):
         from pxr import UsdGeom
@@ -308,7 +377,8 @@ class TestUsdLuxLight(unittest.TestCase):
             # There will be a one to one correspondence between node inputs
             # and light prim inputs.
             nodeInputs = [node.GetInput(i) for i in node.GetInputNames()]
-            lightInputs = light.GetInputs()
+            lightInputs = light.GetInputs(onlyAuthored=False)
+            self.assertEqual(len(nodeInputs), len(lightInputs))
             for nodeInput, lightInput in zip(nodeInputs, lightInputs):
                 self.assertFalse(nodeInput.IsOutput())
                 _CompareLightPropToNodeProp(nodeInput, lightInput)
@@ -316,7 +386,8 @@ class TestUsdLuxLight(unittest.TestCase):
             # There will also be a one to one correspondence between node 
             # outputs and light prim outputs.
             nodeOutputs = [node.GetOutput(i) for i in node.GetOutputNames()]
-            lightOutputs = light.GetOutputs()
+            lightOutputs = light.GetOutputs(onlyAuthored=False)
+            self.assertEqual(len(nodeOutputs), len(lightOutputs))
             for nodeOutput, lightOutput in zip(nodeOutputs, lightOutputs):
                 self.assertTrue(nodeOutput.IsOutput())
                 _CompareLightPropToNodeProp(nodeOutput, lightOutput)

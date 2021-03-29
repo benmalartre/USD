@@ -138,6 +138,10 @@ public:
         UsdPrim const& usdPrim,
         SdfPath const& cachePath) const override;
 
+    SdfPathVector GetInstancerPrototypes(
+        UsdPrim const& usdPrim,
+        SdfPath const& cachePath) const override;
+
     GfMatrix4d GetTransform(UsdPrim const& prim, 
                             SdfPath const& cachePath,
                             UsdTimeCode time,
@@ -234,7 +238,8 @@ public:
     VtValue Get(UsdPrim const& prim,
                 SdfPath const& cachePath,
                 TfToken const& key,
-                UsdTimeCode time) const override;
+                UsdTimeCode time,
+                VtIntArray *outIndices) const override;
 
     // ---------------------------------------------------------------------- //
     /// \name Nested instancing support

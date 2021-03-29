@@ -152,12 +152,16 @@ struct HdPrimvarDescriptor {
     /// for example, to distinguish color/vector/point/normal.
     /// See HdPrimvarRoleTokens; default is HdPrimvarRoleTokens->none.
     TfToken role;
+    /// Optional bool, true if primvar is indexed. This value should be checked
+    /// before calling "GetIndexedPrimvarValue"
+    bool indexed;
 
     HdPrimvarDescriptor() {}
     HdPrimvarDescriptor(TfToken const& name_,
                         HdInterpolation interp_,
-                        TfToken const& role_=HdPrimvarRoleTokens->none)
-        : name(name_), interpolation(interp_), role(role_)
+                        TfToken const& role_=HdPrimvarRoleTokens->none,
+                        bool indexed_=false)
+        : name(name_), interpolation(interp_), role(role_), indexed(indexed_)
     { }
     bool operator==(HdPrimvarDescriptor const& rhs) const {
         return name == rhs.name && role == rhs.role
@@ -192,7 +196,7 @@ struct HdExtComputationPrimvarDescriptor : public HdPrimvarDescriptor {
         SdfPath const & sourceComputationId_,
         TfToken const & sourceComputationOutputName_,
         HdTupleType const & valueType_)
-        : HdPrimvarDescriptor(name_, interp_, role_)
+        : HdPrimvarDescriptor(name_, interp_, role_, false)
         , sourceComputationId(sourceComputationId_)
         , sourceComputationOutputName(sourceComputationOutputName_)
         , valueType(valueType_)
@@ -395,6 +399,14 @@ public:
     HD_API
     virtual VtValue Get(SdfPath const& id, TfToken const& key);
 
+    /// Returns a named primvar value. If outIndices is not nullptr and the 
+    /// primvar has indices, it will return the unflattened primvar and set 
+    /// outIndices to the primvar's associated indices.
+    HD_API
+    virtual VtValue GetIndexedPrimvarValue(SdfPath const& id, 
+                                           TfToken const& key, 
+                                           VtIntArray *outIndices);
+
     /// Returns the authored repr (if any) for the given prim.
     HD_API
     virtual HdReprSelector GetReprSelector(SdfPath const &id);
@@ -586,6 +598,13 @@ public:
     HD_API
     virtual SdfPath GetInstancerId(SdfPath const& primId);
 
+    /// Returns a list of prototypes of this instancer. The intent is to let
+    /// renderers cache instance indices by giving them a complete set of prims
+    /// to call GetInstanceIndices(instancer, prototype) on.
+    /// XXX: This is currently unused, but may be used in the future.
+    HD_API
+    virtual SdfPathVector GetInstancerPrototypes(SdfPath const& instancerId);
+
     // -----------------------------------------------------------------------//
     /// \name Path Translation
     // -----------------------------------------------------------------------//
@@ -696,6 +715,44 @@ public:
     HD_API
     virtual VtValue GetExtComputationInput(SdfPath const& computationId,
                                            TfToken const& input);
+
+    /// Return up to \a maxSampleCount samples for a given computation id and
+    /// input token.
+    /// The token may be a computation input or a computation config parameter.
+    /// Returns the union of the authored samples and the boundaries
+    /// of the current camera shutter interval. If this number is greater
+    /// than maxSampleCount, you might want to call this function again
+    /// to get all the authored data.
+    HD_API
+    virtual size_t SampleExtComputationInput(SdfPath const& computationId,
+                                             TfToken const& input,
+                                             size_t maxSampleCount,
+                                             float *sampleTimes,
+                                             VtValue *sampleValues);
+
+    /// Convenience form of SampleExtComputationInput() that takes an
+    /// HdTimeSampleArray.
+    /// Returns the union of the authored samples and the boundaries
+    /// of the current camera shutter interval.
+    template <unsigned int CAPACITY>
+    void SampleExtComputationInput(SdfPath const& computationId,
+                                   TfToken const& input,
+                                   HdTimeSampleArray<VtValue, CAPACITY> *sa) {
+        size_t authoredSamples = SampleExtComputationInput(
+                computationId, input, CAPACITY,
+                sa->times.data(), sa->values.data());
+
+        if (authoredSamples > CAPACITY) {
+            sa->Resize(authoredSamples);
+            size_t authoredSamplesSecondAttempt = SampleExtComputationInput(
+                    computationId, input, authoredSamples,
+                    sa->times.data(), sa->values.data());
+            // Number of samples should be consisntent through multiple
+            // invokations of the sampling function.
+            TF_VERIFY(authoredSamples == authoredSamplesSecondAttempt);
+        }
+        sa->count = authoredSamples;
+    }
 
     /// Returns the kernel source assigned to the computation at the path id.
     /// If the string is empty the computation has no GPU kernel and the

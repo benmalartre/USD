@@ -93,16 +93,19 @@ HdRenderDelegate::GetShaderSourceTypes() const
     return TfTokenVector();
 }
 
+// deprecated
 TfToken 
 HdRenderDelegate::GetMaterialNetworkSelector() const
 {
     return TfToken();
 }
 
-bool
-HdRenderDelegate::IsPrimvarFilteringNeeded() const
+TfTokenVector
+HdRenderDelegate::GetMaterialRenderContexts() const
 {
-    return false;
+    // To support RenderDelegates that have not yet updated 
+    // GetMaterialNetworkSelector()
+    return {GetMaterialNetworkSelector()};
 }
 
 HdAovDescriptor

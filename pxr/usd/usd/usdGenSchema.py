@@ -857,8 +857,12 @@ def GatherTokens(classes, libName, libTokens):
             # Add default value (if token type) to token set
             if attr.typeName == Sdf.ValueTypeNames.Token and attr.fallback:
                 fallbackName = _CamelCase(attr.fallback)
-                desc = 'Default value for %s::Get%sAttr()' % \
-                       (cls.cppClassName, _ProperCase(attr.name))
+                if attr.apiName != '':
+                    desc = 'Default value for %s::Get%sAttr()' % \
+                           (cls.cppClassName, _ProperCase(attr.apiName))
+                else:
+                    desc = 'Default value for %s schema attribute %s' % \
+                           (cls.cppClassName, attr.rawName)
                 cls.tokens.add(fallbackName)
                 _AddToken(tokenDict, fallbackName, attr.fallback, desc)
             
@@ -869,8 +873,12 @@ def GatherTokens(classes, libName, libTokens):
                     # but do not declare a named literal for it.
                     if val != '':
                         tokenId = _CamelCase(val)
-                        desc = 'Possible value for %s::Get%sAttr()' % \
-                               (cls.cppClassName, _ProperCase(attr.name))
+                        if attr.apiName != '':
+                            desc = 'Possible value for %s::Get%sAttr()' % \
+                                   (cls.cppClassName, _ProperCase(attr.apiName))
+                        else:
+                            desc = 'Possible value for %s schema attribute %s' % \
+                                   (cls.cppClassName, attr.rawName)
                         cls.tokens.add(tokenId)
                         _AddToken(tokenDict, tokenId, val, desc)
 
@@ -1067,7 +1075,7 @@ def GeneratePlugInfo(templatePath, codeGenPath, classes, validate, env):
                     {"apiSchemaAutoApplyTo": list(cls.apiAutoApply)})
 
             # Write out alias/primdefs for concrete IsA schemas and API schemas
-            if (cls.isConcrete or cls.isApi):
+            if (cls.isTyped or cls.isApi):
                 clsDict['alias'] = {'UsdSchemaBase': cls.usdPrimTypeName}
 
             types[cls.cppClassName] = clsDict

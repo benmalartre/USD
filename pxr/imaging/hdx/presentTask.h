@@ -39,17 +39,27 @@ PXR_NAMESPACE_OPEN_SCOPE
 struct HdxPresentTaskParams
 {
     HdxPresentTaskParams() 
-        : interopDst(HgiTokens->OpenGL)
-        , compRegion(0)
+        : dstApi(HgiTokens->OpenGL)
+        , dstRegion(0)
         , enabled(true)
     {}
 
     // The graphics lib that is used by the application / viewer.
     // (The 'interopSrc' is determined by checking Hgi->GetAPIName)
-    TfToken interopDst;
+    TfToken dstApi;
+
+    /// The framebuffer that the AOVs are presented into. This is a
+    /// VtValue that encoding a framebuffer in a dstApi specific
+    /// way.
+    ///
+    /// E.g., a uint32_t (aka GLuint) for framebuffer object for dstApi==OpenGL.
+    /// For backwards compatibility, the currently bound framebuffer is used
+    /// when the VtValue is empty.
+    VtValue dstFramebuffer;
+
     // Subrectangular region of the framebuffer over which to composite aov
     // contents. Coordinates are (left, BOTTOM, width, height).
-    GfVec4i compRegion;
+    GfVec4i dstRegion;
 
     // When not enabled, present task does not execute, but still calls
     // Hgi::EndFrame.
@@ -70,20 +80,20 @@ public:
     HdxPresentTask(HdSceneDelegate* delegate, SdfPath const& id);
 
     HDX_API
-    virtual ~HdxPresentTask();
+    ~HdxPresentTask() override;
 
     HDX_API
-    virtual void Prepare(HdTaskContext* ctx,
-                         HdRenderIndex* renderIndex) override;
+    void Prepare(HdTaskContext* ctx,
+                 HdRenderIndex* renderIndex) override;
 
     HDX_API
-    virtual void Execute(HdTaskContext* ctx) override;
+    void Execute(HdTaskContext* ctx) override;
 
 protected:
     HDX_API
-    virtual void _Sync(HdSceneDelegate* delegate,
-                       HdTaskContext* ctx,
-                       HdDirtyBits* dirtyBits) override;
+    void _Sync(HdSceneDelegate* delegate,
+               HdTaskContext* ctx,
+               HdDirtyBits* dirtyBits) override;
 
 private:
     HdxPresentTaskParams _params;

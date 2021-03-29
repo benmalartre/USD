@@ -299,6 +299,15 @@ UsdImagingPrimAdapter::GetInstancerId(
 }
 
 /*virtual*/
+SdfPathVector
+UsdImagingPrimAdapter::GetInstancerPrototypes(
+    UsdPrim const& usdPrim,
+    SdfPath const& cachePath) const
+{
+    return SdfPathVector();
+}
+
+/*virtual*/
 size_t
 UsdImagingPrimAdapter::SamplePrimvar(
     UsdPrim const& usdPrim,
@@ -398,7 +407,7 @@ UsdImagingPrimAdapter::SamplePrimvar(
     // instead synthesize them -- ex: Cube, Cylinder, Capsule.
     if (maxNumSamples > 0) {
         sampleTimes[0] = 0;
-        sampleValues[0] = Get(usdPrim, cachePath, key, time);
+        sampleValues[0] = Get(usdPrim, cachePath, key, time, nullptr);
         return sampleValues[0].IsEmpty() ? 0 : 1;
     }
 
@@ -590,20 +599,12 @@ UsdImagingPrimAdapter::_GetMaterialBindingPurpose() const
         GetMaterialBindingPurpose();
 }
 
-TfToken
-UsdImagingPrimAdapter::_GetMaterialNetworkSelector() const
+TfTokenVector
+UsdImagingPrimAdapter::_GetMaterialRenderContexts() const
 {
     return _delegate->GetRenderIndex().GetRenderDelegate()->
-        GetMaterialNetworkSelector();
+        GetMaterialRenderContexts();
 }
-
-bool
-UsdImagingPrimAdapter::_IsPrimvarFilteringNeeded() const
-{
-    return _delegate->GetRenderIndex().GetRenderDelegate()->
-        IsPrimvarFilteringNeeded();
-}
-
 
 TfTokenVector 
 UsdImagingPrimAdapter::_GetShaderSourceTypes() const
@@ -623,9 +624,10 @@ UsdImagingPrimAdapter::_MergePrimvar(
     HdPrimvarDescriptorVector* vec,
     TfToken const& name,
     HdInterpolation interp,
-    TfToken const& role) const
+    TfToken const& role, 
+    bool indexed) const
 {
-    HdPrimvarDescriptor primvar(name, interp, role);
+    HdPrimvarDescriptor primvar(name, interp, role, indexed);
     HdPrimvarDescriptorVector::iterator it =
         std::find(vec->begin(), vec->end(), primvar);
     if (it == vec->end())
@@ -709,7 +711,8 @@ UsdImagingPrimAdapter::_ComputeAndMergePrimvar(
                  gprim.GetPath().GetText(),
                  primvarName.GetText(),
                  TfEnum::GetName(interp).c_str());
-        _MergePrimvar(primvarDescs, primvarName, interp, role);
+        _MergePrimvar(primvarDescs, primvarName, interp, role, 
+                      primvar.IsIndexed());
 
     } else {
         TF_DEBUG(USDIMAGING_SHADERS)
@@ -1122,7 +1125,8 @@ UsdImagingPrimAdapter::Get(
     UsdPrim const& prim,
     SdfPath const& cachePath,
     TfToken const &key,
-    UsdTimeCode time) const
+    UsdTimeCode time,
+    VtIntArray *outIndices) const
 {
     UsdAttribute const &attr = prim.GetAttribute(key);
     VtValue value;
@@ -1314,6 +1318,27 @@ UsdImagingPrimAdapter::GetExtComputationInput(
     const UsdImagingInstancerContext* instancerContext) const
 {
     return VtValue();
+}
+
+/*virtual*/
+size_t
+UsdImagingPrimAdapter::SampleExtComputationInput(
+    UsdPrim const& prim,
+    SdfPath const& cachePath,
+    TfToken const& name,
+    UsdTimeCode time,
+    const UsdImagingInstancerContext* instancerContext,
+    size_t maxSampleCount,
+    float *sampleTimes,
+    VtValue *sampleValues)
+{
+    if (maxSampleCount > 0) {
+        sampleTimes[0] = 0.0;
+        sampleValues[0] = GetExtComputationInput(prim, cachePath, name, time,
+                                                 instancerContext);
+        return 1;
+    }
+    return 0;
 }
 
 /*virtual*/ 
