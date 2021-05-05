@@ -108,6 +108,12 @@ HdRenderDelegate::GetMaterialRenderContexts() const
     return {GetMaterialNetworkSelector()};
 }
 
+bool
+HdRenderDelegate::IsPrimvarFilteringNeeded() const
+{
+    return false;
+}
+
 HdAovDescriptor
 HdRenderDelegate::GetDefaultAovDescriptor(TfToken const& name) const
 {
@@ -156,6 +162,21 @@ unsigned int
 HdRenderDelegate::GetRenderSettingsVersion() const
 {
     return _settingsVersion;
+}
+
+HdCommandDescriptors 
+HdRenderDelegate::GetCommandDescriptors() const
+{
+    return HdCommandDescriptors();
+}
+
+bool 
+HdRenderDelegate::InvokeCommand(
+    const TfToken &command,
+    const HdCommandArgs &args)
+{
+    // Fail all commands that get here.
+    return false;
 }
 
 VtDictionary 

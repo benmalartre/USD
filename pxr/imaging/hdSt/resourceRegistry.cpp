@@ -393,7 +393,7 @@ HdStResourceRegistry::AddSources(HdBufferArrayRangeSharedPtr const &range,
             sources[srcNum] = sources.back();
             sources.pop_back();
 
-            // Don't increament srcNum as it now points
+            // Don't increment srcNum as it now points
             // to the new item or is off the end of the vector
         }
     }
@@ -515,9 +515,9 @@ HdStResourceRegistry::RegisterBufferResource(
     HgiBufferDesc bufDesc;
     bufDesc.usage= HgiBufferUsageUniform;
     bufDesc.byteSize= byteSize;
-    HgiBufferHandle newId = _hgi->CreateBuffer(bufDesc);
+    HgiBufferHandle buffer = _hgi->CreateBuffer(bufDesc);
 
-    result->SetAllocation(newId, byteSize);
+    result->SetAllocation(buffer, byteSize);
 
     _bufferResourceRegistry.push_back(result);
 
@@ -802,7 +802,7 @@ HdStResourceRegistry::_Commit()
                         // the reallocation happens only once per BufferArray.
                         //
                         // if the range is already larger than the current one,
-                        // leave it as it is (there is a possibilty that GPU
+                        // leave it as it is (there is a possibility that GPU
                         // computation generates less data than it was).
                         int currentNumElements = dstRange->GetNumElements();
                         if (currentNumElements < numElements) {

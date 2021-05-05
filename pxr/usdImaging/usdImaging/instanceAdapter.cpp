@@ -232,6 +232,9 @@ UsdImagingInstanceAdapter::_Populate(UsdPrim const& prim,
         // Allocate hydra prototype prims for the prims in the USD prototype.
         // -------------------------------------------------------------- //
 
+        // We do not need _GetDisplayPredicateForPrototypes here because
+        // the regular display predicate works properly with native instancing
+        // prototypes.
         UsdPrimRange range(prototypePrim, _GetDisplayPredicate());
         int protoID = 0;
         int primCount = 0;
@@ -1639,7 +1642,8 @@ UsdImagingInstanceAdapter::SamplePrimvar(
     UsdTimeCode time,
     size_t maxNumSamples, 
     float *sampleTimes, 
-    VtValue *sampleValues)
+    VtValue *sampleValues,
+    VtIntArray *sampleIndices)
 {
     HD_TRACE_FUNCTION();
 
@@ -1659,7 +1663,7 @@ UsdImagingInstanceAdapter::SamplePrimvar(
         }
         return proto.adapter->SamplePrimvar(
             _GetPrim(proto.path), cachePath, key, time,  
-            maxNumSamples, sampleTimes, sampleValues);
+            maxNumSamples, sampleTimes, sampleValues, sampleIndices);
     }
 
     GfInterval interval = _GetCurrentTimeSamplingInterval();

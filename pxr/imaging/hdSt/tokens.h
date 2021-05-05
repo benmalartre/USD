@@ -57,7 +57,12 @@ PXR_NAMESPACE_OPEN_SCOPE
     (translation)                               \
     (sRGB)                                      \
     (raw)                                       \
-    ((colorSpaceAuto, "auto"))
+    ((_double, "double"))                       \
+    ((_float, "float"))                         \
+    ((_int, "int"))                             \
+    ((colorSpaceAuto, "auto"))                  \
+    (fvarIndices)                               \
+    (fvarPatchParam)
 
 #define HDST_LIGHT_TOKENS                       \
     (color)

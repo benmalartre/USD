@@ -28,6 +28,7 @@
 #include "pxr/imaging/hd/api.h"
 #include "pxr/imaging/hd/aov.h"
 #include "pxr/imaging/hd/changeTracker.h"
+#include "pxr/imaging/hd/command.h"
 #include "pxr/base/vt/dictionary.h"
 #include "pxr/base/tf/token.h"
 
@@ -390,12 +391,23 @@ public:
     virtual TfToken GetMaterialNetworkSelector() const;
 
     ///
-    /// Returns a list, in decending order of preference, that can be used to
+    /// Returns a list, in descending order of preference, that can be used to
     /// select among multiple material network implementations. The default 
     /// list contains an empty token.
     ///
     HD_API
     virtual TfTokenVector GetMaterialRenderContexts() const;
+
+    ///
+    /// Return true to indicate that the render delegate wants rprim primvars
+    /// to be filtered by the scene delegate to reduce the amount of primvars
+    /// that are send to the render delegate. For example the scene delegate
+    /// may check the bound material primvar requirements and send only those
+    /// to the render delegate. Return false to not apply primvar filtering in
+    /// the scene delegate. Defaults to false.
+    ///
+    HD_API
+    virtual bool IsPrimvarFilteringNeeded() const;
 
     ///
     /// Returns the ordered list of shader source types that the render delegate 
@@ -416,6 +428,32 @@ public:
     ///
     HD_API
     virtual HdAovDescriptor GetDefaultAovDescriptor(TfToken const& name) const;
+
+    ////////////////////////////////////////////////////////////////////////////
+    ///
+    /// Commands API
+    ///
+    ////////////////////////////////////////////////////////////////////////////
+    
+    ///
+    /// Get the descriptors for the commands supported by this render delegate.
+    ///
+    HD_API
+    virtual HdCommandDescriptors GetCommandDescriptors() const;
+
+    ///
+    /// Invokes the command described by the token \p command with optional
+    /// \p args.
+    ///
+    /// If the command succeeds, returns \c true, otherwise returns \c false.
+    /// A command will generally fail if it is not among those returned by
+    /// GetCommandDescriptors().
+    ///
+    HD_API
+    virtual bool InvokeCommand(
+        const TfToken &command,
+        const HdCommandArgs &args = HdCommandArgs());
+
 
 protected:
     /// This class must be derived from.

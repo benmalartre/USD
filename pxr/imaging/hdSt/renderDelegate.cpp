@@ -89,7 +89,7 @@ const TfTokenVector HdStRenderDelegate::SUPPORTED_SPRIM_TYPES =
 
 TF_DEFINE_PRIVATE_TOKENS(
     _tokens,
-    ((mtlxRenderContext, "mtlx"))
+    (mtlx)
 );
 
 using HdStResourceRegistryWeakPtr =  std::weak_ptr<HdStResourceRegistry>;
@@ -504,13 +504,27 @@ HdStRenderDelegate::IsSupported()
 TfTokenVector
 HdStRenderDelegate::GetShaderSourceTypes() const
 {
+#ifdef PXR_MATERIALX_SUPPORT_ENABLED
+    return {HioGlslfxTokens->glslfx, _tokens->mtlx};
+#else
     return {HioGlslfxTokens->glslfx};
+#endif
 }
 
 TfTokenVector
 HdStRenderDelegate::GetMaterialRenderContexts() const
 {
-    return {HioGlslfxTokens->glslfx, _tokens->mtlxRenderContext};
+#ifdef PXR_MATERIALX_SUPPORT_ENABLED
+    return {HioGlslfxTokens->glslfx, _tokens->mtlx};
+#else
+    return {HioGlslfxTokens->glslfx};
+#endif
+}
+
+bool
+HdStRenderDelegate::IsPrimvarFilteringNeeded() const
+{
+    return true;
 }
 
 Hgi*

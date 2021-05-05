@@ -300,8 +300,11 @@ public:
         UsdPrim const& usdPrim,
         SdfPath const& cachePath) const;
 
-    /// Sample the primvar for the given prim.
-    /// \see HdSceneDelegate::SamplePrimvar()
+    /// Sample the primvar for the given prim. If *sampleIndices is not nullptr 
+    /// and the primvar has indices, it will sample the unflattened primvar and 
+    /// set *sampleIndices to the primvar's sampled indices.
+    /// \see HdSceneDelegate::SamplePrimvar() and 
+    /// HdSceneDelegate::SampleIndexedPrimvar()
     USDIMAGING_API
     virtual size_t
     SamplePrimvar(UsdPrim const& usdPrim,
@@ -310,7 +313,8 @@ public:
                   UsdTimeCode time,
                   size_t maxNumSamples, 
                   float *sampleTimes,
-                  VtValue *sampleValues);
+                  VtValue *sampleValues,
+                  VtIntArray *sampleIndices);
 
     /// Get the subdiv tags for this prim.
     USDIMAGING_API
@@ -650,6 +654,11 @@ protected:
     USDIMAGING_API
     TfTokenVector _GetMaterialRenderContexts() const;
 
+    // Returns true if render delegate wants primvars to be filtered based.
+    // This will filter the primvars based on the bound material primvar needs.
+    USDIMAGING_API
+    bool _IsPrimvarFilteringNeeded() const;
+
     // Returns the shader source type from the render delegate.
     USDIMAGING_API
     TfTokenVector _GetShaderSourceTypes() const;
@@ -765,6 +774,9 @@ protected:
 
     USDIMAGING_API
     Usd_PrimFlagsConjunction _GetDisplayPredicate() const;
+
+    USDIMAGING_API
+    Usd_PrimFlagsConjunction _GetDisplayPredicateForPrototypes() const;
 
     USDIMAGING_API
     bool _DoesDelegateSupportCoordSys() const;
