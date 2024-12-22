@@ -3,6 +3,7 @@
     endFrame = 10
     startFrame = 1
     upAxis = "Z"
+	defaultPrim = "Root"
 )
 
 def Xform "Root"

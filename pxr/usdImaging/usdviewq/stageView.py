@@ -1733,6 +1733,10 @@ class StageView(QGLWidget):
                         l.ambient = (0, 0, 0, 0)
                         l.position = (cam_pos[0], cam_pos[1], cam_pos[2], 1)
                         l.transform = frustum.ComputeViewInverse()
+                        l.hasShadow = true
+                        l.shadowResolution = 512
+                        l.shadowBlur = 0.25
+                        l.shadowBias = -0.001
                         lights.append(l)
 
                     # Default Dome Light

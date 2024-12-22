@@ -36,6 +36,8 @@
 #include "pxr/imaging/glf/simpleLightingContext.h"
 
 #include "pxr/base/gf/camera.h"
+#include "pxr/base/gf/frustum.h"
+#include "shadowMatrixComputation.h"
 
 PXR_NAMESPACE_OPEN_SCOPE
 
@@ -217,7 +219,7 @@ HdxTaskController::~HdxTaskController()
             GetRenderIndex()->RemoveTask(tasks[i]);
         }
     }
-
+    
     for (auto const& id : _renderTaskIds) {
         GetRenderIndex()->RemoveTask(id);
     }
@@ -824,7 +826,125 @@ HdxTaskController::_GetDomeLightTexture(GlfSimpleLight const& light)
     }
 }
 
-void 
+namespace {
+class ShadowMatrixComputation : public HdxShadowMatrixComputation
+{
+public:
+    ShadowMatrixComputation(GlfSimpleLight const &light, const HdxTaskController* controller) {
+        _controller = controller;
+        _shadowMatrix = _ComputeFrustumMatrix(light) ;
+    }
+
+    bool Update(GlfSimpleLight const &light) {
+        GfMatrix4d shadowMatrix = _ComputeFrustumMatrix(light) ;
+        if(!pxr::GfIsClose(shadowMatrix, _shadowMatrix, 1e-5)) {
+            _shadowMatrix = shadowMatrix;
+            return true;
+        }
+        return false;
+    }
+
+    std::vector<GfMatrix4d> Compute(
+            const GfVec4f &viewport,
+            CameraUtilConformWindowPolicy policy) override {
+        return { _shadowMatrix };
+    }
+
+    std::vector<GfMatrix4d> Compute(
+            const CameraUtilFraming &framing,
+            CameraUtilConformWindowPolicy policy) override {
+        return { _shadowMatrix };
+    }
+
+protected:
+    GfMatrix4d _ComputeFrustumMatrix(GlfSimpleLight const &light)
+    {
+        GfFrustum frustum;
+        frustum.SetProjectionType(GfFrustum::Orthographic);
+        frustum.SetWindow(GfRange2d(GfVec2d(-200, -200), GfVec2d(200, 200)));
+        frustum.SetNearFar(GfRange1d(0, 1000));
+        const GfVec4d pos = light.GetPosition();
+        frustum.SetPosition(GfVec3d(pos[0], pos[1], pos[2]));
+        frustum.SetRotation(GfRotation(GfVec3d(0, 0, 1),
+                                       GfVec3d(pos[0], pos[1], pos[2])));
+
+        return frustum.ComputeViewMatrix() * frustum.ComputeProjectionMatrix();
+/*
+        GfFrustum frustum;
+        frustum.SetProjectionType(GfFrustum::Orthographic);
+        frustum.SetWindow(GfRange2d(GfVec2d(-1, -1), GfVec2d(1, 1)));
+        frustum.SetNearFar(GfRange1d(0, 1000));
+        const GfVec4d pos = light.GetPosition();
+        frustum.SetPosition(GfVec3d(pos[0], pos[1], pos[2]));
+        frustum.SetRotation(GfRotation(GfVec3d(0, 0, 1),
+                                       GfVec3d(-pos[0], -pos[1], -pos[2])));
+
+        return frustum.ComputeViewMatrix() * frustum.ComputeProjectionMatrix();
+        
+
+    
+        const GfVec4d pos = light.GetPosition();
+        //frustum.SetPosition(GfVec3d(pos[0], pos[1], pos[2]));
+        //frustum.SetRotation();
+
+        GfMatrix4d lightView;
+        lightView.SetLookAt (GfVec3f(pos[0], pos[1], pos[2]), 
+            GfRotation(GfVec3d(0, 0, 1), GfVec3d(-pos[0], -pos[1], -pos[2]).GetNormalized()));
+
+        std::cout << "light view : " << lightView << std::endl;
+
+        const GfMatrix4d& inverseProjectionView = _controller->GetInverseProjectionViewMatrix();
+        std::cout << "inverse projection view : " << inverseProjectionView << std::endl;
+
+        GfVec4d NDC[8] = {
+            GfVec4d{-1.0, -1.0, 0.0, 1.0},
+            GfVec4d{1.0, -1.0, 0.0, 1.0},
+            GfVec4d{-1.0, 1.0, 0.0, 1.0},
+            GfVec4d{1.0, 1.0, 0.0, 1.0},
+            GfVec4d{-1.0, -1.0, 1.0, 1.0},
+            GfVec4d{1.0, -1.0, 1.0, 1.0},
+            GfVec4d{-1.0, 1.0, 1.0, 1.0},
+            GfVec4d{1.0, 1.0, 1.0, 1.0}
+        };
+
+        for (size_t i = 0; i < 8; i++)
+        {
+            NDC[i] = lightView * inverseProjectionView * NDC[i];
+            NDC[i] /= NDC[i][3];
+        }
+
+        GfVec3d min{ DBL_MAX, DBL_MAX, DBL_MAX };
+        GfVec3d max{ -DBL_MAX, -DBL_MAX, -DBL_MAX };
+        for (unsigned int i = 0; i < 8; ++i)
+        {
+            for(unsigned int j = 0; j < 3; ++j) {
+                if (NDC[i][j] < min[j])
+                    min[j] = NDC[i][j];
+                if (NDC[i][j] > max[j])
+                    max[j] = NDC[i][j];
+            }
+
+        }
+
+        GfFrustum frustum;
+
+        frustum.SetOrthographic(min[0], max[0], min[1], max[1], min[2], max[2]);
+
+        return frustum.ComputeProjectionMatrix() * frustum.ComputeViewMatrix();
+
+        */
+
+    }
+
+private:
+    GfMatrix4d _shadowMatrix;
+    const HdxTaskController* _controller;
+    friend HdxTaskController;
+};
+
+}
+
+bool 
 HdxTaskController::_SetParameters(SdfPath const& pathName, 
                                   GlfSimpleLight const& light)
 {
@@ -835,10 +955,22 @@ HdxTaskController::_SetParameters(SdfPath const& pathName,
         VtValue(GfVec3f(1, 1, 1)));
     _delegate.SetParameter(pathName, HdTokens->transform,
         VtValue(light.GetTransform()));
+
+    HdxShadowParams shadowParams;
+    shadowParams.enabled = light.HasShadow();
+    if(shadowParams.enabled) {
+        shadowParams.resolution = light.GetShadowResolution();
+        shadowParams.bias  = light.GetShadowBias();
+        shadowParams.blur = (double)light.GetShadowBlur();
+        shadowParams.shadowMatrix =
+            HdxShadowMatrixComputationSharedPtr(new ShadowMatrixComputation(light, this));
+    }
+
     _delegate.SetParameter(pathName, HdLightTokens->shadowParams,
-        HdxShadowParams());
-    _delegate.SetParameter(pathName, HdLightTokens->shadowCollection,
-        VtValue());
+        shadowParams);
+
+    HdRprimCollection collection(HdTokens->geometry, HdReprSelector(HdReprTokens->smoothHull));
+    _delegate.SetParameter(pathName, HdLightTokens->shadowCollection, collection);
     _delegate.SetParameter(pathName, HdLightTokens->params, light);
 
     // If this is a dome light add the domelight texture resource.
@@ -859,7 +991,9 @@ HdxTaskController::_SetParameters(SdfPath const& pathName,
         _delegate.SetParameter(pathName, HdLightTokens->shadowEnable, 
             VtValue(false));
     }
+    return true;
 }
+
 
 void 
 HdxTaskController::_SetMaterialNetwork(SdfPath const& pathName, 
@@ -1739,7 +1873,7 @@ HdxTaskController::_SetBuiltInLightingState(
             // Make sure the light at _lightIds[i] matches activeLights[i]
             if (_GetLightAtId(i) != activeLights[i]) {
                 _ReplaceLightSprim(i, activeLights[i], lightPath);
-            }
+            } 
             if (needToAddLightPath) {
                 _lightIds.push_back(lightPath);
             }
@@ -1759,7 +1893,7 @@ HdxTaskController::_SetBuiltInLightingState(
             // Make sure the light at _lightIds[i] matches activeLights[i]
             if (_GetLightAtId(i) != activeLights[i]) {
                 _ReplaceLightSprim(i, activeLights[i], lightPath);
-            }
+            } 
         }
         // Now that everything matches, remove the last item in _lightIds
         _RemoveLightSprim(_lightIds.size()-1);
@@ -1770,6 +1904,10 @@ HdxTaskController::_SetBuiltInLightingState(
     // update the light parameters eg. if the free camera has moved 
     for (size_t i = 0; i < activeLights.size(); ++i) {
     
+        if(_SetParameters(_lightIds[i], activeLights[i]))
+            GetRenderIndex()->GetChangeTracker().MarkSprimDirty(_lightIds[i], 
+                                                HdLight::AllDirty);
+
         // Make sure the light parameters and transform match
         GlfSimpleLight const& activeLight = activeLights[i];
         if (_GetLightAtId(i) != activeLight) {
@@ -1875,6 +2013,19 @@ HdxTaskController::SetFreeCameraMatrices(GfMatrix4d const& viewMatrix,
 {
     _freeCameraSceneDelegate->SetMatrices(viewMatrix, projMatrix);
     _SetCameraParamForTasks(_freeCameraSceneDelegate->GetCameraId());
+}
+
+void
+HdxTaskController::ComputeInverseProjectionViewMatrix(GfMatrix4d const& viewMatrix,
+                                                GfMatrix4d const& projMatrix)
+{
+    _inverseProjectionViewMatrix = (projMatrix * viewMatrix).GetInverse();
+}
+
+const GfMatrix4d&
+HdxTaskController::GetInverseProjectionViewMatrix() const 
+{
+    return _inverseProjectionViewMatrix;
 }
 
 void

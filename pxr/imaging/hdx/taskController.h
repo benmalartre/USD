@@ -161,6 +161,14 @@ public:
     HDX_API
     void SetCameraPath(SdfPath const& id);
 
+    /// Current camera inverse projection matrix for shadows
+    /// COmpute and cache current camera inverse projection view matrix
+    HDX_API
+    void ComputeInverseProjectionViewMatrix(GfMatrix4d const& viewMatrix,
+                                        GfMatrix4d const& projMatrix);
+    HDX_API
+    const GfMatrix4d& GetInverseProjectionViewMatrix() const;
+
     /// Set the viewport param on tasks.
     ///
     /// \deprecated Use SetFraming and SetRenderBufferSize instead.
@@ -309,7 +317,7 @@ private:
     // Helper functions to set the parameters of a light, get a particular light 
     // in the scene, replace and remove Sprims from the scene 
     VtValue _GetDomeLightTexture(GlfSimpleLight const& light);
-    void _SetParameters(SdfPath const& pathName, GlfSimpleLight const& light);
+    bool _SetParameters(SdfPath const& pathName, GlfSimpleLight const& light);
     void _SetMaterialNetwork(SdfPath const& pathName, 
                              GlfSimpleLight const& light);
     GlfSimpleLight _GetLightAtId(size_t const& pathIdx);
@@ -405,6 +413,11 @@ private:
     std::optional<CameraUtilConformWindowPolicy> _overrideWindowPolicy;
 
     GfVec4d _viewport;
+    //GfMatrix4d _view;
+    //GfMatrix4d _proj;
+
+    GfMatrix4d _inverseProjectionViewMatrix;
+    
 };
 
 PXR_NAMESPACE_CLOSE_SCOPE
