@@ -5,30 +5,35 @@ if(NOT PXR_ENABLE_OSL_SUPPORT)
     return()
 endif()
 
+# Use the import targets set by Imath's package config
+if (Imath_FOUND)
+    set(__OSL_IMATH_LIBS "Imath::Imath")
+else()
+    set(__OSL_IMATH_INCLUDE ${OPENEXR_INCLUDE_DIRS})
+    set(__OSL_IMATH_LIBS ${OPENEXR_LIBRARIES})
+endif()
+
 pxr_plugin(sdrOsl
     LIBRARIES
         gf
         tf
         vt
         ar
-        ndr
         sdr
         ${OSL_QUERY_LIBRARY}
         ${OIIO_LIBRARIES}
+        ${__OSL_IMATH_LIBS}
 
     INCLUDE_DIRS
-        ${OPENEXR_INCLUDE_DIR}
         ${OSL_INCLUDE_DIR}
         ${OIIO_INCLUDE_DIRS}
+        ${__OSL_IMATH_INCLUDE}
 
     PUBLIC_CLASSES
         oslParser
 
     PRIVATE_HEADERS
         api.h
-
-    PYTHON_CPPFILES
-        moduleDeps.cpp
 
     PYMODULE_CPPFILES
         module.cpp

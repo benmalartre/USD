@@ -8,11 +8,9 @@ pxr_library(plug
         js
         trace
         work
-        ${Boost_PYTHON_LIBRARY}
         ${TBB_tbb_LIBRARY}
 
     INCLUDE_DIRS
-        ${Boost_INCLUDE_DIRS}
         ${TBB_INCLUDE_DIRS}
 
     PUBLIC_CLASSES
@@ -34,9 +32,6 @@ pxr_library(plug
     CPPFILES
         initConfig.cpp
 
-    PYTHON_CPPFILES
-        moduleDeps.cpp
-
     PYMODULE_CPPFILES
         module.cpp
         wrapNotice.cpp
@@ -56,7 +51,6 @@ pxr_test_scripts(
 )
 
 pxr_build_test_shared_lib(TestPlugDso1
-    CREATE_FRAMEWORK
     INSTALL_PREFIX PlugPlugins
     LIBRARIES
         tf

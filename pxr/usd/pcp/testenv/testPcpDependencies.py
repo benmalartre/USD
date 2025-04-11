@@ -2,25 +2,8 @@
 #
 # Copyright 2017 Pixar
 #
-# Licensed under the Apache License, Version 2.0 (the "Apache License")
-# with the following modification; you may not use this file except in
-# compliance with the Apache License and the following modification to it:
-# Section 6. Trademarks. is deleted and replaced with:
-#
-# 6. Trademarks. This License does not grant permission to use the trade
-#    names, trademarks, service marks, or product names of the Licensor
-#    and its affiliates, except as required to comply with Section 4(c) of
-#    the License and to reproduce the content of the NOTICE file.
-#
-# You may obtain a copy of the Apache License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the Apache License with the above modification is
-# distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-# KIND, either express or implied. See the Apache License for the specific
-# language governing permissions and limitations under the Apache License.
+# Licensed under the terms set forth in the LICENSE.txt file available at
+# https://openusd.org/license.
 
 '''
 This test exercises the Pcp dependency API in specific scenarios
@@ -46,6 +29,7 @@ class TestPcpDependencies(unittest.TestCase):
 
     # Wrapper to query deps on a given site.
     def _FindSiteDeps(self, rootLayerPath, siteLayerPath, sitePath,
+                      cacheInUsdMode = False,
                       depMask = Pcp.DependencyTypeAnyNonVirtual,
                       recurseOnSite = False,
                       recurseOnIndex = False):
@@ -55,7 +39,8 @@ class TestPcpDependencies(unittest.TestCase):
         self.assertTrue(rootLayer)
         siteLayer = Sdf.Layer.FindOrOpen(siteLayerPath)
         self.assertTrue(siteLayer)
-        cache = Pcp.Cache( Pcp.LayerStackIdentifier(rootLayer) )
+        cache = Pcp.Cache( Pcp.LayerStackIdentifier(rootLayer), 
+                          usd = cacheInUsdMode )
         siteLayerStack = cache.ComputeLayerStack(
             Pcp.LayerStackIdentifier(siteLayer))[0]
         self.assertTrue(siteLayerStack)
@@ -268,6 +253,120 @@ class TestPcpDependencies(unittest.TestCase):
             ])
 
         ########################################################################
+        # Only prim2 that select a variant depend on that particular variant's 
+        # site. Here /Prim1 selects primVariant=one.
+        self._AssertDepsEqual(self._FindSiteDeps(
+                'BasicVariant/root.sdf',
+                'BasicVariant/root.sdf',
+                '/PrimVariants{primVariant=one}',
+                recurseOnSite = True,
+                cacheInUsdMode = True
+            ),
+            [
+            Pcp.Dependency(
+                '/Prim1', 
+                '/PrimVariants{primVariant=one}', 
+                Pcp.MapFunction({
+                    '/': '/',
+                    '/PrimVariants': '/Prim1'})
+                ),
+            Pcp.Dependency(
+                '/Prim1', 
+                '/PrimVariants{primVariant=one}',
+                Pcp.MapFunction({
+                     '/': '/', 
+                     '/PrimVariants': '/Prim1'})
+                )
+            ])
+
+        # And /Prim2 selects primVariant=two.
+        self._AssertDepsEqual(self._FindSiteDeps(
+                'BasicVariant/root.sdf',
+                'BasicVariant/root.sdf',
+                '/PrimVariants{primVariant=two}',
+                recurseOnSite = True,
+                cacheInUsdMode = True
+            ),
+            [
+            Pcp.Dependency(
+                '/Prim2', 
+                '/PrimVariants{primVariant=two}', 
+                Pcp.MapFunction({
+                    '/': '/',
+                    '/PrimVariants': '/Prim2'})
+                ),
+            Pcp.Dependency(
+                '/Prim2', 
+                '/PrimVariants{primVariant=two}',
+                Pcp.MapFunction({
+                     '/': '/', 
+                     '/PrimVariants': '/Prim2'})
+                )
+            ])
+
+        ########################################################################
+        # XXX: In non-USD mode we still have the bug where prims can have 
+        # dependencies to unselected variants that they don't actually depend 
+        # on. This bug is in place until downstream dependencies can be updated
+        # to account for the fix to the bug.
+        self._AssertDepsEqual(self._FindSiteDeps(
+                'BasicVariant/root.sdf',
+                'BasicVariant/root.sdf',
+                '/PrimVariants{primVariant=one}',
+                recurseOnSite = True,
+                cacheInUsdMode = False
+            ),
+            [
+            Pcp.Dependency(
+                '/Prim1', 
+                '/PrimVariants{primVariant=one}', 
+                Pcp.MapFunction({
+                    '/': '/',
+                    '/PrimVariants': '/Prim1'})
+                ),
+            Pcp.Dependency(
+                '/Prim1', 
+                '/PrimVariants{primVariant=one}',
+                Pcp.MapFunction({
+                     '/': '/', 
+                     '/PrimVariants': '/Prim1'})
+                ), 
+            Pcp.Dependency(
+                '/Prim1', 
+                '/PrimVariants{primVariant=one}',
+                Pcp.MapFunction({
+                    '/': '/',
+                    '/PrimVariants': '/Prim1'})
+                ),
+            Pcp.Dependency(
+                '/Prim2',
+                '/PrimVariants{primVariant=one}',
+                Pcp.MapFunction({
+                    '/': '/', 
+                    '/PrimVariants': '/Prim2'})
+                )
+            ])
+
+        ########################################################################
+        # Because deps are analyzed in terms of prim arcs, recurseOnSite needs
+        # to be careful to work correctly when querying deps on a property path.
+        self._AssertDepsEqual( self._FindSiteDeps(
+                'BasicVariantWithConnections/root.sdf',
+                'BasicVariantWithConnections/camera.sdf',
+                '/camera.HypotheticalProperty',
+                recurseOnSite = True,
+            ),
+            [
+            Pcp.Dependency(
+                '/main_cam.HypotheticalProperty',
+                '/camera.HypotheticalProperty',
+                Pcp.MapFunction({
+                    '/camera': '/main_cam'})
+                )
+            ])
+
+
+        ########################################################################
         # Because deps are analyzed in terms of prim arcs, recurseOnSite needs
         # to be careful to work correctly when querying deps on a property path.
         self._AssertDepsEqual( self._FindSiteDeps(
@@ -382,7 +481,7 @@ class TestPcpDependencies(unittest.TestCase):
                 '/HumanRig/rig/Face/rig/LEyeRig/Anim',
                 Pcp.MapFunction.Identity()),
             Pcp.Dependency(
-                '/HumanRig/rig/Face/Anim/LEye',
+                '/HumanRig/Anim/Face/LEye',
                 '/HumanRig/rig/Face/rig/LEyeRig/Anim',
                 Pcp.MapFunction.Identity()),
             Pcp.Dependency(
@@ -390,7 +489,7 @@ class TestPcpDependencies(unittest.TestCase):
                 '/HumanRig/rig/Face/rig/LEyeRig/Anim',
                 Pcp.MapFunction.Identity()),
             Pcp.Dependency(
-                '/HumanRig/rig/Face/Anim/LEye',
+                '/HumanRig/Anim/Face/LEye',
                 '/HumanRig/rig/Face/rig/LEyeRig/Anim',
                 Pcp.MapFunction.Identity()),
             ])

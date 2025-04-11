@@ -1,42 +1,30 @@
 //
 // Copyright 2023 Pixar
 //
-// Licensed under the Apache License, Version 2.0 (the "Apache License")
-// with the following modification; you may not use this file except in
-// compliance with the Apache License and the following modification to it:
-// Section 6. Trademarks. is deleted and replaced with:
-//
-// 6. Trademarks. This License does not grant permission to use the trade
-//    names, trademarks, service marks, or product names of the Licensor
-//    and its affiliates, except as required to comply with Section 4(c) of
-//    the License and to reproduce the content of the NOTICE file.
-//
-// You may obtain a copy of the Apache License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the Apache License with the above modification is
-// distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied. See the Apache License for the specific
-// language governing permissions and limitations under the Apache License.
+// Licensed under the terms set forth in the LICENSE.txt file available at
+// https://openusd.org/license.
 //
 
 #include "pxr/imaging/hdSt/flatNormals.h"
 #include "pxr/imaging/hdSt/meshTopology.h"
 #include "pxr/imaging/hdSt/quadrangulate.h"
+#include "pxr/imaging/hdSt/renderDelegate.h"
+#include "pxr/imaging/hdSt/resourceRegistry.h"
 #include "pxr/imaging/hdSt/smoothNormals.h"
 #include "pxr/imaging/hdSt/triangulate.h"
 #include "pxr/imaging/hdSt/vertexAdjacency.h"
 
 #include "pxr/imaging/hd/bufferSource.h"
+#include "pxr/imaging/hd/driver.h"
 #include "pxr/imaging/hd/smoothNormals.h"
 #include "pxr/imaging/hd/flatNormals.h"
+#include "pxr/imaging/hd/renderIndex.h"
 #include "pxr/imaging/hd/tokens.h"
 #include "pxr/imaging/hd/vertexAdjacency.h"
 #include "pxr/imaging/hd/vtBufferSource.h"
-#include "pxr/imaging/hdSt/resourceRegistry.h"
 #include "pxr/imaging/glf/testGLContext.h"
+
+#include "pxr/imaging/hgi/tokens.h"
 
 #include "pxr/usd/sdf/path.h"
 
@@ -52,8 +40,6 @@
 
 PXR_NAMESPACE_USING_DIRECTIVE
 
-HdStResourceRegistrySharedPtr registry;
-
 TF_DEFINE_PRIVATE_TOKENS(
     _tokens,
     ((bilinear, "bilinear"))
@@ -62,16 +48,29 @@ TF_DEFINE_PRIVATE_TOKENS(
 );
 
 template <typename T>
-static VtArray<T>
-_BuildArray(T values[], int numValues)
+struct _EmptyArray
 {
-    VtArray<T> result(numValues);
-    std::copy(values, values+numValues, result.begin());
+};
+
+template <typename T, size_t N>
+static VtArray<T>
+_BuildArray(T const (&values)[N])
+{
+    VtArray<T> result(N);
+    std::copy(values, values+N, result.begin());
     return result;
 }
 
+template <typename T>
+static VtArray<T>
+_BuildArray(_EmptyArray<T> values)
+{
+    return VtArray<T>();
+}
+
 static bool
-_CompareIndices(std::string const & name,
+_CompareIndices(HdStResourceRegistrySharedPtr const &registry,
+                std::string const & name,
                 std::string const & orientation,
                 VtIntArray numVerts, VtIntArray verts, VtIntArray holes,
                 VtVec3iArray expected)
@@ -89,9 +88,10 @@ _CompareIndices(std::string const & name,
     HdBufferSpecVector bufferSpecs;
     source->GetBufferSpecs(&bufferSpecs);
     HdBufferArrayRangeSharedPtr const range =
-        registry->AllocateNonUniformBufferArrayRange(HdTokens->topology,
-                                                     bufferSpecs,
-                                                     HdBufferArrayUsageHint());
+        registry->AllocateNonUniformBufferArrayRange(
+            HdTokens->topology,
+            bufferSpecs,
+            HdBufferArrayUsageHintBitsIndex);
     registry->AddSource(range, source);
 
     // execute computation
@@ -108,7 +108,8 @@ _CompareIndices(std::string const & name,
 }
 
 static bool
-_CompareFaceVarying(std::string const &name,
+_CompareFaceVarying(HdStResourceRegistrySharedPtr const &registry,
+                    std::string const &name,
                     std::string const &orientation,
                     VtIntArray numVerts, VtIntArray verts, VtIntArray holes,
                     VtFloatArray fvarValues,
@@ -131,9 +132,10 @@ _CompareFaceVarying(std::string const &name,
     HdBufferSpecVector bufferSpecs;
     source->GetBufferSpecs(&bufferSpecs);
     HdBufferArrayRangeSharedPtr const range =
-        registry->AllocateNonUniformBufferArrayRange(HdTokens->primvar,
-                                                     bufferSpecs,
-                                                     HdBufferArrayUsageHint());
+        registry->AllocateNonUniformBufferArrayRange(
+            HdTokens->primvar,
+            bufferSpecs,
+            HdBufferArrayUsageHintBitsStorage);
     registry->AddSource(range, source);
 
     // execute computation
@@ -149,19 +151,19 @@ _CompareFaceVarying(std::string const &name,
     return true;
 }
 
-#define COMPARE_INDICES(name, orientation, numVerts, verts, expected) \
-    _CompareIndices(name, orientation, \
-                   _BuildArray(numVerts, sizeof(numVerts)/sizeof(int)), \
-                   _BuildArray(verts, sizeof(verts)/sizeof(int)), \
+#define COMPARE_INDICES(registry, name, orientation, numVerts, verts, expected) \
+    _CompareIndices(registry, name, orientation, \
+                   _BuildArray(numVerts), \
+                   _BuildArray(verts), \
                     /*holes=*/VtIntArray(),                             \
-                   _BuildArray(expected, sizeof(expected)/sizeof(expected[0])))
+                   _BuildArray(expected))
 
-#define COMPARE_INDICES_HOLE(name, orientation, numVerts, verts, holes, expected) \
-    _CompareIndices(name, orientation,                                  \
-                    _BuildArray(numVerts, sizeof(numVerts)/sizeof(int)), \
-                    _BuildArray(verts, sizeof(verts)/sizeof(int)),      \
-                    _BuildArray(holes, sizeof(holes)/sizeof(int)),      \
-                    _BuildArray(expected, sizeof(expected)/sizeof(expected[0])))
+#define COMPARE_INDICES_HOLE(registry, name, orientation, numVerts, verts, holes, expected) \
+    _CompareIndices(registry, name, orientation,                                  \
+                    _BuildArray(numVerts), \
+                    _BuildArray(verts),      \
+                    _BuildArray(holes),      \
+                    _BuildArray(expected))
 
 template <typename Vec3Type>
 static bool
@@ -183,7 +185,8 @@ _CompareArrays(VtArray<Vec3Type> const & result,
 
 template <typename Vec3Type>
 bool
-_CompareSmoothNormals(std::string const & name,
+_CompareSmoothNormals(HdStResourceRegistrySharedPtr const &registry,
+                      std::string const & name,
                       std::string const & orientation,
                       VtIntArray numVerts, VtIntArray verts,
                       VtArray<Vec3Type> points,
@@ -223,12 +226,12 @@ _CompareSmoothNormals(std::string const & name,
     return true;
 }
 
-#define COMPARE_SMOOTH_NORMALS(name, orientation, numVerts, verts, points, expected) \
-    _CompareSmoothNormals(name, orientation, \
-               _BuildArray(numVerts, sizeof(numVerts)/sizeof(numVerts[0])), \
-               _BuildArray(verts, sizeof(verts)/sizeof(verts[0])), \
-               _BuildArray(points, sizeof(points)/sizeof(points[0])), \
-               _BuildArray(expected, sizeof(expected)/sizeof(expected[0])))
+#define COMPARE_SMOOTH_NORMALS(registry, name, orientation, numVerts, verts, points, expected) \
+    _CompareSmoothNormals(registry, name, orientation, \
+               _BuildArray(numVerts), \
+               _BuildArray(verts), \
+               _BuildArray(points), \
+               _BuildArray(expected))
 
 template <typename Vec3Type>
 bool
@@ -262,14 +265,15 @@ _CompareFlatNormals(std::string const & name,
 
 #define COMPARE_FLAT_NORMALS(name, orientation, numVerts, verts, points, expected) \
     _CompareFlatNormals(name, orientation, \
-               _BuildArray(numVerts, sizeof(numVerts)/sizeof(numVerts[0])), \
-               _BuildArray(verts, sizeof(verts)/sizeof(verts[0])), \
-               _BuildArray(points, sizeof(points)/sizeof(points[0])), \
-               _BuildArray(expected, sizeof(expected)/sizeof(expected[0])))
+               _BuildArray(numVerts), \
+               _BuildArray(verts), \
+               _BuildArray(points), \
+               _BuildArray(expected))
 
 template <typename Vec3Type>
 bool
-_CompareGpuSmoothNormals(std::string const & name,
+_CompareGpuSmoothNormals(HdStResourceRegistrySharedPtr const &registry,
+                         std::string const & name,
                          std::string const & orientation,
                          VtIntArray numVerts, VtIntArray verts,
                          VtArray<Vec3Type> points,
@@ -295,7 +299,8 @@ _CompareGpuSmoothNormals(std::string const & name,
         adjGpuComputation->GetBufferSpecs(&bufferSpecs);
         HdBufferArrayRangeSharedPtr const adjRange =
             registry->AllocateNonUniformBufferArrayRange(
-                HdTokens->topology, bufferSpecs, HdBufferArrayUsageHint());
+                HdTokens->topology, bufferSpecs,
+                HdBufferArrayUsageHintBitsStorage);
         adjacencyBuilder.SetVertexAdjacencyRange(adjRange);
         registry->AddSource(adjRange, adjGpuComputation);
     }
@@ -315,9 +320,10 @@ _CompareGpuSmoothNormals(std::string const & name,
 
     // allocate GPU buffer range
     HdBufferArrayRangeSharedPtr const range =
-        registry->AllocateNonUniformBufferArrayRange(HdTokens->primvar,
-                                                     bufferSpecs,
-                                                     HdBufferArrayUsageHint());
+        registry->AllocateNonUniformBufferArrayRange(
+            HdTokens->primvar,
+            bufferSpecs,
+            HdBufferArrayUsageHintBitsStorage);
 
     // commit points
     HdBufferSourceSharedPtrVector sources;
@@ -345,16 +351,17 @@ _CompareGpuSmoothNormals(std::string const & name,
     return true;
 }
 
-#define COMPARE_GPU_SMOOTH_NORMALS(name, orientation, numVerts, verts, points, expected) \
-    _CompareGpuSmoothNormals(name, orientation, \
-               _BuildArray(numVerts, sizeof(numVerts)/sizeof(numVerts[0])), \
-               _BuildArray(verts, sizeof(verts)/sizeof(verts[0])), \
-               _BuildArray(points, sizeof(points)/sizeof(points[0])), \
-               _BuildArray(expected, sizeof(expected)/sizeof(expected[0])))
+#define COMPARE_GPU_SMOOTH_NORMALS(registry, name, orientation, numVerts, verts, points, expected) \
+    _CompareGpuSmoothNormals(registry, name, orientation, \
+               _BuildArray(numVerts), \
+               _BuildArray(verts), \
+               _BuildArray(points), \
+               _BuildArray(expected))
 
 template <typename Vec3Type>
 bool
-_CompareGpuFlatNormals(std::string const & name,
+_CompareGpuFlatNormals(HdStResourceRegistrySharedPtr const &registry,
+                       std::string const & name,
                        std::string const & orientation,
                        VtIntArray numVerts, VtIntArray verts,
                        VtArray<Vec3Type> points,
@@ -370,10 +377,12 @@ _CompareGpuFlatNormals(std::string const & name,
     // build the points range
     HdBufferSpecVector vertexSpecs;
     pointsSource->GetBufferSpecs(&vertexSpecs);
+    HdBufferArrayUsageHint vertexUsageHint =
+        HdBufferArrayUsageHintBitsVertex | HdBufferArrayUsageHintBitsStorage;
     HdBufferArrayRangeSharedPtr const vertexRange =
         registry->AllocateNonUniformBufferArrayRange(HdTokens->primvar,
                                                      vertexSpecs,
-                                                     HdBufferArrayUsageHint());
+                                                     vertexUsageHint);
 
     // index builder
     HdBufferSourceSharedPtr indexComputation;
@@ -393,10 +402,12 @@ _CompareGpuFlatNormals(std::string const & name,
     // build the topology range
     HdBufferSpecVector topoSpecs;
     indexComputation->GetBufferSpecs(&topoSpecs);
+    HdBufferArrayUsageHint topoUsageHint =
+        HdBufferArrayUsageHintBitsIndex | HdBufferArrayUsageHintBitsStorage;
     HdBufferArrayRangeSharedPtr const topoRange =
         registry->AllocateNonUniformBufferArrayRange(HdTokens->topology,
                                                      topoSpecs,
-                                                     HdBufferArrayUsageHint());
+                                                     topoUsageHint);
 
     // GPU flat normals computation
     const int numFaces = topology.GetFaceVertexCounts().size();
@@ -411,9 +422,10 @@ _CompareGpuFlatNormals(std::string const & name,
     HdBufferSpecVector elementSpecs;
     normalComputation->GetBufferSpecs(&elementSpecs);
     HdBufferArrayRangeSharedPtr const elementRange =
-        registry->AllocateNonUniformBufferArrayRange(HdTokens->primvar,
-                                                     elementSpecs,
-                                                     HdBufferArrayUsageHint());
+        registry->AllocateNonUniformBufferArrayRange(
+            HdTokens->primvar,
+            elementSpecs,
+            HdBufferArrayUsageHintBitsStorage);
 
     // Add sources
     if (quadInfoComputation) {
@@ -444,28 +456,28 @@ _CompareGpuFlatNormals(std::string const & name,
     return true;
 }
 
-#define COMPARE_GPU_FLAT_NORMALS_TRI(name, orientation, numVerts, verts, points, expected) \
-    _CompareGpuFlatNormals(name, orientation, \
-               _BuildArray(numVerts, sizeof(numVerts)/sizeof(numVerts[0])), \
-               _BuildArray(verts, sizeof(verts)/sizeof(verts[0])), \
-               _BuildArray(points, sizeof(points)/sizeof(points[0])), \
-               _BuildArray(expected, sizeof(expected)/sizeof(expected[0])), false)
+#define COMPARE_GPU_FLAT_NORMALS_TRI(registry, name, orientation, numVerts, verts, points, expected) \
+    _CompareGpuFlatNormals(registry, name, orientation, \
+               _BuildArray(numVerts), \
+               _BuildArray(verts), \
+               _BuildArray(points), \
+               _BuildArray(expected), false)
 
-#define COMPARE_GPU_FLAT_NORMALS_QUAD(name, orientation, numVerts, verts, points, expected) \
-    _CompareGpuFlatNormals(name, orientation, \
-               _BuildArray(numVerts, sizeof(numVerts)/sizeof(numVerts[0])), \
-               _BuildArray(verts, sizeof(verts)/sizeof(verts[0])), \
-               _BuildArray(points, sizeof(points)/sizeof(points[0])), \
-               _BuildArray(expected, sizeof(expected)/sizeof(expected[0])), true)
+#define COMPARE_GPU_FLAT_NORMALS_QUAD(registry, name, orientation, numVerts, verts, points, expected) \
+    _CompareGpuFlatNormals(registry, name, orientation, \
+               _BuildArray(numVerts), \
+               _BuildArray(verts), \
+               _BuildArray(points), \
+               _BuildArray(expected), true)
 
 bool
-BasicTest()
+BasicTest(HdStResourceRegistrySharedPtr const &registry)
 {
     {
-        int numVerts[] = {};
-        int verts[] = {};
-        GfVec3i expected[] = { };
-        if (!COMPARE_INDICES("empty",
+        const _EmptyArray<int> numVerts;
+        const _EmptyArray<int> verts;
+        const _EmptyArray<GfVec3i> expected;
+        if (!COMPARE_INDICES(registry, "empty",
                 _tokens->rightHanded, numVerts, verts, expected)) {
             return false;
         }
@@ -475,7 +487,7 @@ BasicTest()
         int numVerts[] = { 0, 3 };
         int verts[] = { 1 , 2 , 3 };
         GfVec3i expected[] = { GfVec3i(1,2,3) };
-        if (!COMPARE_INDICES("identity_no_vert_face",
+        if (!COMPARE_INDICES(registry, "identity_no_vert_face",
                 _tokens->rightHanded, numVerts, verts, expected)) {
             return false;
         }
@@ -486,7 +498,7 @@ BasicTest()
         int numVerts[] = { 1, 3 };
         int verts[] = { 1, 1, 2 , 3 };
         GfVec3i expected[] = { GfVec3i(1,2,3) };
-        if (!COMPARE_INDICES("identity_one_vert_face",
+        if (!COMPARE_INDICES(registry, "identity_one_vert_face",
                 _tokens->rightHanded, numVerts, verts, expected)) {
             return false;
         }
@@ -497,7 +509,7 @@ BasicTest()
         int numVerts[] = { 2, 3 };
         int verts[] = { 1, 1, 1, 2 , 3 };
         GfVec3i expected[] = { GfVec3i(1,2,3) };
-        if (!COMPARE_INDICES("identity_two_vert_face",
+        if (!COMPARE_INDICES(registry, "identity_two_vert_face",
                 _tokens->rightHanded, numVerts, verts, expected)) {
             return false;
         }
@@ -508,7 +520,7 @@ BasicTest()
         int verts[] = { 1, 2, 3, 4 };
         GfVec3i expected[] = { GfVec3i(1, 2, 3),
                                GfVec3i(1, 3, 4) };
-        if (!COMPARE_INDICES("quad_no_vet_face",
+        if (!COMPARE_INDICES(registry, "quad_no_vet_face",
                 _tokens->rightHanded, numVerts, verts, expected)) {
             return false;
         }
@@ -519,7 +531,7 @@ BasicTest()
         int verts[] = { 1, 1, 1, 2, 3, 4 };
         GfVec3i expected[] = { GfVec3i(1, 2, 3),
                                GfVec3i(1, 3, 4) };
-        if (!COMPARE_INDICES("quad_two_vert_face",
+        if (!COMPARE_INDICES(registry, "quad_two_vert_face",
                 _tokens->rightHanded, numVerts, verts, expected)) {
             return false;
         }
@@ -531,7 +543,7 @@ BasicTest()
                                GfVec3i(4, 5, 6),
                                GfVec3i(4, 6, 7),
                                GfVec3i(8, 9, 10) };
-        if (!COMPARE_INDICES("3 4 3",
+        if (!COMPARE_INDICES(registry, "3 4 3",
                 _tokens->rightHanded, numVerts, verts, expected)) {
             return false;
         }
@@ -540,7 +552,7 @@ BasicTest()
 }
 
 bool
-HoleTest()
+HoleTest(HdStResourceRegistrySharedPtr const &registry)
 {
     /*
          0-----3-------4-----7
@@ -570,36 +582,37 @@ HoleTest()
                            GfVec3i(2, 9, 5),
                            GfVec3i(5, 9, 10),
                            GfVec3i(5, 10, 6) };
-    if (!COMPARE_INDICES_HOLE("hole", _tokens->rightHanded, numVerts, verts, hole, expected)) {
+    if (!COMPARE_INDICES_HOLE(registry, "hole", _tokens->rightHanded, numVerts,
+            verts, hole, expected)) {
         return false;
     }
     return true;
 }
 
 bool
-ComputeNormalsTest()
+ComputeNormalsTest(HdStResourceRegistrySharedPtr const &registry)
 {
     {
-        int numVerts[] = {};
-        int verts[] = {};
-        GfVec3f points[] = {};
-        GfVec3f expectedNormals[] = {};
-        if (!COMPARE_SMOOTH_NORMALS("empty", _tokens->rightHanded,
+        const _EmptyArray<int> numVerts;
+        const _EmptyArray<int> verts;
+        const _EmptyArray<GfVec3f> points;
+        const _EmptyArray<GfVec3f> expectedNormals;
+        if (!COMPARE_SMOOTH_NORMALS(registry, "empty", _tokens->rightHanded,
                 numVerts, verts, points, expectedNormals)) {
             return false;
         }
     }
     {
         int numVerts[] = {3};
-        int verts[] = {};
+        const _EmptyArray<int> verts;
         GfVec3f points[] = {
             GfVec3f(-1.0, 0.0, 0.0 ),
             GfVec3f( 0.0, 0.0, 2.0 ),
             GfVec3f( 1.0, 0.0, 0.0 ),
         };
-        GfVec3f expectedNormals[] = {};
+        const _EmptyArray<GfVec3f> expectedNormals;
         if (!COMPARE_SMOOTH_NORMALS(
-                "missing_faceVertexIndices",_tokens->rightHanded,
+                registry, "missing_faceVertexIndices",_tokens->rightHanded,
                 numVerts, verts, points, expectedNormals)) {
             return false;
         }
@@ -625,26 +638,28 @@ ComputeNormalsTest()
             GfVec3f( 0.0, 0.0, 0.0 ),
             GfVec3f( 0.0, 0.0, 1.0 ),
         };
-        if (!COMPARE_SMOOTH_NORMALS("triangle_cpu", _tokens->rightHanded,
-                numVerts, verts, points, expectedSmoothNormals)) {
+        if (!COMPARE_SMOOTH_NORMALS(registry, "triangle_cpu",
+                _tokens->rightHanded, numVerts, verts, points,
+                expectedSmoothNormals)) {
             return false;
         }
-        if (!COMPARE_GPU_SMOOTH_NORMALS("triangle_gpu", _tokens->rightHanded,
-                numVerts, verts, points, expectedSmoothNormals)) {
+        if (!COMPARE_GPU_SMOOTH_NORMALS(registry, "triangle_gpu",
+                _tokens->rightHanded,numVerts, verts, points,
+                expectedSmoothNormals)) {
             return false;
         }
         if (!COMPARE_FLAT_NORMALS("triangle_flat_cpu", _tokens->rightHanded,
                 numVerts, verts, points, expectedFlatNormals)) {
             return false;
         }
-        if (!COMPARE_GPU_FLAT_NORMALS_TRI("triangle_flat_gpu_tri",
-                _tokens->rightHanded,
-                numVerts, verts, points, expectedFlatNormals)) {
+        if (!COMPARE_GPU_FLAT_NORMALS_TRI(registry, "triangle_flat_gpu_tri",
+                _tokens->rightHanded, numVerts, verts, points,
+                expectedFlatNormals)) {
             return false;
         }
-        if (!COMPARE_GPU_FLAT_NORMALS_QUAD("triangle_flat_gpu_quad",
-                _tokens->rightHanded,
-                numVerts, verts, points, expectedFlatNormals)) {
+        if (!COMPARE_GPU_FLAT_NORMALS_QUAD(registry, "triangle_flat_gpu_quad",
+                _tokens->rightHanded, numVerts, verts, points,
+                expectedFlatNormals)) {
             return false;
         }
     }
@@ -666,26 +681,27 @@ ComputeNormalsTest()
         GfVec3f expectedFlatNormals[] = {
             GfVec3f( 0.0f, 0.0f, 1.0f ),
         };
-        if (!COMPARE_SMOOTH_NORMALS("quad_cpu", _tokens->rightHanded,
+        if (!COMPARE_SMOOTH_NORMALS(registry, "quad_cpu", _tokens->rightHanded,
                 numVerts, verts, points, expectedSmoothNormals)) {
             return false;
         }
-        if (!COMPARE_GPU_SMOOTH_NORMALS("quad_gpu", _tokens->rightHanded,
-                numVerts, verts, points, expectedSmoothNormals)) {
+        if (!COMPARE_GPU_SMOOTH_NORMALS(registry, "quad_gpu",
+                _tokens->rightHanded, numVerts, verts, points,
+                expectedSmoothNormals)) {
             return false;
         }
         if (!COMPARE_FLAT_NORMALS("quad_flat_cpu", _tokens->rightHanded,
                 numVerts, verts, points, expectedFlatNormals)) {
             return false;
         }
-        if (!COMPARE_GPU_FLAT_NORMALS_TRI("quad_flat_gpu_tri",
-                _tokens->rightHanded,
-                numVerts, verts, points, expectedFlatNormals)) {
+        if (!COMPARE_GPU_FLAT_NORMALS_TRI(registry, "quad_flat_gpu_tri",
+                _tokens->rightHanded, numVerts, verts, points,
+                expectedFlatNormals)) {
             return false;
         }
-        if (!COMPARE_GPU_FLAT_NORMALS_QUAD("quad_flat_gpu_quad",
-                _tokens->rightHanded,
-                numVerts, verts, points, expectedFlatNormals)) {
+        if (!COMPARE_GPU_FLAT_NORMALS_QUAD(registry, "quad_flat_gpu_quad",
+                _tokens->rightHanded, numVerts, verts, points,
+                expectedFlatNormals)) {
             return false;
         }
     }
@@ -727,27 +743,28 @@ ComputeNormalsTest()
             GfVec3f( 1.0, 0.0, 0.0 ),
             GfVec3f(-1.0, 0.0, 0.0 ),
         };
-        if (!COMPARE_SMOOTH_NORMALS("cube float ccw_cpu", _tokens->rightHanded,
-                numVerts, verts, points, expectedSmoothNormals)) {
+        if (!COMPARE_SMOOTH_NORMALS(registry, "cube float ccw_cpu",
+                _tokens->rightHanded, numVerts, verts, points,
+                expectedSmoothNormals)) {
             return false;
         }
-        if (!COMPARE_GPU_SMOOTH_NORMALS("cube float ccw_gpu",
+        if (!COMPARE_GPU_SMOOTH_NORMALS(registry, "cube float ccw_gpu",
                 _tokens->rightHanded,
                 numVerts, verts, points, expectedSmoothNormals)) {
             return false;
         }
         if (!COMPARE_FLAT_NORMALS("cube float ccw_flat_cpu",
-                _tokens->rightHanded,
+                _tokens->rightHanded, numVerts, verts, points,
+                expectedFlatNormals)) {
+            return false;
+        }
+        if (!COMPARE_GPU_FLAT_NORMALS_TRI(registry,
+                "cube float ccw_flat_gpu_tri", _tokens->rightHanded,
                 numVerts, verts, points, expectedFlatNormals)) {
             return false;
         }
-        if (!COMPARE_GPU_FLAT_NORMALS_TRI("cube float ccw_flat_gpu_tri",
-                _tokens->rightHanded,
-                numVerts, verts, points, expectedFlatNormals)) {
-            return false;
-        }
-        if (!COMPARE_GPU_FLAT_NORMALS_QUAD("cube float ccw_flat_gpu_quad",
-                _tokens->rightHanded,
+        if (!COMPARE_GPU_FLAT_NORMALS_QUAD(registry,
+                "cube float ccw_flat_gpu_quad", _tokens->rightHanded,
                 numVerts, verts, points, expectedFlatNormals)) {
             return false;
         }
@@ -790,26 +807,27 @@ ComputeNormalsTest()
             GfVec3f( 1.0, 0.0, 0.0 ),
             GfVec3f(-1.0, 0.0, 0.0 ),
         };
-        if (!COMPARE_SMOOTH_NORMALS("cube float cw_cpu", _tokens->leftHanded,
-                numVerts, verts, points, expectedSmoothNormals)) {
+        if (!COMPARE_SMOOTH_NORMALS(registry, "cube float cw_cpu",
+                _tokens->leftHanded, numVerts, verts, points,
+                expectedSmoothNormals)) {
             return false;
         }
-        if (!COMPARE_GPU_SMOOTH_NORMALS("cube float cw_gpu",
-                _tokens->leftHanded,
-                numVerts, verts, points, expectedSmoothNormals)) {
+        if (!COMPARE_GPU_SMOOTH_NORMALS(registry, "cube float cw_gpu",
+                _tokens->leftHanded, numVerts, verts, points,
+                expectedSmoothNormals)) {
             return false;
         }
         if (!COMPARE_FLAT_NORMALS("cube float cw_flat_cpu", _tokens->leftHanded,
                 numVerts, verts, points, expectedFlatNormals)) {
             return false;
         }
-        if (!COMPARE_GPU_FLAT_NORMALS_TRI("cube float cw_flat_gpu_tri",
-                _tokens->leftHanded,
+        if (!COMPARE_GPU_FLAT_NORMALS_TRI(registry,
+                "cube float cw_flat_gpu_tri", _tokens->leftHanded,
                 numVerts, verts, points, expectedFlatNormals)) {
             return false;
         }
-        if (!COMPARE_GPU_FLAT_NORMALS_QUAD("cube float cw_flat_gpu_quad",
-                _tokens->leftHanded,
+        if (!COMPARE_GPU_FLAT_NORMALS_QUAD(registry,
+                "cube float cw_flat_gpu_quad", _tokens->leftHanded,
                 numVerts, verts, points, expectedFlatNormals)) {
             return false;
         }
@@ -852,24 +870,26 @@ ComputeNormalsTest()
             GfVec3d( 1.0, 0.0, 0.0 ),
             GfVec3d(-1.0, 0.0, 0.0 ),
         };
-        if (!COMPARE_SMOOTH_NORMALS("cube double_cpu", _tokens->rightHanded,
-                numVerts, verts, points, expectedSmoothNormals)) {
+        if (!COMPARE_SMOOTH_NORMALS(registry, "cube double_cpu",
+                _tokens->rightHanded, numVerts, verts, points,
+                expectedSmoothNormals)) {
             return false;
         }
-        if (!COMPARE_GPU_SMOOTH_NORMALS("cube double_gpu", _tokens->rightHanded,
-                numVerts, verts, points, expectedSmoothNormals)) {
+        if (!COMPARE_GPU_SMOOTH_NORMALS(registry, "cube double_gpu",
+                _tokens->rightHanded, numVerts, verts, points,
+                expectedSmoothNormals)) {
             return false;
         }
         if (!COMPARE_FLAT_NORMALS("cube double_flat_cpu", _tokens->rightHanded,
                 numVerts, verts, points, expectedFlatNormals)) {
             return false;
         }
-        if (!COMPARE_GPU_FLAT_NORMALS_TRI("cube double_flat_gpu_tri",
+        if (!COMPARE_GPU_FLAT_NORMALS_TRI(registry, "cube double_flat_gpu_tri",
                 _tokens->rightHanded,
                 numVerts, verts, points, expectedFlatNormals)) {
             return false;
         }
-        if (!COMPARE_GPU_FLAT_NORMALS_QUAD("cube double_flat_gpu_quad",
+        if (!COMPARE_GPU_FLAT_NORMALS_QUAD(registry, "cube double_flat_gpu_quad",
                 _tokens->rightHanded,
                 numVerts, verts, points, expectedFlatNormals)) {
             return false;
@@ -879,7 +899,7 @@ ComputeNormalsTest()
 }
 
 bool
-FaceVaryingTest()
+FaceVaryingTest(HdStResourceRegistrySharedPtr const &registry)
 {
     /*
          0-----3-------4-----7
@@ -912,19 +932,19 @@ FaceVaryingTest()
                          13, 14, 15, 13, 15, 16,
                          17, 18, 19, 17, 19, 20 };
 
-    if (!_CompareFaceVarying("FaceVarying", _tokens->rightHanded,
-                             _BuildArray(numVerts, sizeof(numVerts)/sizeof(int)),
-                             _BuildArray(verts, sizeof(verts)/sizeof(int)),
-                             _BuildArray(hole, sizeof(hole)/sizeof(int)),
-                             _BuildArray(fvarValues, sizeof(fvarValues)/sizeof(float)),
-                             _BuildArray(expected, sizeof(expected)/sizeof(float)))) {
+    if (!_CompareFaceVarying(registry, "FaceVarying", _tokens->rightHanded,
+                             _BuildArray(numVerts),
+                             _BuildArray(verts),
+                             _BuildArray(hole),
+                             _BuildArray(fvarValues),
+                             _BuildArray(expected))) {
         return false;
     }
     return true;
 }
 
 bool
-InvalidTopologyTest()
+InvalidTopologyTest(HdStResourceRegistrySharedPtr const &registry)
 {
     int numVerts[] = { 4, 4, 4, 4, 4};
     int verts[] = { 0, 1, 2, 3,
@@ -957,19 +977,19 @@ InvalidTopologyTest()
                              0, 0, 0, 0, 0, 0,  // missing
     };
 
-    if (!_CompareIndices("Invalid", _tokens->rightHanded,
-                         _BuildArray(numVerts, sizeof(numVerts)/sizeof(int)),
-                         _BuildArray(verts, sizeof(verts)/sizeof(int)),
-                         _BuildArray(hole, sizeof(hole)/sizeof(int)),
-                         _BuildArray(expected, sizeof(expected)/sizeof(expected[0])))) {
+    if (!_CompareIndices(registry, "Invalid", _tokens->rightHanded,
+                         _BuildArray(numVerts),
+                         _BuildArray(verts),
+                         _BuildArray(hole),
+                         _BuildArray(expected))) {
         return false;
     }
-    if (!_CompareFaceVarying("InvalidFaceVarying", _tokens->rightHanded,
-                             _BuildArray(numVerts, sizeof(numVerts)/sizeof(int)),
-                             _BuildArray(verts, sizeof(verts)/sizeof(int)),
-                             _BuildArray(hole, sizeof(hole)/sizeof(int)),
-                             _BuildArray(fvarValues, sizeof(fvarValues)/sizeof(float)),
-                             _BuildArray(fvarExpected, sizeof(fvarExpected)/sizeof(float)))) {
+    if (!_CompareFaceVarying(registry, "InvalidFaceVarying", _tokens->rightHanded,
+                             _BuildArray(numVerts),
+                             _BuildArray(verts),
+                             _BuildArray(hole),
+                             _BuildArray(fvarValues),
+                             _BuildArray(fvarExpected))) {
         return false;
     }
 
@@ -984,19 +1004,22 @@ int main()
 
     TfErrorMark mark;
 
-    static HgiUniquePtr _hgi = Hgi::CreatePlatformDefaultHgi();
-    registry = std::make_shared<HdStResourceRegistry>(_hgi.get());
+    HgiUniquePtr const hgi = Hgi::CreatePlatformDefaultHgi();
+    HdDriver driver{HgiTokens->renderDriver, VtValue(hgi.get())};
+    HdStRenderDelegate renderDelegate;
+    std::unique_ptr<HdRenderIndex> const index(
+        HdRenderIndex::New(&renderDelegate, {&driver}));
+    HdStResourceRegistrySharedPtr const registry =
+        std::static_pointer_cast<HdStResourceRegistry>(
+        index->GetResourceRegistry());
 
     bool success = true;
-    success &= BasicTest();
-    success &= HoleTest();
-    success &= ComputeNormalsTest();
-    success &= FaceVaryingTest();
-    success &= InvalidTopologyTest();
+    success &= BasicTest(registry);
+    success &= HoleTest(registry);
+    success &= ComputeNormalsTest(registry);
+    success &= FaceVaryingTest(registry);
+    success &= InvalidTopologyTest(registry);
 
-    registry->GarbageCollect();
-    registry.reset();
-    
     TF_VERIFY(mark.IsClean());
 
     if (success && mark.IsClean()) {

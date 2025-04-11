@@ -1,25 +1,8 @@
 //
 // Copyright 2016 Pixar
 //
-// Licensed under the Apache License, Version 2.0 (the "Apache License")
-// with the following modification; you may not use this file except in
-// compliance with the Apache License and the following modification to it:
-// Section 6. Trademarks. is deleted and replaced with:
-//
-// 6. Trademarks. This License does not grant permission to use the trade
-//    names, trademarks, service marks, or product names of the Licensor
-//    and its affiliates, except as required to comply with Section 4(c) of
-//    the License and to reproduce the content of the NOTICE file.
-//
-// You may obtain a copy of the Apache License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the Apache License with the above modification is
-// distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied. See the Apache License for the specific
-// language governing permissions and limitations under the Apache License.
+// Licensed under the terms set forth in the LICENSE.txt file available at
+// https://openusd.org/license.
 //
 #include "pxr/imaging/hdSt/codeGen.h"
 #include "pxr/imaging/hdSt/binding.h"
@@ -52,7 +35,7 @@
 #include "pxr/base/tf/hash.h"
 
 #include <sstream>
-#include <unordered_map>
+#include <map>
 
 #if defined(__APPLE__)
 #include <opensubdiv/osd/mtlPatchShaderSource.h>
@@ -145,6 +128,10 @@ TF_DEFINE_PRIVATE_TOKENS(
     (line_strip)
     (triangle_strip)
     (early_fragment_tests)
+    (OsdPerPatchVertexBezier)
+    (interstageDrawingCoord)
+    ((withoutScaleAndBias, "_withoutScaleAndBias"))
+    ((applyScaleAndBias, "_applyScaleAndBias"))
 );
 
 TF_DEFINE_ENV_SETTING(HDST_ENABLE_HGI_RESOURCE_GENERATION, false,
@@ -270,6 +257,10 @@ static void _EmitAccessor(std::stringstream &str,
                           TfToken const &type,
                           HdStBinding const &binding,
                           const char *index=NULL);
+
+static void _EmitScalarAccessor(std::stringstream &str,
+                                TfToken const &name,
+                                TfToken const &type);
 /*
   1. If the member is a scalar consuming N basic machine units,
   the base alignment is N.
@@ -578,6 +569,7 @@ public:
     ~_ResourceGenerator() = default;
 
     void _GenerateHgiResources(
+        Hgi const * hgi,
         HgiShaderFunctionDesc *funcDesc,
         TfToken const & shaderStage,
         HioGlslfxResourceLayout::ElementVector const & elements,
@@ -602,6 +594,12 @@ public:
         HioGlslfxResourceLayout::TextureElementVector const & textureElements,
         HdSt_ResourceBinder::MetaData const & metaData);
 
+    void  _AdvanceShaderStage()
+    {
+        // Reset interstage slot counter when moving to next stage.
+        _nextInterstageSlot = 0;
+    }
+
 private:
     using _SlotTable = std::unordered_map<TfToken, int32_t, TfHash>;
 
@@ -621,16 +619,17 @@ private:
         return _nextOutputLocation++;
     }
 
-    int32_t _GetSlot(TfToken const & name, uint32_t const count = 1)
+    int32_t _GetSlot(TfToken const & name, bool in, uint32_t const count = 1)
     {
         _SlotTable::iterator entry = _interstageSlotTable.find(name);
 
-        if (entry != _interstageSlotTable.end()) {
+        // For input interstage slots, check slot table.
+        if (in && entry != _interstageSlotTable.end()) {
             return entry->second;
         }
 
         int32_t const currentSlot = _nextInterstageSlot;
-        _interstageSlotTable.insert({name, currentSlot});
+        _interstageSlotTable.insert_or_assign(name, currentSlot);
         _nextInterstageSlot += count;
 
         return currentSlot;
@@ -709,8 +708,27 @@ _IsVertexAttribInputStage(TfToken const & shaderStage)
            (shaderStage == HdShaderTokens->postTessVertexShader);
 }
 
+// Most data types we use in Storm take up one location slot. There are some 
+// exceptions, which we can add here as we find them.
+uint32_t
+_GetLocationCount(Hgi const * hgi, TfToken const & dataType)
+{
+    if (dataType == _tokens->OsdPerPatchVertexBezier) {
+        return 2;
+    }
+    
+    // In Vulkan, 64-bit three or four component vectors take up two slots.
+    if ((dataType == _tokens->dvec3 || dataType == _tokens->dvec4) && 
+        hgi->GetAPIName() == HgiTokens->Vulkan) {
+        return 2;
+    }
+    
+    return 1;
+}
+
 void
 _ResourceGenerator::_GenerateHgiResources(
+    Hgi const * hgi,
     HgiShaderFunctionDesc *funcDesc,
     TfToken const & shaderStage,
     HioGlslfxResourceLayout::ElementVector const & elements,
@@ -736,7 +754,8 @@ _ResourceGenerator::_GenerateHgiResources(
                     HgiShaderFunctionParamDesc param;
                     param.nameInShader = element.name;
                     param.type = element.dataType;
-                    param.interstageSlot = _GetSlot(element.name);
+                    param.interstageSlot = _GetSlot(element.name, /*in*/true,
+                        _GetLocationCount(hgi, element.dataType));
                     param.interpolation = _GetInterpolation(element.qualifiers);
                     param.sampling = _GetSamplingQualifier(element.qualifiers);
                     param.storage = _GetStorageQualifier(element.qualifiers);
@@ -754,7 +773,8 @@ _ResourceGenerator::_GenerateHgiResources(
                     HgiShaderFunctionParamDesc param;
                     param.nameInShader = element.name,
                     param.type = element.dataType,
-                    param.interstageSlot = _GetSlot(element.name);
+                    param.interstageSlot = _GetSlot(element.name, /*in*/false,
+                        _GetLocationCount(hgi, element.dataType));
                     param.interpolation = _GetInterpolation(element.qualifiers);
                     param.sampling = _GetSamplingQualifier(element.qualifiers);
                     param.storage = _GetStorageQualifier(element.qualifiers);
@@ -771,12 +791,20 @@ _ResourceGenerator::_GenerateHgiResources(
             TfToken const firstMemberBlockName =
                 _GetFlattenedName(element.aggregateName,
                                   element.members.front().name);
-            paramBlock.interstageSlot = _GetSlot(firstMemberBlockName);
+
+            uint32_t locationCount = 0;
+            for (const auto& member : element.members) {
+                locationCount += _GetLocationCount(hgi, member.dataType);
+            }
+            paramBlock.interstageSlot = _GetSlot(firstMemberBlockName,
+                /*in*/element.inOut == InOut::STAGE_IN, locationCount);
 
             for (auto const & member : element.members) {
                 HgiShaderFunctionParamBlockDesc::Member paramMember;
                 paramMember.name = member.name;
                 paramMember.type = _ConvertBoolType(member.dataType);
+                paramMember.interpolation = _GetInterpolation(member.qualifiers); 
+                paramMember.sampling = _GetSamplingQualifier(member.qualifiers); 
                 paramBlock.members.push_back(paramMember);
             }
             if (element.inOut == InOut::STAGE_IN) {
@@ -1030,8 +1058,20 @@ _ResourceGenerator::_GenerateGLSLResources(
                 }
                 str << element.aggregateName << " {\n";
                 for (auto const & member : element.members) {
-                    str << "    " << member.dataType << " "
-                                        << member.name;
+                    str << "    ";
+                    if (member.qualifiers == _tokens->flat) {
+                        str << "flat ";
+                    }
+                    else if (member.qualifiers == _tokens->noperspective) {
+                        str << "noperspective ";
+                    }
+                    else if (member.qualifiers == _tokens->centroid) {
+                        str << "centroid ";
+                    }
+                    else if (member.qualifiers == _tokens->sample) {
+                        str << "sample ";
+                    }
+                    str << member.dataType << " " << member.name;
                     if (member.arraySize.IsEmpty()) {
                         str << ";\n";
                     } else {
@@ -1193,6 +1233,26 @@ _ResourceGenerator::_GenerateGLSLResources(
     }
 }
 
+static
+std::string
+_GetGLSLSamplerTypePrefix(HioFormat hioFormat)
+{
+    GLenum const hioType = HioGetHioType(hioFormat);
+    switch (hioType) {
+        case HioTypeUnsignedByte:
+        case HioTypeUnsignedByteSRGB:
+        case HioTypeUnsignedShort:
+        case HioTypeUnsignedInt:
+            return "u";
+        case HioTypeSignedByte:
+        case HioTypeSignedShort:
+        case HioTypeInt:
+            return "i";
+        default:
+            return "";
+    }
+}
+
 void
 _ResourceGenerator::_GenerateGLSLTextureResources(
     std::stringstream &str,
@@ -1209,13 +1269,18 @@ _ResourceGenerator::_GenerateGLSLTextureResources(
 
         bool const isArrayOfTexture = (texture.arraySize > 0);
 
+        const std::string typePrefix =
+            _GetGLSLSamplerTypePrefix(texture.format);
+
         std::string const samplerType =
+            typePrefix +
             (isShadowTexture
                 ? "sampler" + std::to_string(texture.dim) + "DShadow"
                 : "sampler" + std::to_string(texture.dim) + "D") +
             (isArrayTexture ? "Array" : "");
 
         std::string const resultType =
+            typePrefix +
             (isShadowTexture ? "float" : "vec4");
 
         std::string const resourceName =
@@ -1527,67 +1592,174 @@ HdSt_CodeGen::_GetShaderResourceLayouts(
 }
 
 void
-HdSt_CodeGen::_PlumbInterstageElements(
-    TfToken const &name,
-    TfToken const &dataType)
+HdSt_CodeGen::_PlumbInterstageElements()
 {
-    // Add resource elements to plumb interstage elements, e.g.
-    // drawingCoord and interpolated primvar through active stages.
+    // Graphics devices impose limits on the number of input/output locations
+    // available. We can quickly exceeed such limits on low spec devices if we 
+    // naively use one location per drawing coord. This is because arrays take 
+    // one location per item, regardless of the item size. This means that:
+    //   layout(location = 0) in int someCoord[gl_MaxPatchVertices]
+    // consumes as many locations (gl_MaxPatchVertices) as:
+    //   layout(location = 0) in ivec4 someCoord[gl_MaxPatchVertices]
+    // while holding 4x fewer values. Instead if we do:
+    //   layout(location = 0) in ivec4 someCoord[
+    //       divRoundUp(gl_MaxPatchVertices, 4)]
+    // and pack the coord values into the vector elements, we can use 4x fewer 
+    // locations. In practice, since we have many coord in/out fields, it's 
+    // simpler to pack across fields instead of within a field, but the idea is 
+    // the same. This means that:
+    //   flat layout(location = 0) in int someCoord1[gl_MaxPatchVertices];
+    //   flat layout(location = 1) in int someCoord2[gl_MaxPatchVertices];
+    //     < 7 more fields omitted >
+    //   flat layout(location = 9) in int someCoord10[gl_MaxPatchVertices];
+    // becomes:
+    //   flat layout(location = 0) in ivec4 someCoord1To4[gl_MaxPatchVertices];
+    //   flat layout(location = 1) in ivec4 someCoord5to8[gl_MaxPatchVertices];
+    //   flat layout(location = 2) in ivec4 someCoord8to10[gl_MaxPatchVertices];
+    // where someCoord1To4[i].x is someCoord1[i], someCoord1To4[i].y is
+    // someCoord2[i], someCoord1To4[i].z is someCoord3[i], someCoord1To4[i].w 
+    // is someCoord4[i].
+    //
+    // Ref: https://docs.vulkan.org/spec/latest/chapters/interfaces.html#interfaces-iointerfaces-locations
 
-    std::string const &baseName = name.GetString();
-    TfToken const  vs_outName( "vs_" + baseName);
-    TfToken const tcs_outName("tcs_" + baseName);
-    TfToken const tes_outName("tes_" + baseName);
-    TfToken const  gs_outName( "gs_" + baseName);
+    // This code automates such packing. It identifies fields with the same
+    // scalar type, and groups them into 4 element vectors. It also generates
+    // mapping data, so the original field can be mapped to its vector
+    // component.
 
-    // Empty token for variables with no array size
-    TfToken const noArraySize;
+    struct _ProcessedElement {
+        TfToken name;
+        TfToken dataType;
+    };
+    using _ProcessedElementVector = std::vector<_ProcessedElement>;
 
-    // Interstage variables of type "int" require "flat" interpolation
-    TfToken const &qualifier =
-        (dataType == _tokens->_int) ? _tokens->flat : _tokens->_default;
+    struct _ElementGroup {
+        TfToken commonDataType;
+        ElementVector elements;
+    };
 
-    // Vertex attrib input for VS, PTCS, PTVS
-    _resAttrib.emplace_back(InOut::STAGE_OUT, Kind::VALUE, dataType,
-        vs_outName, noArraySize, qualifier);
+    _ProcessedElementVector processedElements;
+    std::vector<_ElementGroup> packedElementGroups;
+    std::map<TfToken, _ElementGroup> elementGroupsToFill;
+    for (auto const& element : _resInterstage) {
+        TfToken const& dataType = element.dataType;
+        if (dataType != _tokens->_int && dataType != _tokens->_float) {
+            processedElements.push_back({element.name, dataType});
+            continue;
+        }
 
-    if (_hasTCS) {
-        _resTCS.emplace_back(InOut::STAGE_IN, Kind::VALUE, dataType,
-                vs_outName, _tokens->gl_MaxPatchVertices, qualifier);
-        _resTCS.emplace_back(InOut::STAGE_OUT, Kind::VALUE, dataType,
-                tcs_outName, _tokens->HD_NUM_PATCH_EVAL_VERTS, qualifier);
+        // Add to an existing group, or create a new one.
+        _ElementGroup* group;
+        if (const auto iter = elementGroupsToFill.find(dataType);
+            iter != elementGroupsToFill.end()) {
+            group = &iter->second;
+        } else {
+            group = &elementGroupsToFill.try_emplace(
+                dataType, _ElementGroup{dataType}).first->second;
+        }
+
+        // When a group is full, move it to the fully packed groups list.
+        TF_VERIFY(group->elements.size() < 4);
+        group->elements.push_back(element);
+        if (group->elements.size() == 4) {
+            packedElementGroups.push_back(std::move(*group));
+            elementGroupsToFill.erase(dataType);
+        }
     }
 
-    if (_hasTES) {
-        _resTES.emplace_back(InOut::STAGE_IN, Kind::VALUE, dataType,
-                tcs_outName, _tokens->gl_MaxPatchVertices, qualifier);
-        _resTES.emplace_back(InOut::STAGE_OUT, Kind::VALUE, dataType,
-                tes_outName, noArraySize, qualifier);
+    // Some groups won't be full if the number of elements is not cleanly 
+    // divisible by 4.
+    for (auto& [_, group] : elementGroupsToFill) {
+        packedElementGroups.push_back(std::move(group));
     }
 
-    // Geometry shader inputs come from previous active stage
-    if (_hasGS && _hasTES) {
-        _resGS.emplace_back(InOut::STAGE_IN, Kind::VALUE, dataType,
-                tes_outName, _tokens->HD_NUM_PRIMITIVE_VERTS, qualifier);
-        _resGS.emplace_back(InOut::STAGE_OUT, Kind::VALUE, dataType,
-                gs_outName, noArraySize, qualifier);
-    } else if (_hasGS) {
-        _resGS.emplace_back(InOut::STAGE_IN, Kind::VALUE, dataType,
-                vs_outName, _tokens->HD_NUM_PRIMITIVE_VERTS, qualifier);
-        _resGS.emplace_back(InOut::STAGE_OUT, Kind::VALUE, dataType,
-                gs_outName, noArraySize, qualifier);
+    // Generate the mapping data.
+    _resInterstagePackedMappings.clear();
+    size_t packedElementGroup = 0;
+    for (const auto& [commonDataType, elements] : packedElementGroups) {
+        std::stringstream groupNameBuffer;
+        TfToken const groupName = TfToken(
+            _tokens->interstageDrawingCoord.GetString() +
+            std::to_string(packedElementGroup++));
+
+        for (size_t i = 0; i < elements.size(); i++) {
+            _PackedResourceMapping mapping;
+            mapping.groupName = groupName;
+            mapping.component = '[' + std::to_string(i) + ']';
+            _resInterstagePackedMappings.try_emplace(
+                elements[i].name.GetString(), std::move(mapping));
+        }
+
+        if (commonDataType == _tokens->_int) {
+            processedElements.push_back({groupName, _tokens->ivec4});
+        } else if (commonDataType == _tokens->_float) {
+            processedElements.push_back({groupName, _tokens->vec4});
+        } else {
+            TF_CODING_ERROR("Invalid element group data type");
+        }
     }
 
-    // Fragment shader inputs come from previous active stage
-    if (_hasGS) {
-        _resFS.emplace_back(InOut::STAGE_IN, Kind::VALUE, dataType,
-                gs_outName, noArraySize, qualifier);
-    } else if (_hasTES) {
-        _resFS.emplace_back(InOut::STAGE_IN, Kind::VALUE, dataType,
-                tes_outName, noArraySize, qualifier);
-    } else {
-        _resFS.emplace_back(InOut::STAGE_IN, Kind::VALUE, dataType,
-                vs_outName, noArraySize, qualifier);
+    for (auto const& [name, dataType] : processedElements) {
+        bool const isInteger = (dataType == _tokens->ivec4);
+        
+        // Add resource elements to plumb interstage elements, e.g.
+        // drawingCoord and interpolated primvar through active stages.
+
+        std::string const &baseName = name.GetString();
+        TfToken const  vs_outName( "vs_" + baseName);
+        TfToken const tcs_outName("tcs_" + baseName);
+        TfToken const tes_outName("tes_" + baseName);
+        TfToken const  gs_outName( "gs_" + baseName);
+
+        // Empty token for variables with no array size
+        TfToken const noArraySize;
+
+        // Interstage variables of base type "int" require "flat" interpolation
+        TfToken const &qualifier = isInteger ?
+            _tokens->flat : _tokens->_default;
+
+        // Vertex attrib input for VS, PTCS, PTVS
+        _resAttrib.emplace_back(InOut::STAGE_OUT, Kind::VALUE, dataType,
+            vs_outName, noArraySize, qualifier);
+
+        if (_hasTCS) {
+            _resTCS.emplace_back(InOut::STAGE_IN, Kind::VALUE, dataType,
+                    vs_outName, _tokens->gl_MaxPatchVertices, qualifier);
+            _resTCS.emplace_back(InOut::STAGE_OUT, Kind::VALUE, dataType,
+                    tcs_outName, _tokens->HD_NUM_PATCH_EVAL_VERTS, qualifier);
+        }
+
+        if (_hasTES) {
+            _resTES.emplace_back(InOut::STAGE_IN, Kind::VALUE, dataType,
+                    tcs_outName, _tokens->gl_MaxPatchVertices, qualifier);
+            _resTES.emplace_back(InOut::STAGE_OUT, Kind::VALUE, dataType,
+                    tes_outName, noArraySize, qualifier);
+        }
+
+        // Geometry shader inputs come from previous active stage
+        if (_hasGS && _hasTES) {
+            _resGS.emplace_back(InOut::STAGE_IN, Kind::VALUE, dataType,
+                    tes_outName, _tokens->HD_NUM_PRIMITIVE_VERTS, qualifier);
+            _resGS.emplace_back(InOut::STAGE_OUT, Kind::VALUE, dataType,
+                    gs_outName, noArraySize, qualifier);
+        } else if (_hasGS) {
+            _resGS.emplace_back(InOut::STAGE_IN, Kind::VALUE, dataType,
+                    vs_outName, _tokens->HD_NUM_PRIMITIVE_VERTS, qualifier);
+            _resGS.emplace_back(InOut::STAGE_OUT, Kind::VALUE, dataType,
+                    gs_outName, noArraySize, qualifier);
+        }
+
+        // Fragment shader inputs come from previous active stage
+        if (_hasGS) {
+            _resFS.emplace_back(InOut::STAGE_IN, Kind::VALUE, dataType,
+                    gs_outName, noArraySize, qualifier);
+        } else if (_hasTES) {
+            _resFS.emplace_back(InOut::STAGE_IN, Kind::VALUE, dataType,
+                    tes_outName, noArraySize, qualifier);
+        } else {
+            _resFS.emplace_back(InOut::STAGE_IN, Kind::VALUE, dataType,
+                    vs_outName, noArraySize, qualifier);
+        }
     }
 }
 
@@ -2425,6 +2597,7 @@ HdSt_CodeGen::_GenerateComputeParameters(HgiShaderFunctionDesc * const csDesc)
     // main
     _genCS << "void main() {\n";
     _genCS << "  int computeCoordinate = int(hd_GlobalInvocationID.x);\n";
+    _genCS << "  if (computeCoordinate >= indexEnd) {\n    return;\n  };\n";
     _genCS << "  compute(computeCoordinate);\n";
     _genCS << "}\n";
 
@@ -2436,11 +2609,6 @@ HdSt_CodeGen::_CompileWithGeneratedGLSLResources(
 {
     // Generator assigns attribute and binding locations
     _ResourceGenerator resourceGen;
-
-    // Create additional resource elements needed by interstage elements
-    for (auto const &element : _resInterstage) {
-        _PlumbInterstageElements(element.name, element.dataType);
-    }
 
     // create GLSL program.
     HdStGLSLProgramSharedPtr glslProgram =
@@ -2485,42 +2653,6 @@ HdSt_CodeGen::_CompileWithGeneratedGLSLResources(
             HgiShaderFunctionAddStageOutput(
                 &desc, "gl_ClipDistance", "float",
                 "clip_distance", /*arraySize*/"HD_NUM_clipPlanes");
-        }
-
-        if (!glslProgram->CompileShader(desc)) {
-            return nullptr;
-        }
-        shaderCompiled = true;
-    }
-    if (_hasFS) {
-        HgiShaderFunctionDesc desc;
-        std::stringstream resDecl;
-        resourceGen._GenerateGLSLResources(&desc, resDecl,
-            HdShaderTokens->fragmentShader, _resCommon, _GetMetaData());
-        resourceGen._GenerateGLSLResources(&desc, resDecl,
-            HdShaderTokens->fragmentShader, _resFS, _GetMetaData());
-
-        // material in FS
-        resourceGen._GenerateGLSLResources(&desc, resDecl,
-            HdShaderTokens->fragmentShader, _resMaterial, _GetMetaData());
-        resourceGen._GenerateGLSLTextureResources(resDecl,
-            HdShaderTokens->fragmentShader, _resTextures, _GetMetaData());
-
-        std::string const source =
-            _genDefines.str() + _genDecl.str() + resDecl.str() + _osd.str() +
-            _genAccessors.str() + _genFS.str();
-
-        desc.shaderStage = HgiShaderStageFragment;
-        desc.shaderCode = source.c_str();
-        desc.generatedShaderCodeOut = &_fsSource;
-
-        const bool builtinBarycentricsEnabled =
-            registry->GetHgi()->GetCapabilities()->IsSet(
-                HgiDeviceCapabilitiesBitsBuiltinBarycentrics);
-        if (builtinBarycentricsEnabled) {
-            HgiShaderFunctionAddStageInput(
-                &desc, "hd_BaryCoordNoPersp", "vec3",
-                HgiShaderKeywordTokens->hdBaryCoordNoPersp);
         }
 
         if (!glslProgram->CompileShader(desc)) {
@@ -2618,6 +2750,55 @@ HdSt_CodeGen::_CompileWithGeneratedGLSLResources(
         }
         shaderCompiled = true;
     }
+    if (_hasFS) {
+        HgiShaderFunctionDesc desc;
+        std::stringstream resDecl;
+        resourceGen._GenerateGLSLResources(&desc, resDecl,
+            HdShaderTokens->fragmentShader, _resCommon, _GetMetaData());
+        resourceGen._GenerateGLSLResources(&desc, resDecl,
+            HdShaderTokens->fragmentShader, _resFS, _GetMetaData());
+
+        // material in FS
+        resourceGen._GenerateGLSLResources(&desc, resDecl,
+            HdShaderTokens->fragmentShader, _resMaterial, _GetMetaData());
+        resourceGen._GenerateGLSLTextureResources(resDecl,
+            HdShaderTokens->fragmentShader, _resTextures, _GetMetaData());
+
+        std::string const source =
+            _genDefines.str() + _genDecl.str() + resDecl.str() + _osd.str() +
+            _genAccessors.str() + _genFS.str();
+
+        desc.shaderStage = HgiShaderStageFragment;
+        desc.shaderCode = source.c_str();
+        desc.generatedShaderCodeOut = &_fsSource;
+
+        const bool builtinBarycentricsEnabled =
+            registry->GetHgi()->GetCapabilities()->IsSet(
+                HgiDeviceCapabilitiesBitsBuiltinBarycentrics);
+        if (builtinBarycentricsEnabled) {
+            HgiShaderFunctionAddStageInput(
+                &desc, "hd_BaryCoordNoPersp", "vec3",
+                HgiShaderKeywordTokens->hdBaryCoordNoPersp);
+        }
+
+        if (_geometricShader->GetPrimitiveType() ==
+            HdSt_GeometricShader::PrimitiveType::PRIM_POINTS) {
+            HgiShaderFunctionAddStageInput(&desc, "hd_SampleMaskIn", "uint",
+                HgiShaderKeywordTokens->hdSampleMaskIn);
+            if (!registry->GetHgi()->GetCapabilities()->IsSet(
+                    HgiDeviceCapabilitiesBitsRoundPoints)) {
+                HgiShaderFunctionAddStageInput(&desc, "gl_PointCoord", "vec2",
+                    HgiShaderKeywordTokens->hdPointCoord);
+                HgiShaderFunctionAddStageOutput(&desc, "hd_SampleMask",
+                    "uint", HgiShaderKeywordTokens->hdSampleMask);
+            }
+        }
+
+        if (!glslProgram->CompileShader(desc)) {
+            return nullptr;
+        }
+        shaderCompiled = true;
+    }
 
     if (!shaderCompiled) {
         return nullptr;
@@ -2633,12 +2814,6 @@ HdSt_CodeGen::_CompileWithGeneratedHgiResources(
     // Generator assigns attribute and binding locations
     _ResourceGenerator resourceGen;
 
-    // Create additional resource elements needed by interstage elements.
-    // For compute-only shaders, we don't have a HdSt_GeometricShader.
-    for (auto const &element : _resInterstage) {
-        _PlumbInterstageElements(element.name, element.dataType);
-    }
-
     // create GLSL program.
     HdStGLSLProgramSharedPtr glslProgram =
         std::make_shared<HdStGLSLProgram>(HdTokens->drawingShader, registry);
@@ -2649,11 +2824,12 @@ HdSt_CodeGen::_CompileWithGeneratedHgiResources(
         HgiShaderFunctionDesc vsDesc;
         vsDesc.shaderStage = HgiShaderStageVertex;
 
-        resourceGen._GenerateHgiResources(&vsDesc,
+        resourceGen._AdvanceShaderStage();
+        resourceGen._GenerateHgiResources(registry->GetHgi(), &vsDesc,
             HdShaderTokens->vertexShader, _resAttrib, _GetMetaData());
-        resourceGen._GenerateHgiResources(&vsDesc,
+        resourceGen._GenerateHgiResources(registry->GetHgi(), &vsDesc,
             HdShaderTokens->vertexShader, _resCommon, _GetMetaData());
-        resourceGen._GenerateHgiResources(&vsDesc,
+        resourceGen._GenerateHgiResources(registry->GetHgi(), &vsDesc,
             HdShaderTokens->vertexShader, _resVS, _GetMetaData());
 
         std::string const declarations = _genDefines.str() + _genDecl.str();
@@ -2705,62 +2881,14 @@ HdSt_CodeGen::_CompileWithGeneratedHgiResources(
         shaderCompiled = true;
     }
 
-    if (_hasFS) {
-        HgiShaderFunctionDesc fsDesc;
-        fsDesc.shaderStage = HgiShaderStageFragment;
-
-        resourceGen._GenerateHgiResources(&fsDesc,
-            HdShaderTokens->fragmentShader, _resCommon, _GetMetaData());
-        resourceGen._GenerateHgiResources(&fsDesc,
-            HdShaderTokens->fragmentShader, _resFS, _GetMetaData());
-
-        // material in FS
-        resourceGen._GenerateHgiResources(&fsDesc,
-            HdShaderTokens->fragmentShader, _resMaterial, _GetMetaData());
-        resourceGen._GenerateHgiTextureResources(&fsDesc,
-            HdShaderTokens->fragmentShader, _resTextures, _GetMetaData());
-
-        std::string const declarations =
-            _genDefines.str() + _genDecl.str() + _osd.str();
-        std::string const source = _genAccessors.str() + _genFS.str();
-
-        fsDesc.shaderCodeDeclarations = declarations.c_str();
-        fsDesc.shaderCode = source.c_str();
-        fsDesc.generatedShaderCodeOut = &_fsSource;
-
-        // builtins
-        HgiShaderFunctionAddStageInput(
-            &fsDesc, "gl_PrimitiveID", "uint",
-            HgiShaderKeywordTokens->hdPrimitiveID);
-        HgiShaderFunctionAddStageInput(
-            &fsDesc, "gl_FrontFacing", "bool",
-            HgiShaderKeywordTokens->hdFrontFacing);
-        HgiShaderFunctionAddStageInput(
-            &fsDesc, "gl_FragCoord", "vec4",
-            HgiShaderKeywordTokens->hdPosition);
-        const bool builtinBarycentricsEnabled =
-            registry->GetHgi()->GetCapabilities()->IsSet(
-                HgiDeviceCapabilitiesBitsBuiltinBarycentrics);
-        if (builtinBarycentricsEnabled) {
-            HgiShaderFunctionAddStageInput(
-                &fsDesc, "hd_BaryCoordNoPersp", "vec3",
-                HgiShaderKeywordTokens->hdBaryCoordNoPersp);
-        }
-
-        if (!glslProgram->CompileShader(fsDesc)) {
-            return nullptr;
-        }
-
-        shaderCompiled = true;
-    }
-
     if (_hasTCS) {
         HgiShaderFunctionDesc tcsDesc;
         tcsDesc.shaderStage = HgiShaderStageTessellationControl;
 
-        resourceGen._GenerateHgiResources(&tcsDesc,
+        resourceGen._AdvanceShaderStage();
+        resourceGen._GenerateHgiResources(registry->GetHgi(), &tcsDesc,
             HdShaderTokens->tessControlShader, _resCommon, _GetMetaData());
-        resourceGen._GenerateHgiResources(&tcsDesc,
+        resourceGen._GenerateHgiResources(registry->GetHgi(), &tcsDesc,
             HdShaderTokens->tessControlShader, _resTCS, _GetMetaData());
 
         std::string const declarations =
@@ -2782,9 +2910,10 @@ HdSt_CodeGen::_CompileWithGeneratedHgiResources(
         HgiShaderFunctionDesc tesDesc;
         tesDesc.shaderStage = HgiShaderStageTessellationEval;
 
-        resourceGen._GenerateHgiResources(&tesDesc,
+        resourceGen._AdvanceShaderStage();
+        resourceGen._GenerateHgiResources(registry->GetHgi(), &tesDesc,
             HdShaderTokens->tessEvalShader, _resCommon, _GetMetaData());
-        resourceGen._GenerateHgiResources(&tesDesc,
+        resourceGen._GenerateHgiResources(registry->GetHgi(), &tesDesc,
             HdShaderTokens->tessEvalShader, _resTES, _GetMetaData());
 
         std::string const declarations =
@@ -2838,15 +2967,16 @@ HdSt_CodeGen::_CompileWithGeneratedHgiResources(
             HgiShaderFunctionTessellationDesc::PatchType::Isolines;
         }
 
-        resourceGen._GenerateHgiResources(&ptcsDesc,
+        resourceGen._AdvanceShaderStage();
+        resourceGen._GenerateHgiResources(registry->GetHgi(), &ptcsDesc,
             HdShaderTokens->postTessControlShader, _resAttrib, _GetMetaData());
-        resourceGen._GenerateHgiResources(&ptcsDesc,
+        resourceGen._GenerateHgiResources(registry->GetHgi(), &ptcsDesc,
             HdShaderTokens->postTessControlShader, _resCommon, _GetMetaData());
-        resourceGen._GenerateHgiResources(&ptcsDesc,
+        resourceGen._GenerateHgiResources(registry->GetHgi(), &ptcsDesc,
             HdShaderTokens->postTessControlShader, _resPTCS, _GetMetaData());
 
         // material in PTCS
-        resourceGen._GenerateHgiResources(&ptcsDesc,
+        resourceGen._GenerateHgiResources(registry->GetHgi(), &ptcsDesc,
             HdShaderTokens->postTessControlShader, _resMaterial, _GetMetaData());
         resourceGen._GenerateHgiTextureResources(&ptcsDesc,
             HdShaderTokens->postTessControlShader, _resTextures, _GetMetaData());
@@ -2924,15 +3054,16 @@ HdSt_CodeGen::_CompileWithGeneratedHgiResources(
                 HgiShaderFunctionTessellationDesc::PatchType::Isolines;
         }
 
-        resourceGen._GenerateHgiResources(&ptvsDesc,
+        resourceGen._AdvanceShaderStage();
+        resourceGen._GenerateHgiResources(registry->GetHgi(), &ptvsDesc,
             HdShaderTokens->postTessVertexShader, _resAttrib, _GetMetaData());
-        resourceGen._GenerateHgiResources(&ptvsDesc,
+        resourceGen._GenerateHgiResources(registry->GetHgi(), &ptvsDesc,
             HdShaderTokens->postTessVertexShader, _resCommon, _GetMetaData());
-        resourceGen._GenerateHgiResources(&ptvsDesc,
+        resourceGen._GenerateHgiResources(registry->GetHgi(), &ptvsDesc,
             HdShaderTokens->postTessVertexShader, _resPTVS, _GetMetaData());
 
         // material in PTVS
-        resourceGen._GenerateHgiResources(&ptvsDesc,
+        resourceGen._GenerateHgiResources(registry->GetHgi(), &ptvsDesc,
             HdShaderTokens->postTessVertexShader, _resMaterial, _GetMetaData());
         resourceGen._GenerateHgiTextureResources(&ptvsDesc,
             HdShaderTokens->postTessVertexShader, _resTextures, _GetMetaData());
@@ -2998,13 +3129,14 @@ HdSt_CodeGen::_CompileWithGeneratedHgiResources(
         HgiShaderFunctionDesc gsDesc;
         gsDesc.shaderStage = HgiShaderStageGeometry;
 
-        resourceGen._GenerateHgiResources(&gsDesc,
+        resourceGen._AdvanceShaderStage();
+        resourceGen._GenerateHgiResources(registry->GetHgi(), &gsDesc,
             HdShaderTokens->geometryShader, _resCommon, _GetMetaData());
-        resourceGen._GenerateHgiResources(&gsDesc,
+        resourceGen._GenerateHgiResources(registry->GetHgi(), &gsDesc,
             HdShaderTokens->geometryShader, _resGS, _GetMetaData());
 
         // material in GS
-        resourceGen._GenerateHgiResources(&gsDesc,
+        resourceGen._GenerateHgiResources(registry->GetHgi(), &gsDesc,
             HdShaderTokens->geometryShader, _resMaterial, _GetMetaData());
         resourceGen._GenerateHgiTextureResources(&gsDesc,
             HdShaderTokens->geometryShader, _resTextures, _GetMetaData());
@@ -3030,18 +3162,85 @@ HdSt_CodeGen::_CompileWithGeneratedHgiResources(
         shaderCompiled = true;
     }
 
+    if (_hasFS) {
+        HgiShaderFunctionDesc fsDesc;
+        fsDesc.shaderStage = HgiShaderStageFragment;
+
+        resourceGen._AdvanceShaderStage();
+        resourceGen._GenerateHgiResources(registry->GetHgi(), &fsDesc,
+            HdShaderTokens->fragmentShader, _resCommon, _GetMetaData());
+        resourceGen._GenerateHgiResources(registry->GetHgi(), &fsDesc,
+            HdShaderTokens->fragmentShader, _resFS, _GetMetaData());
+
+        // material in FS
+        resourceGen._GenerateHgiResources(registry->GetHgi(), &fsDesc,
+            HdShaderTokens->fragmentShader, _resMaterial, _GetMetaData());
+        resourceGen._GenerateHgiTextureResources(&fsDesc,
+            HdShaderTokens->fragmentShader, _resTextures, _GetMetaData());
+
+        std::string const declarations =
+            _genDefines.str() + _genDecl.str() + _osd.str();
+        std::string const source = _genAccessors.str() + _genFS.str();
+
+        fsDesc.shaderCodeDeclarations = declarations.c_str();
+        fsDesc.shaderCode = source.c_str();
+        fsDesc.generatedShaderCodeOut = &_fsSource;
+
+        // builtins
+        HgiShaderFunctionAddStageInput(
+            &fsDesc, "gl_PrimitiveID", "uint",
+            HgiShaderKeywordTokens->hdPrimitiveID);
+        HgiShaderFunctionAddStageInput(
+            &fsDesc, "gl_FrontFacing", "bool",
+            HgiShaderKeywordTokens->hdFrontFacing);
+        HgiShaderFunctionAddStageInput(
+            &fsDesc, "gl_FragCoord", "vec4",
+            HgiShaderKeywordTokens->hdFragCoord);
+        const bool builtinBarycentricsEnabled =
+            registry->GetHgi()->GetCapabilities()->IsSet(
+                HgiDeviceCapabilitiesBitsBuiltinBarycentrics);
+        if (builtinBarycentricsEnabled) {
+            HgiShaderFunctionAddStageInput(
+                &fsDesc, "hd_BaryCoordNoPersp", "vec3",
+                HgiShaderKeywordTokens->hdBaryCoordNoPersp);
+        }
+
+        if (_geometricShader->GetPrimitiveType() ==
+            HdSt_GeometricShader::PrimitiveType::PRIM_POINTS) {
+            HgiShaderFunctionAddStageInput(&fsDesc, "hd_SampleMaskIn", "uint",
+                HgiShaderKeywordTokens->hdSampleMaskIn);
+            if (!registry->GetHgi()->GetCapabilities()->IsSet(
+                    HgiDeviceCapabilitiesBitsRoundPoints)) {
+                HgiShaderFunctionAddStageInput(&fsDesc, "gl_PointCoord", "vec2",
+                    HgiShaderKeywordTokens->hdPointCoord);
+                HgiShaderFunctionAddStageOutput(&fsDesc, "hd_SampleMask",
+                    "uint", HgiShaderKeywordTokens->hdSampleMask);
+            }
+        }
+
+        if (!glslProgram->CompileShader(fsDesc)) {
+            return nullptr;
+        }
+
+        shaderCompiled = true;
+    }
+
     if (_hasCS) {
         HgiShaderFunctionDesc csDesc;
         csDesc.shaderStage = HgiShaderStageCompute;
+        csDesc.computeDescriptor.localSize = GfVec3i(64, 1, 1);
 
         _GenerateComputeParameters(&csDesc);
 
-        resourceGen._GenerateHgiResources(&csDesc,
+        resourceGen._AdvanceShaderStage();
+        resourceGen._GenerateHgiResources(registry->GetHgi(), &csDesc,
             HdShaderTokens->computeShader, _resAttrib, _GetMetaData());
-        resourceGen._GenerateHgiResources(&csDesc,
+        resourceGen._GenerateHgiResources(registry->GetHgi(), &csDesc,
             HdShaderTokens->computeShader, _resCommon, _GetMetaData());
-        resourceGen._GenerateHgiResources(&csDesc,
+        resourceGen._GenerateHgiResources(registry->GetHgi(), &csDesc,
             HdShaderTokens->computeShader, _resCS, _GetMetaData());
+
+        HgiShaderFunctionAddConstantParam(&csDesc, "indexEnd", _tokens->_uint);
 
         std::string const declarations = _genDefines.str() + _genDecl.str();
         std::string const source = _genAccessors.str() + _genCS.str();
@@ -3206,6 +3405,8 @@ static void _EmitStageAccessor(std::stringstream &str,
     // default to localIndex=0
     str << _GetUnpackedType(type, false) << " HdGet_" << name << "()"
         << " { return HdGet_" << name << "(0); }\n";
+
+    _EmitScalarAccessor(str, name, type);
 }
 
 static void _EmitStructAccessor(std::stringstream &str,
@@ -3261,6 +3462,7 @@ static void _EmitStructAccessor(std::stringstream &str,
         str << _GetUnpackedType(type, false) << " HdGet_" << accessorName << "()"
             << " { return HdGet_" << accessorName << "(0); }\n";
     }
+    _EmitScalarAccessor(str, accessorName, type);
 }
 
 static void _EmitBufferAccessor(std::stringstream &str,
@@ -3465,6 +3667,53 @@ static void _EmitAccessor(std::stringstream &str,
     _EmitScalarAccessor(str, name, type);
 }
 
+static void _EmitTextureScaleAndBiasDeclarations(
+    std::stringstream &accessors,
+    HdSt_ResourceBinder::MetaData::ShaderParameterAccessor const &acc)
+{
+    TfToken const &name = acc.name;
+
+    accessors 
+        << "#ifdef HD_HAS_" << name << "_" 
+        << HdStTokens->storm << "_" << HdStTokens->scale << "\n"
+        << "FORWARD_DECL(vec4 HdGet_" << name << "_" 
+        << HdStTokens->storm << "_" << HdStTokens->scale 
+        << "());\n"
+        << "#endif\n"
+        << "#ifdef HD_HAS_" << name << "_" << HdStTokens->storm 
+        << "_" << HdStTokens->bias  << "\n"
+        << "FORWARD_DECL(vec4 HdGet_" << name << "_" << HdStTokens->storm 
+        << "_" << HdStTokens->bias 
+        << "());\n"
+        << "#endif\n";
+}
+
+static void _EmitTextureApplyScaleAndBias(
+    std::stringstream &accessors,
+    HdSt_ResourceBinder::MetaData::ShaderParameterAccessor const &acc,
+    std::string const &swizzle)
+{
+    TfToken const &name = acc.name;
+    TfToken const &dataType = acc.dataType;
+
+    accessors
+        << _GetUnpackedType(dataType, false)
+        << " HdGet_" << name << _tokens->applyScaleAndBias << "("
+        << _GetUnpackedType(dataType, false) << " value) {\n"
+        << "#ifdef HD_HAS_" << name << "_" << HdStTokens->storm << "_"
+        << HdStTokens->scale << "\n"
+        << "  value *= HdGet_" << name << "_" << HdStTokens->storm
+        << "_" << HdStTokens->scale << "()" << swizzle << ";\n"
+        << "#endif\n"
+        << "#ifdef HD_HAS_" << name << "_" << HdStTokens->storm << "_"
+        << HdStTokens->bias << "\n"
+        << "  value += HdGet_" << name << "_" << HdStTokens->storm
+        << "_" << HdStTokens->bias << "()" << swizzle << ";\n"
+        << "#endif\n"
+        << "  return value;\n"
+        << "}\n";
+}
+
 static void _EmitTextureAccessors(
     std::stringstream &accessors,
     HdSt_ResourceBinder::MetaData::ShaderParameterAccessor const &acc,
@@ -3487,19 +3736,7 @@ static void _EmitTextureAccessors(
 
     // Forward declare texture scale and bias
     if (hasTextureScaleAndBias) {
-        accessors 
-            << "#ifdef HD_HAS_" << name << "_" 
-            << HdStTokens->storm << "_" << HdStTokens->scale << "\n"
-            << "FORWARD_DECL(vec4 HdGet_" << name << "_" 
-            << HdStTokens->storm << "_" << HdStTokens->scale 
-            << "());\n"
-            << "#endif\n"
-            << "#ifdef HD_HAS_" << name << "_" << HdStTokens->storm 
-            << "_" << HdStTokens->bias  << "\n"
-            << "FORWARD_DECL(vec4 HdGet_" << name << "_" << HdStTokens->storm 
-            << "_" << HdStTokens->bias 
-            << "());\n"
-            << "#endif\n";
+        _EmitTextureScaleAndBiasDeclarations(accessors, acc);
     }
 
     if (!isBindless) {
@@ -3604,15 +3841,24 @@ static void _EmitTextureAccessors(
         // bindless
     }
 
+    // If we have texture scale and bias, we want to define an accessor that
+    // does not include scale and bias.  We will define additional functions
+    // below to return the value with the scale and bias applied.
+    const std::string accessorSuffix =
+        hasTextureScaleAndBias ? _tokens->withoutScaleAndBias.GetText()
+                               : "";
+
     if (isArray) {
         accessors
         << _GetUnpackedType(dataType, false)
-        << " HdGet_" << name << "(int index, vec" << coordDim << " coord) {\n"
+        << " HdGet_" << name << accessorSuffix << "(int index, vec" << coordDim
+        << " coord) {\n"
         << "  int shaderCoord = GetDrawingCoord().shaderCoord; \n";
     } else {
         accessors
             << _GetUnpackedType(dataType, false)
-            << " HdGet_" << name << "(vec" << coordDim << " coord) {\n"
+            << " HdGet_" << name << accessorSuffix << "(vec" << coordDim
+            << " coord) {\n"
             << "  int shaderCoord = GetDrawingCoord().shaderCoord; \n";
     }
 
@@ -3629,68 +3875,30 @@ static void _EmitTextureAccessors(
             << "  vec" << coordDim << " sampleCoord = coord;\n";
     }
 
-    if (hasTextureScaleAndBias) {
-        if (!isBindless) {
-            accessors
-                << "  " << _GetUnpackedType(dataType, false)
-                << " result = "
-                << _GetPackedTypeAccessor(dataType, false)
-                << "((HgiGet_" << name;
-            if (isArray) {
-                accessors << "(index, sampleCoord)\n";
-            } else {
-                accessors << "(sampleCoord)\n";
-            }
-        } else {
-            accessors
-                << "  " << _GetUnpackedType(dataType, false)
-                << " result = "
-                << _GetPackedTypeAccessor(dataType, false)
-                << "((texture(HdGetSampler_" << name;
-            if (isArray) {
-                accessors << "(index), sampleCoord)\n";
-            } else {
-                accessors << "(), sampleCoord)\n";
-            }
-        }
+    if (!isBindless) {
         accessors
-            << "#ifdef HD_HAS_" << name << "_" << HdStTokens->storm << "_" 
-            << HdStTokens->scale << "\n"
-            << "    * HdGet_" << name << "_" << HdStTokens->storm << "_" 
-            << HdStTokens->scale << "()\n"
-            << "#endif\n" 
-            << "#ifdef HD_HAS_" << name << "_" << HdStTokens->storm << "_" 
-            << HdStTokens->bias << "\n"
-            << "    + HdGet_" << name << "_" << HdStTokens->storm << "_" 
-            << HdStTokens->bias  << "()\n"
-            << "#endif\n"
-            << ")" << swizzle << ");\n";
-    } else {
-        if (!isBindless) {
-            accessors
-                << "  " << _GetUnpackedType(dataType, false)
-                << " result = "
-                << _GetPackedTypeAccessor(dataType, false)
-                << "(HgiGet_" << name;
-            if (isArray) {
-                accessors << "(index, sampleCoord)";
-            } else {
-                accessors << "(sampleCoord)";
-            }
-            accessors << swizzle << ");\n";
+            << "  " << _GetUnpackedType(dataType, false)
+            << " result = "
+            << _GetPackedTypeAccessor(dataType, false)
+            << "(HgiGet_" << name;
+        if (isArray) {
+            accessors << "(index, sampleCoord)";
         } else {
-            accessors
-                << "  " << _GetUnpackedType(dataType, false)
-                << " result = "
-                << _GetPackedTypeAccessor(dataType, false)
-                << "(texture(HdGetSampler_" << name;
-            if (isArray) {
-                accessors << "(index), sampleCoord)";
-            } else {
-                accessors << "(), sampleCoord)";
-            }
-            accessors << swizzle << ");\n";
+            accessors << "(sampleCoord)";
         }
+        accessors << swizzle << ");\n";
+    } else {
+        accessors
+            << "  " << _GetUnpackedType(dataType, false)
+            << " result = "
+            << _GetPackedTypeAccessor(dataType, false)
+            << "(texture(HdGetSampler_" << name;
+        if (isArray) {
+            accessors << "(index), sampleCoord)";
+        } else {
+            accessors << "(), sampleCoord)";
+        }
+        accessors << swizzle << ");\n";
     }
 
     if (acc.processTextureFallbackValue) {
@@ -3705,45 +3913,15 @@ static void _EmitTextureAccessors(
         //
         accessors
             << "  if (bool(shaderData[shaderCoord]." << name
-            << HdSt_ResourceBindingSuffixTokens->valid
-            << ")) {\n";
-
-        if (hasTextureScaleAndBias) {
-            accessors
-                << "    return result;\n"
-                << "  } else {\n"
-                << "    return ("
-                << _GetPackedTypeAccessor(dataType, false)
-                << "(shaderData[shaderCoord]."
-                << name
-                << HdSt_ResourceBindingSuffixTokens->fallback
-                << fallbackSwizzle << ")\n"
-                << "#ifdef HD_HAS_" << name << "_" 
-                << HdStTokens->storm << "_" << HdStTokens->scale << "\n"
-                << "        * HdGet_" << name << "_" 
-                << HdStTokens->storm << "_" << HdStTokens->scale 
-                << "()" << swizzle << "\n"
-                << "#endif\n" 
-                << "#ifdef HD_HAS_" << name << "_" 
-                << HdStTokens->storm << "_" << HdStTokens->bias << "\n"
-                << "        + HdGet_" << name << "_" 
-                << HdStTokens->storm << "_" << HdStTokens->bias
-                << "()" << swizzle << "\n"
-                << "#endif\n"
-                << ");\n"
-                << "  }\n";
-        } else {
-            accessors
-                << "    return result;\n"
-                << "  } else {\n"
-                << "    return "
-                << _GetPackedTypeAccessor(dataType, false)
-                << "(shaderData[shaderCoord]."
-                << name
-                << HdSt_ResourceBindingSuffixTokens->fallback
-                << fallbackSwizzle << ");\n"
-                << "  }\n";
-        }
+            << HdSt_ResourceBindingSuffixTokens->valid << ")) {\n"
+            << "    return result;\n"
+            << "  } else {\n"
+            << "    return "
+            << _GetPackedTypeAccessor(dataType, false)
+            << "(shaderData[shaderCoord]."
+            << name << HdSt_ResourceBindingSuffixTokens->fallback
+            << fallbackSwizzle << ");\n"
+            << "  }\n";
     } else {
         accessors
             << "  return result;\n";
@@ -3751,7 +3929,35 @@ static void _EmitTextureAccessors(
     
     accessors
         << "}\n";
-    
+
+    if (hasTextureScaleAndBias) {
+        // HdGet_name_applyScaleAndBias
+        _EmitTextureApplyScaleAndBias(accessors, acc, swizzle);
+
+        // HdGet_name implemented using HdGet_name_withoutScaleAndBias and
+        // HdGet_name_applyScaleAndBias
+        if (isArray) {
+            accessors
+                << _GetUnpackedType(dataType, false)
+                << " HdGet_" << name << "(int index, vec" << coordDim
+                << " coord) {\n"
+                << "  " << _GetUnpackedType(dataType, false) << " value"
+                << " = HdGet_" << name << accessorSuffix << "(index, coord);\n";
+        } else {
+            accessors
+                << _GetUnpackedType(dataType, false)
+                << " HdGet_" << name << "(vec" << coordDim << " coord) {\n"
+                << "  " << _GetUnpackedType(dataType, false) << " value"
+                << " = HdGet_" << name << accessorSuffix << "(coord);\n";
+        }
+
+        accessors
+            << "  value = HdGet_" << name << _tokens->applyScaleAndBias
+            << "(value);\n"
+            << "  return value;\n"
+            << "}\n";
+    }
+
     TfTokenVector const &inPrimvars = acc.inPrimvars;
 
     // Forward declare getter for inPrimvars in case it's a transform2d
@@ -3779,33 +3985,42 @@ static void _EmitTextureAccessors(
         accessors
             << "  vec" << coordDim << "(0.0)";
     }
-    accessors << ";\n}\n"; 
+    accessors << ";\n}\n";
 
     // vec2 HdGetCoord_name()
     accessors
         << "vec" << coordDim << " HdGetCoord_" << name << "() {"
         << "  return HdGetCoord_" << name << "(0);\n }\n";
 
-    // vec4 HdGet_name(int localIndex)
-    if (isArray) {
-        accessors
-            << _GetUnpackedType(dataType, false)
-            << " HdGet_" << name
-            << "(int localIndex) { return HdGet_" << name << "(localIndex, "
-            << "HdGetCoord_" << name << "(localIndex));\n}\n";
-    } else {
-        accessors
-            << _GetUnpackedType(dataType, false)
-            << " HdGet_" << name
-            << "(int localIndex) { return HdGet_" << name << "("
-            << "HdGetCoord_" << name << "(localIndex));\n}\n";
+    // If accessorSuffix is not empty (i.e., hasTextureScaleAndBias is true),
+    // we need to ouput accessors with and without the accessorSuffix.
+    std::vector<std::string> accessorSuffixes = { accessorSuffix };
+    if (!accessorSuffix.empty()) {
+        accessorSuffixes.emplace_back();
     }
+    for (const std::string& suffix : accessorSuffixes) {
+        // vec4 HdGet_name[_suffix](int localIndex)
+        if (isArray) {
+            accessors
+                << _GetUnpackedType(dataType, false)
+                << " HdGet_" << name << suffix
+                << "(int localIndex) { return HdGet_" << name << suffix
+                << "(localIndex, " << "HdGetCoord_" << name
+                << "(localIndex));\n}\n";
+        } else {
+            accessors
+                << _GetUnpackedType(dataType, false)
+                << " HdGet_" << name << suffix
+                << "(int localIndex) { return HdGet_" << name << suffix << "("
+                << "HdGetCoord_" << name << "(localIndex));\n}\n";
+        }
 
-    // vec4 HdGet_name()
-    accessors
-        << _GetUnpackedType(dataType, false)
-        << " HdGet_" << name
-        << "() {\n  return HdGet_" << name << "(0);\n}\n";
+        // vec4 HdGet_name[_suffix]()
+        accessors
+            << _GetUnpackedType(dataType, false)
+            << " HdGet_" << name << suffix
+            << "() {\n  return HdGet_" << name << suffix << "(0);\n}\n";
+    }
 
     // float HdGetScalar_name()
     _EmitScalarAccessor(accessors, name, dataType);
@@ -3813,7 +4028,146 @@ static void _EmitTextureAccessors(
     // Emit pre-multiplication by alpha indicator
     if (acc.isPremultiplied) {
         accessors << "#define " << name << "_IS_PREMULTIPLIED 1\n";
-    }      
+    }
+}
+
+static void _EmitTextureUdimArrayAccessors(
+    std::stringstream &accessors,
+    HdSt_ResourceBinder::MetaData::ShaderParameterAccessor const &acc,
+    std::string const &swizzle,
+    std::string const &fallbackSwizzle,
+    bool const isBindless,
+    bool const bindlessTextureEnabled)
+{
+    // Always possible to have texture scale and bias.
+    _EmitTextureScaleAndBiasDeclarations(accessors, acc);
+
+    const TfToken& name = acc.name;
+
+    // a function returning sampler requires bindless_texture
+    if (isBindless && bindlessTextureEnabled) {
+        accessors
+            << "sampler2DArray\n"
+            << "HdGetSampler_" << name << "() {\n"
+            << "  int shaderCoord = GetDrawingCoord().shaderCoord; \n"
+            << "  return sampler2DArray(shaderData[shaderCoord]."
+            << name << ");\n"
+            << "}\n";
+    }
+
+    const TfToken& dataType = acc.dataType;
+
+    // HdGet_name_withoutScaleAndBias
+    accessors
+        << dataType
+        << " HdGet_" << name << _tokens->withoutScaleAndBias << "(vec2 coord)"
+        << " {\n"
+        << "  int shaderCoord = GetDrawingCoord().shaderCoord;\n"
+        << "  vec3 c = hd_sample_udim(coord);\n";
+
+    if (isBindless) {
+        accessors
+            << "  uvec2 handle = shaderData[shaderCoord]."
+            << name << HdSt_ResourceBindingSuffixTokens->layout << ";\n"
+            << "  c.z = "
+            << "texelFetch(sampler1D(handle), int(c.z), 0).x - 1;\n"
+            << "  vec4 ret = vec4(0, 0, 0, 0);\n"
+            << "  if (c.z >= -0.5) {\n"
+            << "    uvec2 handleTexels = shaderData[shaderCoord]."
+            << name << ";\n"
+            << "    ret = texture(sampler2DArray(handleTexels), c);\n"
+            << "  }\n";
+    } else {
+        accessors
+            << "  c.z = HgiTexelFetch_"
+            << name << HdSt_ResourceBindingSuffixTokens->layout
+            << "(int(c.z)).x - 1;\n"
+            << "  vec4 ret = vec4(0, 0, 0, 0);\n"
+            << "  if (c.z >= -0.5) { ret = HgiGet_"
+            << name << "(c); }\n";
+    }
+
+    if (acc.processTextureFallbackValue) {
+        accessors
+            << "  if (!bool(shaderData[shaderCoord]." << name
+            << HdSt_ResourceBindingSuffixTokens->valid << ")) {\n"
+            << "    return "
+            << _GetPackedTypeAccessor(dataType, false)
+            << "(shaderData[shaderCoord]." << name
+            << HdSt_ResourceBindingSuffixTokens->fallback
+            << fallbackSwizzle << ");\n"
+            << "  }\n";
+    }
+
+    accessors
+        << "  return ret" << swizzle << ";\n}\n";
+
+    // HdGet_name_applyScaleAndBias
+    _EmitTextureApplyScaleAndBias(accessors, acc, swizzle);
+
+    // HdGet_name implemented using HdGet_name_withoutScaleAndBias and
+    // HdGet_name_applyScaleAndBias
+    accessors
+        << dataType
+        << " HdGet_" << name << "(vec2 coord) {\n"
+        << "  " << dataType << " value = HdGet_" << name
+        << _tokens->withoutScaleAndBias << "(coord);\n"
+        << "  value = HdGet_" << name << _tokens->applyScaleAndBias
+        << "(value);\n"
+        << "  return value;\n"
+        << "}\n";
+
+    const TfTokenVector& inPrimvars = acc.inPrimvars;
+
+    // Create accessor for texture coordinates based on param name
+    // vec2 HdGetCoord_name()
+    accessors
+        << "vec2 HdGetCoord_" << name << "() {\n"
+        << "  return \n";
+    if (!inPrimvars.empty()) {
+        accessors 
+            << "#if defined(HD_HAS_" << inPrimvars[0] <<")\n"
+            << "  HdGet_" << inPrimvars[0] << "().xy;\n"
+            << "#else\n"
+            << "  vec2(0.0, 0.0)\n"
+            << "#endif\n";
+    } else {
+        accessors
+            << "  vec2(0.0, 0.0)\n";
+    }
+    accessors << "; }\n";
+
+    const std::vector<std::string> accessorSuffixes = {
+        _tokens->withoutScaleAndBias.GetText(),
+        ""
+    };
+    for (const std::string& suffix : accessorSuffixes) {
+        // vec4 HdGet_name[_suffix]() {
+        //   return HdGet_name[_suffix](HdGetCoord_name());
+        // }
+        accessors
+            << dataType
+            << " HdGet_" << name << suffix << "() { return HdGet_"
+            << name << suffix << "(" << "HdGetCoord_" << name << "()); }\n";
+
+        // vec4 HdGet_name[_suffix](int localIndex) {
+        //   return HdGet_name[_suffix](HdGetCoord_name());
+        // }
+        accessors
+            << dataType
+            << " HdGet_" << name << suffix << "(int localIndex) { return HdGet_"
+            << name << suffix << "(" << "HdGetCoord_" << name << "());\n}\n";
+    }
+
+    // float HdGetScalar_name()
+    _EmitScalarAccessor(
+        accessors, name, dataType);
+
+    // Emit pre-multiplication by alpha indicator
+    if (acc.isPremultiplied) {
+        accessors 
+            << "#define " << name << "_IS_PREMULTIPLIED 1\n";
+    }
 }
 
 // Accessing face varying primvar data from the GS or FS requires special
@@ -4027,58 +4381,82 @@ static void _EmitFVarAccessor(
         << " { return HdGet_" << name << "(0); }\n";
 }
 
-// Helper function to generate the implementation of "GetDrawingCoord()".
-static void
-_GetDrawingCoord(std::stringstream &ss,
-                 std::vector<std::string> const &drawingCoordParams,
-                 int const instanceIndexWidth,
-                 char const *inputPrefix,
-                 char const *inArraySize)
+HdSt_CodeGen::_PackedResourceMapping
+HdSt_CodeGen::_GetDrawingCoordMapping(std::string const& name)
+{
+    // Given a drawing coord un-prefixed name, return a mapping to
+    // a component in a vector of packed interstage drawing coords.
+    if (const auto iter = _resInterstagePackedMappings.find("dc_" + name);
+        iter != _resInterstagePackedMappings.end())
+    {
+        return iter->second;
+    }
+
+    return {TfToken(name), TfToken()};
+}
+
+void
+HdSt_CodeGen::_GetDrawingCoord(
+    std::stringstream &ss,
+    std::vector<std::string> const &drawingCoordParams,
+    int instanceIndexWidth,
+    char const *inputPrefix,
+    char const *inArraySize)
 {
     ss << "hd_drawingCoord GetDrawingCoord() { \n"
        << "  hd_drawingCoord dc; \n";
 
     for (std::string const & param : drawingCoordParams) {
+        const auto [groupName, component] = _GetDrawingCoordMapping(param);
+
         ss << "  dc." << param
-           << " = " << inputPrefix << param << inArraySize << ";\n";
+           << " = " << inputPrefix << groupName << inArraySize << component
+           << ";\n";
     }
     for(int i = 0; i < instanceIndexWidth; ++i) {
-        ss << "  dc.instanceIndex[" << std::to_string(i) << "]"
-           << " = " << inputPrefix
-           << "instanceIndexI" << std::to_string(i) << inArraySize << ";\n";
+        const auto [groupName, component] = _GetDrawingCoordMapping(
+            "instanceIndexI" + std::to_string(i));
+        ss << "  dc.instanceIndex[" << i << "]"
+           << " = " << inputPrefix << groupName << inArraySize << component
+           << ";\n";
     }
     for(int i = 0; i < instanceIndexWidth-1; ++i) {
-        ss << "  dc.instanceCoords[" << std::to_string(i) << "]"
-           << " = " << inputPrefix
-           << "instanceCoordsI" << std::to_string(i) << inArraySize << ";\n";
+        const auto [groupName, component] = _GetDrawingCoordMapping(
+            "instanceCoordsI" + std::to_string(i));
+        ss << "  dc.instanceCoords[" << i << "]"
+           << " = " << inputPrefix << groupName << inArraySize << component
+           << ";\n";
     }
 
     ss << "  return dc; \n"
        << "}\n";
 }
 
-// Helper function to generate drawingCoord interstage processing.
-static void
-_ProcessDrawingCoord(std::stringstream &ss,
-                     std::vector<std::string> const &drawingCoordParams,
-                     int const instanceIndexWidth,
-                     char const *outputPrefix,
-                     char const *outArraySize)
+void
+HdSt_CodeGen::_ProcessDrawingCoord(
+    std::stringstream &ss,
+    std::vector<std::string> const &drawingCoordParams,
+    int instanceIndexWidth,
+    char const *outputPrefix,
+    char const *outArraySize)
 {
     ss << "  hd_drawingCoord dc = GetDrawingCoord();\n";
     for (std::string const & param : drawingCoordParams) {
-        ss << "  " << outputPrefix << param << outArraySize
-           << " = " << "dc." << param << ";\n";
+        const auto [groupName, component] = _GetDrawingCoordMapping(param);
+        ss << "  " << outputPrefix << groupName << outArraySize << component
+            << " = " << "dc." << param << ";\n";
     }
     for(int i = 0; i < instanceIndexWidth; ++i) {
-        std::string const index = std::to_string(i);
-        ss << "  " << outputPrefix << "instanceIndexI" << index << outArraySize
-           << " = " << "dc.instanceIndex[" << index << "]" << ";\n";
+        const auto [groupName, component] = _GetDrawingCoordMapping(
+            "instanceIndexI" + std::to_string(i));
+        ss << "  " << outputPrefix << groupName << outArraySize << component
+           << " = " << "dc.instanceIndex[" << i << "]" << ";\n";
     }
     for(int i = 0; i < instanceIndexWidth-1; ++i) {
-        std::string const index = std::to_string(i);
-        ss << "  " << outputPrefix << "instanceCoordsI" << index << outArraySize
-           << " = " << "dc.instanceCoords[" << index << "]" << ";\n";
+        const auto [groupName, component] = _GetDrawingCoordMapping(
+            "instanceCoordsI" + std::to_string(i));
+        ss << "  " << outputPrefix << groupName << outArraySize << component
+           << " = " << "dc.instanceCoords[" << i << "]" << ";\n";
     }
 }
 
@@ -4199,6 +4577,34 @@ HdSt_CodeGen::_GenerateDrawingCoord(
         "varyingCoord"
     };
 
+    const int instanceIndexWidth = _metaData->instancerNumLevels + 1;
+
+    if (!_hasCS) {
+        for (std::string const & param : drawingCoordParams) {
+            TfToken const drawingCoordParamName("dc_" + param);
+            _AddInterstageElement(&_resInterstage,
+                                  HioGlslfxResourceLayout::InOut::NONE,
+                                  /*name=*/drawingCoordParamName,
+                                  /*dataType=*/_tokens->_int);
+        }
+        for (int i = 0; i < instanceIndexWidth; ++i) {
+            TfToken const name(TfStringPrintf("dc_instanceIndexI%d", i));
+            _AddInterstageElement(&_resInterstage,
+                                  HioGlslfxResourceLayout::InOut::NONE,
+                                  /*name=*/name,
+                                  /*dataType=*/_tokens->_int);
+        }
+        for (int i = 0; i < instanceIndexWidth; ++i) {
+            TfToken const name(TfStringPrintf("dc_instanceCoordsI%d", i));
+            _AddInterstageElement(&_resInterstage,
+                                  HioGlslfxResourceLayout::InOut::NONE,
+                                  /*name=*/name,
+                                  /*dataType=*/_tokens->_int);
+        }
+
+        _PlumbInterstageElements();
+    }
+
     // common
     //
     // note: instanceCoords should be [HD_INSTANCER_NUM_LEVELS], but since
@@ -4215,8 +4621,6 @@ HdSt_CodeGen::_GenerateDrawingCoord(
     // forward declaration
     _genDecl << "FORWARD_DECL(hd_drawingCoord GetDrawingCoord());\n"
                 "FORWARD_DECL(int HgiGetBaseVertex());\n";
-
-    int instanceIndexWidth = _metaData->instancerNumLevels + 1;
 
     // vertex shader
 
@@ -4247,7 +4651,10 @@ HdSt_CodeGen::_GenerateDrawingCoord(
         // patch instance offset exists on Apple Silicon. Use primitiveCoord
         // subtracted from the primitive ID for those cases
         if (requiresBasePrimitiveOffset) {
-            primitiveID << "int GetBasePrimitiveOffset() { return vs_dc_primitiveCoord; }\n";
+            const auto [groupName, component] =
+                _GetDrawingCoordMapping("primitiveCoord");
+            primitiveID << "int GetBasePrimitiveOffset() { return vs_" 
+                        << groupName << component << "; }\n";
             _genPTCS    << "int GetBasePrimitiveOffset() { return drawingCoord0[0].w; }\n";
             _genPTVS    << "int GetBasePrimitiveOffset() { return drawingCoord0[0].w; }\n";
         } else {
@@ -4512,30 +4919,6 @@ HdSt_CodeGen::_GenerateDrawingCoord(
                << "  hd_instanceIndex r; r.indices[0] = 0; return r; }\n";
     }
 
-    if (!_hasCS) {
-        for (std::string const & param : drawingCoordParams) {
-            TfToken const drawingCoordParamName("dc_" + param);
-            _AddInterstageElement(&_resInterstage,
-                                  HioGlslfxResourceLayout::InOut::NONE,
-                                  /*name=*/drawingCoordParamName,
-                                  /*dataType=*/_tokens->_int);
-        }
-        for (int i = 0; i < instanceIndexWidth; ++i) {
-            TfToken const name(TfStringPrintf("dc_instanceIndexI%d", i));
-            _AddInterstageElement(&_resInterstage,
-                                  HioGlslfxResourceLayout::InOut::NONE,
-                                  /*name=*/name,
-                                  /*dataType=*/_tokens->_int);
-        }
-        for (int i = 0; i < instanceIndexWidth; ++i) {
-            TfToken const name(TfStringPrintf("dc_instanceCoordsI%d", i));
-            _AddInterstageElement(&_resInterstage,
-                                  HioGlslfxResourceLayout::InOut::NONE,
-                                  /*name=*/name,
-                                  /*dataType=*/_tokens->_int);
-        }
-    }
-
     _genVS   << genAttr.str();
     _genPTCS << genAttr.str();
     _genPTVS << genAttr.str();
@@ -4638,52 +5021,52 @@ HdSt_CodeGen::_GenerateDrawingCoord(
 
     // VS/PTVS from attributes
     _ProcessDrawingCoord(_procVS, drawingCoordParams, instanceIndexWidth,
-                         "vs_dc_", "");
+                         "vs_", "");
     _ProcessDrawingCoord(_procPTVSOut, drawingCoordParams, instanceIndexWidth,
-                         "vs_dc_", "");
+                         "vs_", "");
 
     // TCS from VS
     if (_hasTCS) {
         _GetDrawingCoord(_genTCS, drawingCoordParams, instanceIndexWidth,
-                "vs_dc_", "[0]");
+                "vs_", "[0]");
         _ProcessDrawingCoord(_procTCS, drawingCoordParams, instanceIndexWidth,
-                "tcs_dc_", "[gl_InvocationID]");
+                "tcs_", "[gl_InvocationID]");
     }
 
     // TES from TCS
     if (_hasTES) {
         _GetDrawingCoord(_genTES, drawingCoordParams, instanceIndexWidth,
-                "tcs_dc_", "[0]");
+                "tcs_", "[0]");
         _ProcessDrawingCoord(_procTES, drawingCoordParams, instanceIndexWidth,
-                "tes_dc_", "");
+                "tes_", "");
     }
 
     // GS
     if (_hasGS && _hasTES) {
         // from TES
         _GetDrawingCoord(_genGS, drawingCoordParams, instanceIndexWidth,
-                "tes_dc_", "[0]");
+                "tes_", "[0]");
     } else if (_hasGS) {
         // from VS
         _GetDrawingCoord(_genGS, drawingCoordParams, instanceIndexWidth,
-                "vs_dc_", "[0]");
+                "vs_", "[0]");
     }
     _ProcessDrawingCoord(_procGS, drawingCoordParams, instanceIndexWidth,
-                "gs_dc_", "");
+                "gs_", "");
 
     // FS
     if (_hasGS) {
         // from GS
         _GetDrawingCoord(_genFS, drawingCoordParams, instanceIndexWidth,
-                "gs_dc_", "");
+                "gs_", "");
     } else if (_hasTES) {
         // from TES
         _GetDrawingCoord(_genFS, drawingCoordParams, instanceIndexWidth,
-                "tes_dc_", "");
+                "tes_", "");
     } else {
         // from VS/PTVS
         _GetDrawingCoord(_genFS, drawingCoordParams, instanceIndexWidth,
-                "vs_dc_", "");
+                "vs_", "");
     }
 }
 
@@ -5239,6 +5622,10 @@ HdSt_CodeGen::_GenerateElementPrimvar()
             accessors
                 << "float GetSelectedEdgeOpacity() {\n"
                 << "  return 0.0;\n"
+                << "}\n";
+            accessors
+                << "bool SelectWireframeFaceEdges() {\n"
+                << "  return false;\n"
                 << "}\n";
             break;
     }
@@ -6002,263 +6389,23 @@ HdSt_CodeGen::_GenerateShaderParameters(bool bindlessTextureEnabled)
 
         } else if (bindingType == HdStBinding::BINDLESS_TEXTURE_UDIM_ARRAY) {
 
-            accessors 
-                << "#ifdef HD_HAS_" << it->second.name << "_" 
-                << HdStTokens->storm << "_" 
-                << HdStTokens->scale << "\n"
-                << "vec4 HdGet_" << it->second.name << "_" 
-                << HdStTokens->storm << "_"
-                << HdStTokens->scale << "();\n"
-                << "#endif\n"
-                << "#ifdef HD_HAS_" << it->second.name << "_" 
-                << HdStTokens->storm << "_"
-                << HdStTokens->bias << "\n"
-                << "vec4 HdGet_" << it->second.name << "_" 
-                << HdStTokens->storm << "_"
-                << HdStTokens->bias << "();\n"
-                << "#endif\n";
-                
-            // a function returning sampler requires bindless_texture
-            if (bindlessTextureEnabled) {
-                accessors
-                    << "sampler2DArray\n"
-                    << "HdGetSampler_" << it->second.name << "() {\n"
-                    << "  int shaderCoord = GetDrawingCoord().shaderCoord; \n"
-                    << "  return sampler2DArray(shaderData[shaderCoord]."
-                    << it->second.name << ");\n"
-                    << "}\n";
-            }
-            accessors
-                << it->second.dataType
-                << " HdGet_" << it->second.name << "(vec2 coord)" << " {\n"
-                << "  int shaderCoord = GetDrawingCoord().shaderCoord;\n"
-                << "  uvec2 handle = shaderData[shaderCoord]."
-                << it->second.name
-                << HdSt_ResourceBindingSuffixTokens->layout << ";\n"
-                << "  vec3 c = hd_sample_udim(coord);\n"
-                << "  c.z = "
-                << "texelFetch(sampler1D(handle), int(c.z), 0).x - 1;\n"
-                << "  vec4 ret = vec4(0, 0, 0, 0);\n"
-                << "  if (c.z >= -0.5) {\n"
-                << "    uvec2 handleTexels = shaderData[shaderCoord]."
-                << it->second.name << ";\n"
-                << "    ret = texture(sampler2DArray(handleTexels), c);\n"
-                << "  }\n";
-                
-            if (it->second.processTextureFallbackValue) {
-                accessors
-                    << "  if (!bool(shaderData[shaderCoord]." << it->second.name
-                    << HdSt_ResourceBindingSuffixTokens->valid
-                    << ")) {\n"
-                    << "    return ("
-                    << _GetPackedTypeAccessor(it->second.dataType, false)
-                    << "(shaderData[shaderCoord]." << it->second.name
-                    << HdSt_ResourceBindingSuffixTokens->fallback
-                    << fallbackSwizzle << ")\n"
-                    << "#ifdef HD_HAS_" << it->second.name << "_"
-                    << HdStTokens->storm << "_"
-                    << HdStTokens->scale << "\n"
-                    << "    * HdGet_" << it->second.name << "_" 
-                    << HdStTokens->storm << "_"
-                    << HdStTokens->scale << "()" << swizzle << "\n"
-                    << "#endif\n" 
-                    << "#ifdef HD_HAS_" << it->second.name << "_" 
-                    << HdStTokens->storm << "_"
-                    << HdStTokens->bias << "\n"
-                    << "    + HdGet_" << it->second.name << "_" 
-                    << HdStTokens->storm << "_"
-                    << HdStTokens->bias  << "()" << swizzle << "\n"
-                    << "#endif\n"
-                    << "    );\n  }\n";
-            }
-            
-            accessors
-                << "  return (ret\n"
-                << "#ifdef HD_HAS_" << it->second.name << "_" 
-                << HdStTokens->storm << "_"
-                << HdStTokens->scale << "\n"
-                << "    * HdGet_" << it->second.name << "_" 
-                << HdStTokens->storm << "_"
-                << HdStTokens->scale << "()\n"
-                << "#endif\n" 
-                << "#ifdef HD_HAS_" << it->second.name << "_" 
-                << HdStTokens->storm << "_" 
-                << HdStTokens->bias << "\n"
-                << "    + HdGet_" << it->second.name << "_" 
-                << HdStTokens->storm << "_" 
-                << HdStTokens->bias  << "()\n"
-                << "#endif\n"
-                << "  )" << swizzle << ";\n}\n";
-
-            // Create accessor for texture coordinates based on param name
-            // vec2 HdGetCoord_name()
-            accessors
-                << "vec2 HdGetCoord_" << it->second.name << "() {\n"
-                << "  return \n";
-            if (!it->second.inPrimvars.empty()) {
-                accessors 
-                    << "#if defined(HD_HAS_" << it->second.inPrimvars[0] <<")\n"
-                    << "  HdGet_" << it->second.inPrimvars[0] << "().xy;\n"
-                    << "#else\n"
-                    << "  vec2(0.0, 0.0)\n"
-                    << "#endif\n";
-            } else {
-                accessors
-                    << "  vec2(0.0, 0.0)\n";
-            }
-            accessors << "; }\n";
-
-            // vec4 HdGet_name() { return HdGet_name(HdGetCoord_name()); }
-            accessors
-                << it->second.dataType
-                << " HdGet_" << it->second.name
-                << "() { return HdGet_" << it->second.name << "("
-                << "HdGetCoord_" << it->second.name << "()); }\n";
-
-            // vec4 HdGet_name(int localIndex) { return HdGet_name(HdGetCoord_name()); }
-            accessors
-                << it->second.dataType
-                << " HdGet_" << it->second.name
-                << "(int localIndex) { return HdGet_" << it->second.name << "("
-                << "HdGetCoord_" << it->second.name << "());\n}\n";
-
-            // float HdGetScalar_name()
-            _EmitScalarAccessor(
-                accessors, it->second.name, it->second.dataType);
-
-            // Emit pre-multiplication by alpha indicator
-            if (it->second.isPremultiplied) {
-                accessors 
-                    << "#define " << it->second.name << "_IS_PREMULTIPLIED 1\n";
-            }      
+            _EmitTextureUdimArrayAccessors(
+                accessors, it->second, swizzle, fallbackSwizzle,
+                /* isBindless = */ true,
+                bindlessTextureEnabled);
 
         } else if (bindingType == HdStBinding::TEXTURE_UDIM_ARRAY) {
 
-            accessors 
-                << "#ifdef HD_HAS_" << it->second.name << "_" 
-                << HdStTokens->storm << "_"
-                << HdStTokens->scale << "\n"
-                << "FORWARD_DECL(vec4 HdGet_" << it->second.name << "_" 
-                << HdStTokens->storm << "_"
-                << HdStTokens->scale << "());\n"
-                << "#endif\n"
-                << "#ifdef HD_HAS_" << it->second.name << "_" 
-                << HdStTokens->storm << "_"
-                << HdStTokens->bias << "\n"
-                << "FORWARD_DECL(vec4 HdGet_" << it->second.name << "_" 
-                << HdStTokens->storm << "_" 
-                << HdStTokens->bias << "());\n"
-                << "#endif\n";
-                
             _AddTextureElement(&_resTextures,
                                it->second.name, 2,
                                binding.GetTextureUnit(),
                                HioFormatFloat32Vec4,
                                TextureType::ARRAY_TEXTURE);
 
-            // vec4 HdGet_name(vec2 coord) { vec3 c = hd_sample_udim(coord);
-            // c.z = HgiTexelFetch_name(int(c.z), 0).x - 1;
-            // vec4 ret = vec4(0, 0, 0, 0);
-            // if (c.z >= -0.5) { ret = HgiGet_name(c); }
-            // return (ret
-            // #ifdef HD_HAS_name_scale
-            //   * HdGet_name_scale()
-            // #endif
-            // #ifdef HD_HAS_name_bias
-            //   + HdGet_name_bias()
-            // #endif // ).xyz; }
-            accessors
-                << it->second.dataType
-                << " HdGet_" << it->second.name
-                << "(vec2 coord) {\n vec3 c = hd_sample_udim(coord);\n"
-                << "  c.z = HgiTexelFetch_"
-                << it->second.name << HdSt_ResourceBindingSuffixTokens->layout
-                << "(int(c.z)).x - 1;\n"
-                << "  vec4 ret = vec4(0, 0, 0, 0);\n"
-                << "  if (c.z >= -0.5) { ret = HgiGet_"
-                << it->second.name << "(c); }\n";
-            
-            if (it->second.processTextureFallbackValue) {
-                accessors
-                    << "  int shaderCoord = GetDrawingCoord().shaderCoord;\n"
-                    << "  if (!bool(shaderData[shaderCoord]." << it->second.name
-                    << HdSt_ResourceBindingSuffixTokens->valid
-                    << ")) {\n"
-                    << "    return ("
-                    << _GetPackedTypeAccessor(it->second.dataType, false)
-                    << "(shaderData[shaderCoord]." << it->second.name
-                    << HdSt_ResourceBindingSuffixTokens->fallback
-                    << fallbackSwizzle << ")\n"
-                    << "#ifdef HD_HAS_" << it->second.name << "_"
-                    << HdStTokens->storm << "_" << HdStTokens->scale << "\n"
-                    << "    * HdGet_" << it->second.name << "_" 
-                    << HdStTokens->storm << "_" << HdStTokens->scale << "()" 
-                    << swizzle << "\n"
-                    << "#endif\n" 
-                    << "#ifdef HD_HAS_" << it->second.name << "_" 
-                    << HdStTokens->storm << "_" << HdStTokens->bias << "\n"
-                    << "    + HdGet_" << it->second.name << "_" 
-                    << HdStTokens->storm << "_" << HdStTokens->bias  << "()" 
-                    << swizzle << "\n"
-                    << "#endif\n"
-                    << "    );\n  }\n";
-            }
-
-            accessors
-                << "  return (ret\n"
-                << "#ifdef HD_HAS_" << it->second.name << "_"
-                << HdStTokens->storm << "_" << HdStTokens->scale << "\n"
-                << "    * HdGet_" << it->second.name << "_" 
-                << HdStTokens->storm << "_" << HdStTokens->scale << "()\n"
-                << "#endif\n" 
-                << "#ifdef HD_HAS_" << it->second.name << "_" 
-                << HdStTokens->storm << "_" << HdStTokens->bias << "\n"
-                << "    + HdGet_" << it->second.name << "_" 
-                << HdStTokens->storm << "_" << HdStTokens->bias  << "()\n"
-                << "#endif\n"
-                << "  )" << swizzle << ";\n}\n";
-
-            // Create accessor for texture coordinates based on param name
-            // vec2 HdGetCoord_name()
-            accessors
-                << "vec2 HdGetCoord_" << it->second.name << "() {\n"
-                << "  return \n";
-            if (!it->second.inPrimvars.empty()) {
-                accessors 
-                    << "#if defined(HD_HAS_" << it->second.inPrimvars[0] <<")\n"
-                    << "  HdGet_" << it->second.inPrimvars[0] << "().xy\n"
-                    << "#else\n"
-                    << "  vec2(0.0, 0.0)\n"
-                    << "#endif\n";
-            } else {
-                accessors
-                    << "  vec2(0.0, 0.0)\n";
-            }
-            accessors << "; }\n";
-
-            // vec4 HdGet_name() { return HdGet_name(HdGetCoord_name()); }
-            accessors
-                << it->second.dataType
-                << " HdGet_" << it->second.name
-                << "() { return HdGet_" << it->second.name << "("
-                << "HdGetCoord_" << it->second.name << "()); }\n";
-
-            // vec4 HdGet_name(int localIndex) { return HdGet_name(HdGetCoord_name()); }
-            accessors
-                << it->second.dataType
-                << " HdGet_" << it->second.name
-                << "(int localIndex) { return HdGet_" << it->second.name << "("
-                << "HdGetCoord_" << it->second.name << "());\n}\n";
-
-            // float HdGetScalar_name()
-            _EmitScalarAccessor(
-                accessors, it->second.name, it->second.dataType);
-
-            // Emit pre-multiplication by alpha indicator
-            if (it->second.isPremultiplied) {
-                accessors 
-                    << "#define " << it->second.name << "_IS_PREMULTIPLIED 1\n";
-            }
+            _EmitTextureUdimArrayAccessors(
+                accessors, it->second, swizzle, fallbackSwizzle,
+                /* isBindless = */ false,
+                bindlessTextureEnabled);
 
         } else if (bindingType == HdStBinding::TEXTURE_UDIM_LAYOUT) {
 
@@ -6513,11 +6660,6 @@ HdSt_CodeGen::_GenerateShaderParameters(bool bindlessTextureEnabled)
                 << "\n}\n"
                 << "#define HD_HAS_" << it->second.name << " 1\n";
             
-            if (it->second.name == it->second.inPrimvars[0]) {
-                accessors
-                    << "#endif\n";
-            }
-
             // Emit scalar accessors to support shading languages like MSL which
             // do not support swizzle operators on scalar values.
             if (_GetNumComponents(it->second.dataType) <= 4) {
@@ -6527,6 +6669,11 @@ HdSt_CodeGen::_GenerateShaderParameters(bool bindlessTextureEnabled)
                     << " { return HdGet_" << it->second.name << "()"
                     << _GetFlatTypeSwizzleString(it->second.dataType)
                     << "; }\n";
+            }
+
+            if (it->second.name == it->second.inPrimvars[0]) {
+                accessors
+                    << "#endif\n";
             }
 
         } else if (bindingType == HdStBinding::TRANSFORM_2D) {

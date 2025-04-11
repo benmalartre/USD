@@ -1,25 +1,8 @@
 //
 // Copyright 2016 Pixar
 //
-// Licensed under the Apache License, Version 2.0 (the "Apache License")
-// with the following modification; you may not use this file except in
-// compliance with the Apache License and the following modification to it:
-// Section 6. Trademarks. is deleted and replaced with:
-//
-// 6. Trademarks. This License does not grant permission to use the trade
-//    names, trademarks, service marks, or product names of the Licensor
-//    and its affiliates, except as required to comply with Section 4(c) of
-//    the License and to reproduce the content of the NOTICE file.
-//
-// You may obtain a copy of the Apache License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the Apache License with the above modification is
-// distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied. See the Apache License for the specific
-// language governing permissions and limitations under the Apache License.
+// Licensed under the terms set forth in the LICENSE.txt file available at
+// https://openusd.org/license.
 //
 #include "pxr/pxr.h"
 
@@ -104,6 +87,7 @@ HdStMesh::HdStMesh(SdfPath const& id)
     , _sceneNormals(false)
     , _hasVaryingTopology(false)
     , _displayOpacity(false)
+    , _displayInOverlay(false)
     , _occludedSelectionShowsThrough(false)
     , _pointsShadingEnabled(false)
     , _fvarTopologyTracker(std::make_unique<_FvarTopologyTracker>())
@@ -568,6 +552,7 @@ HdStMesh::_PopulateTopology(HdSceneDelegate *sceneDelegate,
 
         _flatShadingEnabled = displayStyle.flatShadingEnabled;
         _displacementEnabled = displayStyle.displacementEnabled;
+        _displayInOverlay = displayStyle.displayInOverlay;
         _occludedSelectionShowsThrough =
             displayStyle.occludedSelectionShowsThrough;
         _pointsShadingEnabled = displayStyle.pointsShadingEnabled;
@@ -829,10 +814,12 @@ HdStMesh::_PopulateTopology(HdSceneDelegate *sceneDelegate,
 
                 // Set up the usage hints to mark topology as varying if
                 // there is a previously set range
-                HdBufferArrayUsageHint usageHint;
-                usageHint.value = 0;
-                usageHint.bits.sizeVarying = 
-                    drawItem->GetTopologyRange() ? 1 : 0;
+                HdBufferArrayUsageHint usageHint = 
+                    HdBufferArrayUsageHintBitsIndex |
+                    HdBufferArrayUsageHintBitsStorage;
+                if (drawItem->GetTopologyRange()) {
+                    usageHint |= HdBufferArrayUsageHintBitsSizeVarying;
+                }
 
                 // allocate new range
                 HdBufferArrayRangeSharedPtr range =
@@ -1015,9 +1002,11 @@ void HdStMesh::_CreateTopologyRangeForGeomSubset(
 
         // Set up the usage hints to mark topology as varying if there is a 
         // previously set range
-        HdBufferArrayUsageHint usageHint;
-        usageHint.value = 0;
-        usageHint.bits.sizeVarying = drawItem->GetTopologyRange() ? 1 : 0;
+        HdBufferArrayUsageHint usageHint =
+            HdBufferArrayUsageHintBitsIndex | HdBufferArrayUsageHintBitsStorage;
+        if (drawItem->GetTopologyRange()) {
+            usageHint |= HdBufferArrayUsageHintBitsSizeVarying;
+        }
 
         // allocate new range
         HdBufferArrayRangeSharedPtr range =
@@ -1090,7 +1079,8 @@ HdStMesh::_PopulateAdjacency(
 
         HdBufferArrayRangeSharedPtr vertexAdjacencyRange =
             resourceRegistry->AllocateNonUniformBufferArrayRange(
-                HdTokens->topology, bufferSpecs, HdBufferArrayUsageHint());
+                HdTokens->topology, bufferSpecs,
+                HdBufferArrayUsageHintBitsStorage);
 
         vertexAdjacencyBuilder->SetVertexAdjacencyRange(vertexAdjacencyRange);
         resourceRegistry->AddSource(vertexAdjacencyRange,
@@ -1665,7 +1655,7 @@ HdStMesh::_PopulateVertexPrimvars(HdSceneDelegate *sceneDelegate,
                 if (transitionToMutableBAR) {
                     // (b1)
                     HdBufferArrayUsageHint newUsageHint = bar->GetUsageHint();
-                    newUsageHint.bits.immutable = 0;
+                    newUsageHint &= ~HdBufferArrayUsageHintBitsImmutable;
                     _vertexPrimvarId = 0;
 
                     range = resourceRegistry->UpdateNonUniformBufferArrayRange(
@@ -1708,17 +1698,24 @@ HdStMesh::_PopulateVertexPrimvars(HdSceneDelegate *sceneDelegate,
 
             } else {
                 // (c) Exiting BAR is a mutable one.
+                HdBufferArrayUsageHint usageHint =
+                    HdBufferArrayUsageHintBitsVertex |
+                    HdBufferArrayUsageHintBitsStorage;
                 range = resourceRegistry->UpdateNonUniformBufferArrayRange(
                     HdTokens->primvar, bar, bufferSpecs, removedSpecs,
-                    HdBufferArrayUsageHint());
+                    usageHint);
             }
         }
     } else {
         // When primvar sharing is disabled, a mutable BAR is allocated/updated/
         // migrated as necessary.
+        HdBufferArrayUsageHint usageHint = 
+            HdBufferArrayUsageHintBitsVertex |
+            HdBufferArrayUsageHintBitsStorage;
+
         range = resourceRegistry->UpdateNonUniformBufferArrayRange(
                 HdTokens->primvar, bar, bufferSpecs, removedSpecs,
-                HdBufferArrayUsageHint());
+                usageHint);
     }
 
     HdStUpdateDrawItemBAR(
@@ -1859,6 +1856,14 @@ HdStMesh::_PopulateFaceVaryingPrimvars(HdSceneDelegate *sceneDelegate,
             if (doRefine) {
                 channel = 
                     _fvarTopologyTracker->GetChannelFromPrimvar(primvar.name);
+
+                // Invalid fvar topologies may have been skipped when
+                // processed by _GatherFaceVaryingTopologies() in which
+                // case a validation warning will have been posted already
+                // and we should skip further refinement here.
+                if (channel < 0) {
+                    continue;
+                }
             }
 
             source = _RefineOrQuadrangulateOrTriangulateFaceVaryingPrimvar(
@@ -1901,7 +1906,7 @@ HdStMesh::_PopulateFaceVaryingPrimvars(HdSceneDelegate *sceneDelegate,
     HdBufferArrayRangeSharedPtr range =
         resourceRegistry->UpdateNonUniformBufferArrayRange(
             HdTokens->primvar, bar, bufferSpecs, removedSpecs,
-            HdBufferArrayUsageHint());
+            HdBufferArrayUsageHintBitsStorage);
     
     HdStUpdateDrawItemBAR(
         range,
@@ -2074,7 +2079,7 @@ HdStMesh::_PopulateElementPrimvars(HdSceneDelegate *sceneDelegate,
     HdBufferArrayRangeSharedPtr range =
         resourceRegistry->UpdateNonUniformBufferArrayRange(
             HdTokens->primvar, bar, bufferSpecs, removedSpecs,
-            HdBufferArrayUsageHint());
+            HdBufferArrayUsageHintBitsStorage);
 
     HdStUpdateDrawItemBAR(
         range,
@@ -2218,12 +2223,16 @@ HdStMesh::_GetSharedPrimvarRange(uint64_t primvarId,
     HdBufferArrayRangeSharedPtr range;
 
     if (barInstance.IsFirstInstance()) {
+        HdBufferArrayUsageHint usageHint =
+            HdBufferArrayUsageHintBitsVertex |
+            HdBufferArrayUsageHintBitsStorage;
+
         range = resourceRegistry->UpdateNonUniformImmutableBufferArrayRange(
                     HdTokens->primvar,
                     curRange,
                     updatedOrAddedSpecs,
                     removedSpecs,
-                    HdBufferArrayUsageHint());
+                    usageHint);
 
         barInstance.SetValue(range);
     } else {
@@ -2610,6 +2619,10 @@ HdStMesh::_UpdateDrawItemGeometricShader(HdSceneDelegate *sceneDelegate,
         resourceRegistry->GetHgi()->GetCapabilities()->
             IsSet(HgiDeviceCapabilitiesBitsMetalTessellation);
 
+    bool const nativeRoundPoints =
+        resourceRegistry->GetHgi()->GetCapabilities()->
+            IsSet(HgiDeviceCapabilitiesBitsRoundPoints);
+
     // create a shaderKey and set to the geometric shader.
     HdSt_MeshShaderKey shaderKey(primType,
                                  shadingTerminal,
@@ -2630,7 +2643,9 @@ HdStMesh::_UpdateDrawItemGeometricShader(HdSceneDelegate *sceneDelegate,
                                  hasInstancer,
                                  desc.enableScalarOverride,
                                  _pointsShadingEnabled,
-                                 desc.forceOpaqueEdges);
+                                 desc.forceOpaqueEdges,
+                                 desc.surfaceEdgeIds,
+                                 nativeRoundPoints);
 
     HdSt_GeometricShaderSharedPtr geomShader =
         HdSt_GeometricShader::Create(shaderKey, resourceRegistry);
@@ -2996,7 +3011,7 @@ HdStMesh::_UpdateMaterialTagsForAllReprs(HdSceneDelegate *sceneDelegate,
                     repr->GetDrawItem(drawItemIndex++));
                 HdStSetMaterialTag(sceneDelegate, renderParam, drawItem, 
                     this->GetMaterialId(), _displayOpacity, 
-                    _occludedSelectionShowsThrough);
+                    _displayInOverlay, _occludedSelectionShowsThrough);
             }
 
             // Update geom subset draw items if they exist 
@@ -3017,7 +3032,7 @@ HdStMesh::_UpdateMaterialTagsForAllReprs(HdSceneDelegate *sceneDelegate,
                 }
                 HdStSetMaterialTag(sceneDelegate, renderParam, drawItem,
                     materialId, _displayOpacity, 
-                    _occludedSelectionShowsThrough);
+                    _displayInOverlay, _occludedSelectionShowsThrough);
             }
             geomSubsetDescIndex++;
         }

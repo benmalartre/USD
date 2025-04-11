@@ -1,25 +1,8 @@
 #
 # Copyright 2016 Pixar
 #
-# Licensed under the Apache License, Version 2.0 (the "Apache License")
-# with the following modification; you may not use this file except in
-# compliance with the Apache License and the following modification to it:
-# Section 6. Trademarks. is deleted and replaced with:
-#
-# 6. Trademarks. This License does not grant permission to use the trade
-#    names, trademarks, service marks, or product names of the Licensor
-#    and its affiliates, except as required to comply with Section 4(c) of
-#    the License and to reproduce the content of the NOTICE file.
-#
-# You may obtain a copy of the Apache License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the Apache License with the above modification is
-# distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-# KIND, either express or implied. See the Apache License for the specific
-# language governing permissions and limitations under the Apache License.
+# Licensed under the terms set forth in the LICENSE.txt file available at
+# https://openusd.org/license.
 #
 option(PXR_STRICT_BUILD_MODE "Turn on additional warnings. Enforce all warnings as errors." OFF)
 option(PXR_VALIDATE_GENERATED_CODE "Validate script generated code" OFF)
@@ -33,6 +16,8 @@ option(PXR_BUILD_EMBREE_PLUGIN "Build embree imaging plugin" OFF)
 option(PXR_BUILD_OPENIMAGEIO_PLUGIN "Build OpenImageIO plugin" OFF)
 option(PXR_BUILD_OPENCOLORIO_PLUGIN "Build OpenColorIO plugin" OFF)
 option(PXR_BUILD_USD_IMAGING "Build USD imaging components" ON)
+option(PXR_BUILD_USD_VALIDATION "Build USD validation library and core USD validators" ON)
+option(PXR_BUILD_EXEC "Build the Exec libraries" OFF)
 option(PXR_BUILD_USDVIEW "Build usdview" ON)
 option(PXR_BUILD_ALEMBIC_PLUGIN "Build the Alembic plugin for USD" OFF)
 option(PXR_BUILD_DRACO_PLUGIN "Build the Draco plugin for USD" OFF)
@@ -53,6 +38,37 @@ option(PXR_ENABLE_NAMESPACES "Enable C++ namespaces." ON)
 option(PXR_PREFER_SAFETY_OVER_SPEED
        "Enable certain checks designed to avoid crashes or out-of-bounds memory reads with malformed input files.  These checks may negatively impact performance."
         ON)
+
+if(APPLE)
+    # Cross Compilation detection as defined in CMake docs
+    # Required to be handled here so it can configure options later on
+    # https://cmake.org/cmake/help/latest/manual/cmake-toolchains.7.html#cross-compiling-for-ios-tvos-visionos-or-watchos
+    # Note: All these SDKs may not be supported by OpenUSD, but are all listed here for future proofing
+    set(PXR_APPLE_EMBEDDED OFF)
+    if (CMAKE_SYSTEM_NAME MATCHES "iOS"
+            OR CMAKE_SYSTEM_NAME MATCHES "tvOS"
+            OR CMAKE_SYSTEM_NAME MATCHES "visionOS"
+            OR CMAKE_SYSTEM_NAME MATCHES "watchOS")
+        set(PXR_APPLE_EMBEDDED ON)
+        if(${PXR_BUILD_USD_TOOLS})
+            MESSAGE(STATUS "Setting PXR_BUILD_USD_TOOLS=OFF because they are not supported on Apple embedded platforms")
+            set(PXR_BUILD_USD_TOOLS OFF)
+        endif()
+        if(${PXR_BUILD_OPENCOLORIO_PLUGIN})
+            MESSAGE(STATUS "Setting PXR_BUILD_OPENCOLORIO_PLUGIN=OFF because it is not supported on Apple embedded platforms")
+            set(PXR_BUILD_OPENCOLORIO_PLUGIN OFF)
+        endif()
+        if(${PXR_BUILD_OPENIMAGEIO_PLUGIN})
+            MESSAGE(STATUS "Setting PXR_BUILD_OPENIMAGEIO_PLUGIN=OFF because it is not supported on Apple embedded platforms")
+            set(PXR_BUILD_OPENIMAGEIO_PLUGIN OFF)
+        endif()
+        if(${PXR_ENABLE_OPENVDB_SUPPORT})
+            MESSAGE(STATUS "Setting PXR_ENABLE_OPENVDB_SUPPORT=OFF because it is not supported on Apple embedded platforms")
+            set(PXR_ENABLE_OPENVDB_SUPPORT OFF)
+        endif()
+    endif ()
+endif()
+
 
 # Determine GFX api
 # Metal only valid on Apple platforms
@@ -86,6 +102,14 @@ set(PXR_OVERRIDE_PLUGINPATH_NAME ""
     CACHE
     STRING
     "Name of the environment variable that will be used to get plugin paths."
+)
+
+set(PXR_TEST_RUN_TEMP_DIR_PREFIX ""
+    CACHE
+    STRING
+    "Prefix for test run temporary directory names. \
+    Setting this option to \"foo-\" will create directories like \
+    \"<temp dir>/foo-<test dir>\"."
 )
 
 set(PXR_ALL_LIBS ""
