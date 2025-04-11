@@ -311,6 +311,9 @@ HdStRenderPassState::Prepare(
         bufferSpecs.emplace_back(
             HdShaderTokens->stepSizeLighting,
             HdTupleType{HdTypeFloat, 1});
+        bufferSpecs.emplace_back(
+            HdShaderTokens->multisampleCount,
+            HdTupleType{HdTypeUInt32, 1});
 
         if (_UseAlphaMask()) {
             bufferSpecs.emplace_back(
@@ -431,6 +434,20 @@ HdStRenderPassState::Prepare(
             VtValue(_stepSizeLighting))
     };
 
+    uint32_t multisampleCount = 1;
+    if (const auto& aovBindings = GetAovBindings();
+            !aovBindings.empty() && GetUseAovMultiSample()) {
+        if (const auto* renderBuffer = dynamic_cast<HdStRenderBuffer*>(
+                aovBindings.front().renderBuffer)) {
+            multisampleCount = renderBuffer->GetMSAASampleCount();
+        }
+    }
+            
+    sources.push_back(
+        std::make_shared<HdVtBufferSource>(
+            HdShaderTokens->multisampleCount,
+            VtValue(multisampleCount)));
+
     if (_UseAlphaMask()) {
         sources.push_back(
             std::make_shared<HdVtBufferSource>(
@@ -490,11 +507,11 @@ HdStRenderPassState::SetLightingShader(HdStLightingShaderSharedPtr const &lighti
 }
 
 void 
-HdStRenderPassState::SetRenderPassShader(HdStRenderPassShaderSharedPtr const &renderPassShader)
+HdStRenderPassState::SetRenderPassShader(
+    HdStRenderPassShaderSharedPtr const &renderPassShader)
 {
     _renderPassShader = renderPassShader;
     if (_renderPassStateBar) {
-
         HdStBufferArrayRangeSharedPtr _renderPassStateBar_ =
             std::static_pointer_cast<HdStBufferArrayRange> (_renderPassStateBar);
 
@@ -837,7 +854,7 @@ _GetRenderBuffer(const HdRenderPassAovBinding& aov,
         return aov.renderBuffer;
     }
 
-    return 
+    return
         dynamic_cast<HdRenderBuffer*>(
             renderIndex->GetBprim(
                 HdPrimTypeTokens->renderBuffer,
@@ -854,6 +871,10 @@ GfVec4f _ToVec4f(const VtValue &v)
     }
     if (v.IsHolding<double>()) {
         const double val = v.UncheckedGet<double>();
+        return GfVec4f(val);
+    }
+    if (v.IsHolding<int>()) {
+        const double val = v.UncheckedGet<int>();
         return GfVec4f(val);
     }
     if (v.IsHolding<GfVec2f>()) {

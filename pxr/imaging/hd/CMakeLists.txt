@@ -52,6 +52,7 @@ pxr_library(hd
         dataSource
         dataSourceHash
         dataSourceLegacyPrim
+        dataSourceLegacyTaskPrim
         dataSourceLocator
         dataSourceMaterialNetworkInterface
         debugCodes
@@ -103,6 +104,8 @@ pxr_library(hd
         legacyDisplayStyleSchema
         legacyGeomSubsetSceneIndex
         legacyPrimSceneIndex
+        legacyTaskFactory
+        legacyTaskSchema
         lensDistortionSchema
         light
         lightSchema

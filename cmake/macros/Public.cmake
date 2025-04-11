@@ -386,6 +386,30 @@ function(pxr_library NAME)
         set(pch "OFF")
     endif()
 
+    if (PXR_ENABLE_PYTHON_SUPPORT AND args_PYMODULE_CPPFILES)
+        # If moduleDeps.cpp does not exist, create one
+        set(moduleDepsFileName "moduleDeps.cpp")
+        list(FIND args_PYTHON_CPPFILES ${moduleDepsFileName} foundModuleDeps)
+        if (${foundModuleDeps} EQUAL -1)
+            # Add moduleDeps.cpp as a built file
+            list(APPEND args_CPPFILES ${moduleDepsFileName})
+
+            # Keep only our libraries in the module dependencies
+            foreach(library ${args_LIBRARIES})
+                if (TARGET ${library}) 
+                    list(APPEND localLibs ${library})
+                endif()
+            endforeach()
+
+            # Generate moduleDeps.cpp
+            _get_python_module_name(${NAME} pyModuleName)
+            add_custom_command(
+                OUTPUT ${moduleDepsFileName}
+                COMMAND ${CMAKE_COMMAND} -DlibraryName=${NAME} -DmoduleName=${pyModuleName} -DsourceDir=${PROJECT_SOURCE_DIR} -Dlibraries="${localLibs}" -Doutfile=${moduleDepsFileName} -P "${PROJECT_SOURCE_DIR}/cmake/macros/genModuleDepsCpp.cmake"
+                DEPENDS "CMakeLists.txt")
+        endif()
+    endif()
+
     _pxr_library(${NAME}
         TYPE "${args_TYPE}"
         PREFIX "${prefix}"
@@ -658,7 +682,24 @@ function(pxr_test_scripts)
     endif()
 
     foreach(file ${ARGN})
-        get_filename_component(destFile ${file} NAME_WE)
+        # Perform regex match to extract both source resource path and
+        # destination resource path.
+        # Regex match appropriately takes care of windows drive letter followed
+        # by a ":", which is also the token we use to separate the source and
+        # destination resource paths.
+        string(REGEX MATCHALL "([A-Za-z]:)?([^:]+)" file "${file}")
+
+        list(LENGTH file n)
+        if (n EQUAL 1)
+            get_filename_component(destFile ${file} NAME_WE)
+        elseif (n EQUAL 2)
+           list(GET file 1 destFile)
+           list(GET file 0 file)
+        else()
+           message(FATAL_ERROR
+               "Failed to parse test file path ${file}")
+        endif()        
+
         # XXX -- We shouldn't have to install to run tests.
         install(
             PROGRAMS ${file}
