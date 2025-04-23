@@ -364,23 +364,11 @@ VtValue TsKnot::GetCustomDataByKey(
 
 bool TsKnot::_CheckGetWidth() const
 {
-    if (_data->curveType == TsCurveTypeHermite)
-    {
-        TF_CODING_ERROR("Cannot read widths for Hermite knots");
-        return false;
-    }
-
     return true;
 }
 
 bool TsKnot::_CheckSetWidth(const TsTime width) const
 {
-    if (_data->curveType == TsCurveTypeHermite)
-    {
-        TF_CODING_ERROR("Cannot set widths for Hermite knots");
-        return false;
-    }
-
     if (width < 0)
     {
         TF_CODING_ERROR("Cannot set negative tangent width");
