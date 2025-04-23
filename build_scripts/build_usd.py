@@ -1279,17 +1279,20 @@ PTEX = Dependency("Ptex", InstallPtex, "include/PtexVersion.h")
 ############################################################
 # BLOSC (Compression used by OpenVDB)
 
-# Using blosc v1.20.1 to avoid build errors on macOS Catalina (10.15)
-# related to implicit declaration of functions in zlib. See:
-# https://github.com/Blosc/python-blosc/issues/229
 BLOSC_URL = "https://github.com/Blosc/c-blosc/archive/v1.20.1.zip"
+if MacOS():
+    # Using blosc v1.21.6 to avoid build errors with Xcode 16.3+ toolchain, 
+    # caused by incompatibility with internally used zlib v1.2.8 with blosc 
+    # v1.20.1
+    BLOSC_URL = "https://github.com/Blosc/c-blosc/archive/v1.21.6.zip"
 
 def InstallBLOSC(context, force, buildArgs):
     with CurrentWorkingDirectory(DownloadURL(BLOSC_URL, context, force)):
-        macArgs = []
+        # MacOS we can use the built in Zlib instead of the external one.
+        macArgs = ["-DPREFER_EXTERNAL_ZLIB=ON"]
         if MacOS() and apple_utils.IsTargetArm(context):
             # Need to disable SSE for macOS ARM targets.
-            macArgs = ["-DDEACTIVATE_SSE2=ON"]
+            macArgs += ["-DDEACTIVATE_SSE2=ON"]
         RunCMake(context, force, buildArgs + macArgs)
 
 BLOSC = Dependency("Blosc", InstallBLOSC, "include/blosc.h")
@@ -1380,6 +1383,9 @@ def InstallOpenImageIO(context, force, buildArgs):
         # Make sure to use boost installed by the build script and not any
         # system installed boost
         extraArgs.append('-DBoost_NO_SYSTEM_PATHS=ON')
+        # OIIO 2.5.16 requires Boost_NO_BOOST_CMAKE to be explicitly defined,
+        # else it sets it to ON.
+        extraArgs.append('-DBoost_NO_BOOST_CMAKE=OFF')
 
         # OpenImageIO 2.3.5 changed the default postfix for debug library
         # names from "" to "_d". USD's build system currently does not support
