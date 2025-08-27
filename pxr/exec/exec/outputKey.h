@@ -11,8 +11,10 @@
 
 #include "pxr/exec/exec/api.h"
 
-#include "pxr/exec/exec/valueKey.h"
+#include "pxr/exec/exec/computationDefinition.h"
 
+#include "pxr/exec/esf/object.h"
+#include "pxr/exec/esf/schemaConfigKey.h"
 #include "pxr/base/tf/smallVector.h"
 
 PXR_NAMESPACE_OPEN_SCOPE
@@ -25,39 +27,97 @@ PXR_NAMESPACE_OPEN_SCOPE
 class Exec_OutputKey
 {
 public:
-    explicit Exec_OutputKey(const ExecValueKey &valueKey) :
-        _valueKey(valueKey)
+    Exec_OutputKey(
+        const EsfObject &providerObject,
+        const EsfSchemaConfigKey dispatchingSchemaKey,
+        const Exec_ComputationDefinition *const computationDefinition)
+        : _providerObject(providerObject)
+        , _dispatchingSchemaKey(dispatchingSchemaKey)
+        , _computationDefinition(computationDefinition)
     {}
 
-    /// Returns the value key, which specifies the scene object provider and
-    /// name of the computation to compile.
-    /// 
-    const ExecValueKey &GetValueKey() const {
-        return _valueKey;
+    /// Returns the object that provides the computation.
+    const EsfObject &GetProviderObject() const {
+        return _providerObject;
     }
 
-    bool operator==(const Exec_OutputKey &rhs) const {
-        return _valueKey == rhs._valueKey;
+    /// Returns the schema config key that should be used for computation lookup
+    /// for any input keys that request dispatched inputs, when compiling the
+    /// node that provides the output described by this key.
+    ///
+    /// The returned config key is either the key for the output key's provider
+    /// or the key for the provider at the start of a recursive dispatched
+    /// computation chain.
+    ///
+    EsfSchemaConfigKey GetDispatchingSchemaKey() const {
+        return _dispatchingSchemaKey;
     }
 
-    bool operator!=(const Exec_OutputKey &rhs) const {
+    /// Returns the definition of the computation to compile.
+    const Exec_ComputationDefinition *GetComputationDefinition() const {
+        return _computationDefinition;
+    }
+
+    /// Identity class. See Exec_OutputKey::Identity below.
+    class Identity;
+
+    /// Constructs and returns an identity for this output key.
+    inline Identity MakeIdentity() const;
+
+private:
+    EsfObject _providerObject;
+    EsfSchemaConfigKey _dispatchingSchemaKey;
+    const Exec_ComputationDefinition *_computationDefinition;
+};
+
+/// Lightweight identity that represents an Exec_OutputKey.
+/// 
+/// Instances of this class contain all the information necessary to represent
+/// an Exec_OutputKey, while being lightweight, comparable, and hashable. They
+/// can be used, for example, as key types in hash maps.
+/// 
+/// \note
+/// Identities are not automatically maintained across scene edits.
+///
+class Exec_OutputKey::Identity
+{
+public:
+    explicit Identity(const Exec_OutputKey &key)
+        : _providerPath(key._providerObject->GetPath(nullptr))
+        , _computationDefinition(key._computationDefinition)
+    {}
+
+    bool operator==(const Exec_OutputKey::Identity &rhs) const {
+        return _providerPath == rhs._providerPath &&
+            _computationDefinition == rhs._computationDefinition;
+    }
+
+    bool operator!=(const Exec_OutputKey::Identity &rhs) const {
         return !(*this == rhs);
     }
 
     template <typename HashState>
-    friend void TfHashAppend(HashState& h, const Exec_OutputKey& key) {
-        h.Append(key._valueKey);
+    friend void TfHashAppend(
+        HashState& h, const Exec_OutputKey::Identity& identity) {
+        h.Append(identity._providerPath);
+        h.Append(identity._computationDefinition);
     }
 
     /// Return a human-readable description of this value key for diagnostic
     /// purposes.
     /// 
-    EXEC_API
-    std::string GetDebugName() const;
+    EXEC_API std::string GetDebugName() const;
 
 private:
-    ExecValueKey _valueKey;
+    SdfPath _providerPath;
+    const Exec_ComputationDefinition *_computationDefinition;
 };
+
+Exec_OutputKey::Identity 
+Exec_OutputKey::MakeIdentity() const
+{
+    return Identity(*this);
+}
 
 /// A vector of output keys.
 ///

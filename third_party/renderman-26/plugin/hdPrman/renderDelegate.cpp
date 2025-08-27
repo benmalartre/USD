@@ -178,6 +178,7 @@ TF_DEFINE_PRIVATE_TOKENS(
     (DefaultMayaLight)
     (__FnKat_bbox)
     (viewerMouseClick)
+    ((houdiniInteractive, "houdini:interactive"))
 );
 
 TF_DEFINE_PUBLIC_TOKENS(HdPrmanRenderSettingsTokens,
@@ -260,17 +261,6 @@ const TfTokenVector HdPrmanRenderDelegate::SUPPORTED_BPRIM_TYPES =
 };
 
 static
-std::string
-_ToLower(const std::string &s)
-{
-    std::string result = s;
-    for(auto &c : result) {
-        c = tolower(c);
-    }
-    return result;
-}
-
-static
 std::vector<std::string>
 _GetExtraArgs(const HdRenderSettingsMap &settingsMap)
 {
@@ -297,71 +287,18 @@ _GetExtraArgs(const HdRenderSettingsMap &settingsMap)
     return TfStringTokenize(extraArgs, " ");
 }
 
-std::string
-HdPrmanRenderDelegate::_GetRenderVariant(const HdRenderSettingsMap &settingsMap)
-{
-    std::string renderVariant;
-    auto it = settingsMap.find(HdPrmanRenderSettingsTokens->renderVariant);
-    if(it != settingsMap.end()) {
-        assert(it->second.IsHolding<TfToken>());
-        renderVariant = it->second.UncheckedGet<TfToken>().GetText();
-    } else {
-        renderVariant =
-                _ToLower(
-                    GetRenderSetting<std::string>(
-                        HdPrmanRenderSettingsTokens->rileyVariant,
-                        TfGetenv("RILEY_VARIANT")));
-    }
-    return renderVariant;
-}
-
-int
-HdPrmanRenderDelegate::_GetCpuConfig(const HdRenderSettingsMap &settingsMap)
-{
-    int xpuCpuConfig = 1;
-
-    auto it = settingsMap.find(HdPrmanRenderSettingsTokens->xpuDevices);
-    if( it != settingsMap.end()) {
-        std::string xpuDevices = it->second.UncheckedGet<std::string>();
-        xpuCpuConfig = xpuDevices.find("cpu") != std::string::npos;
-    } else {
-        auto it = settingsMap.find(HdPrmanRenderSettingsTokens->xpuCpuConfig);
-        if (it != settingsMap.end()) {
-            xpuCpuConfig = it->second.UncheckedGet<int>();
-        }
-    }
-    return xpuCpuConfig;
-}
-
-std::vector<int>
-HdPrmanRenderDelegate::_GetGpuConfig(const HdRenderSettingsMap &settingsMap)
-{
-    std::vector<int> xpuGpuConfig;
-
-    auto it = settingsMap.find(HdPrmanRenderSettingsTokens->xpuDevices);
-    if( it != settingsMap.end()) {
-        std::string xpuDevices = it->second.UncheckedGet<std::string>();
-        if (xpuDevices.find("gpu") != std::string::npos) {
-            xpuGpuConfig.push_back(0);
-        }
-    } else {
-        auto it = settingsMap.find(HdPrmanRenderSettingsTokens->xpuGpuConfig);
-        if (it != settingsMap.end()) {
-            xpuGpuConfig = it->second.UncheckedGet< std::vector<int> >();
-        }
-    }
-    return xpuGpuConfig;
-}
-
 HdPrmanRenderDelegate::HdPrmanRenderDelegate(
-    HdRenderSettingsMap const& settingsMap)
+    HdRenderSettingsMap const& settingsMap,
+        TfToken const& rileyVariant,
+        int xpuCpuConfig,
+        std::vector<int> xpuGpuConfig)
   : HdRenderDelegate(settingsMap)
   , _renderParam(
       std::make_unique<HdPrman_RenderParam>(
                      this,
-                     _GetRenderVariant(settingsMap),
-                     _GetCpuConfig(settingsMap),
-                     _GetGpuConfig(settingsMap),
+                     rileyVariant,
+                     xpuCpuConfig,
+                     xpuGpuConfig,
                      _GetExtraArgs(settingsMap)))
 {
     if(_renderParam->IsValid()) {
@@ -434,12 +371,6 @@ HdPrmanRenderDelegate::_Initialize()
         std::string("Variance Threshold"),
         HdRenderSettingsTokens->convergedVariance,
         VtValue(pixelVariance)
-    });
-
-    _settingDescriptors.push_back({
-        std::string("Riley Variant"),
-        HdPrmanRenderSettingsTokens->rileyVariant,
-        VtValue(TfGetenv("RILEY_VARIANT"))
     });
 
     _settingDescriptors.push_back({
@@ -818,7 +749,7 @@ HdPrmanRenderDelegate::SetRenderSetting(TfToken const &key,
     // Solaris will send mouse clicks to the render settings.
     // We want to ignore these as they will cause the render to restart which
     // can be frustrating for users.
-    if (key == _tokens->viewerMouseClick)
+    if (key == _tokens->viewerMouseClick || key == _tokens->houdiniInteractive)
         return;
 
     HdRenderDelegate::SetRenderSetting(key, value);

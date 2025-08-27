@@ -42,6 +42,9 @@ pxr_library(ef
         timeInputNode
         timeInterval
         vectorKey
+
+    DOXYGEN_FILES
+        README.md
 )
 
 pxr_build_test(testEfDependencyCache

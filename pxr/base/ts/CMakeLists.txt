@@ -172,6 +172,16 @@ pxr_build_test(
 )
 
 pxr_build_test(
+    testTsSplineEval
+    CPPFILES
+        testenv/testTsSplineEval.cpp
+    LIBRARIES
+        ts
+        vt
+        tf
+)
+
+pxr_build_test(
     testTsSplineSampling
     CPPFILES
         testenv/testTsSplineSampling.cpp
@@ -193,7 +203,11 @@ pxr_build_test(
 
 pxr_test_scripts(
     testenv/testTsDerivatives.py
+    testenv/testTsBugs.py
     testenv/testTsRegressionPreventer.py
+    testenv/testTsSplineAPIPy.py
+    testenv/testTsSplineValueBlock.py
+    testenv/testTsTangentAlgorithms.py
     testenv/tsTest_TsFramework.py
     testenv/tsTest_TsVsBezier.py
 )
@@ -220,9 +234,33 @@ pxr_register_test(
 )
 
 pxr_register_test(
+    testTsBugs
+    PYTHON
+    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testTsBugs"
+)
+
+pxr_register_test(
     testTsRegressionPreventer
     PYTHON
     COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testTsRegressionPreventer"
+)
+
+pxr_register_test(
+    testTsSplineAPIPy
+    PYTHON
+    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testTsSplineAPIPy"
+)
+
+pxr_register_test(
+    testTsSplineValueBlock
+    PYTHON
+    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testTsSplineValueBlock"
+)
+
+pxr_register_test(
+    testTsTangentAlgorithms
+    PYTHON
+    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testTsTangentAlgorithms"
 )
 
 pxr_register_test(
@@ -233,6 +271,11 @@ pxr_register_test(
 pxr_register_test(
     testTsSplineAPI
     COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testTsSplineAPI"
+)
+
+pxr_register_test(
+    testTsSplineEval
+    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testTsSplineEval"
 )
 
 pxr_register_test(
