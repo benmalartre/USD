@@ -12,13 +12,18 @@
 
 PXR_NAMESPACE_OPEN_SCOPE
 
-const char *EsfEditReason::_GetBitDescription(EsfEditReason::_BitIndex bitIndex)
+const char *
+EsfEditReason::_GetBitDescription(EsfEditReason::_BitIndex bitIndex)
 {
     switch (bitIndex) {
     case EsfEditReason::_BitIndex::ResyncedObject:
         return "ResyncedObject";
     case EsfEditReason::_BitIndex::ChangedPropertyList:
         return "ChangedPropertyList";
+    case EsfEditReason::_BitIndex::ChangedConnectionPaths:
+        return "ChangedConnectionPaths";
+    case EsfEditReason::_BitIndex::ChangedTargetPaths:
+        return "ChangedTargetPaths";
     case EsfEditReason::_BitIndex::Max:
         break; // fallthrough.
     }
@@ -27,7 +32,8 @@ const char *EsfEditReason::_GetBitDescription(EsfEditReason::_BitIndex bitIndex)
     return "InvalidBit";
 }
 
-std::string EsfEditReason::GetDescription() const
+std::string
+EsfEditReason::GetDescription() const
 {
     std::string result;
 

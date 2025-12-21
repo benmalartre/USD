@@ -13,24 +13,23 @@ endif()
 
 pxr_plugin(hdEmbree
    LIBRARIES
-        plug
         tf
         vt
         gf
         work
-        hf
         hd
-        hdx
-        ${TBB_tbb_LIBRARY}
+        hdsi
+        hio
         ${EMBREE_LIBRARY}
 
     INCLUDE_DIRS
-        ${TBB_INCLUDE_DIRS}
         ${EMBREE_INCLUDE_DIR}
 
     PUBLIC_CLASSES
         config
         instancer
+        light
+        lightSamplers
         mesh
         meshSamplers
         renderBuffer
@@ -45,6 +44,7 @@ pxr_plugin(hdEmbree
         renderParam.h
 
     PRIVATE_CLASSES
+        debugCodes
         implicitSurfaceSceneIndexPlugin
 
     RESOURCE_FILES
@@ -57,9 +57,11 @@ pxr_plugin(hdEmbree
 if (X11_FOUND OR APPLE)
 pxr_build_test(testHdEmbree
     LIBRARIES
-        hdEmbree
-        garch
         arch
+        garch
+        hdEmbree
+        hdSt
+        hdx
         hio
     CPPFILES
         testenv/testHdEmbree.cpp

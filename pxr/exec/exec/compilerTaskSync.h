@@ -9,97 +9,65 @@
 
 #include "pxr/pxr.h"
 
+#include "pxr/exec/exec/compilerTaskSyncBase.h"
 #include "pxr/exec/exec/outputKey.h"
 
 #include "pxr/base/tf/hash.h"
-#include "pxr/exec/vdf/maskedOutput.h"
-#include "pxr/exec/vdf/parallelTaskWaitlist.h"
 
 #include <tbb/concurrent_unordered_map.h>
 
-#include <atomic>
-#include <cstdint>
-#include <tuple>
-
 PXR_NAMESPACE_OPEN_SCOPE
-
-class Exec_CompiledOutputCache;
 
 /// Instances of this class are used to synchronize compilation task graphs.
 /// 
-/// Tasks can claim dependent output keys for processing, and depending on the
-/// returned result are on the hook for processing the claimed output key, or
-/// will be notified when a task previously claiming the same output key
-/// is completed.
+/// Tasks can claim dependent tasks, where each dependent task is identified by
+/// \p KeyType. The result of this operation instructs the caller to run the
+/// dependent task (if the caller is the first to claim the task), or to wait on
+/// the dependent task (if another caller claimed it first).
 /// 
 /// The lifetime of instances of this class is expected to be limited to one
 /// round of compilation.
 ///
-class Exec_CompilerTaskSync
+template <class KeyType>
+class Exec_CompilerTaskSync final : public Exec_CompilerTaskSyncBase
 {
 public:
-    Exec_CompilerTaskSync(const Exec_CompilerTaskSync &) = delete;
-    Exec_CompilerTaskSync &operator=(const Exec_CompilerTaskSync &) =
-        delete;
+    explicit Exec_CompilerTaskSync(WorkDispatcher &dispatcher);
 
-    Exec_CompilerTaskSync() = default;
+    ~Exec_CompilerTaskSync();
 
-    /// The different results claiming an output key can return.
-    ///
-    enum class ClaimResult {
-        Done,       /// The task is already done.
-
-        Wait,       /// Another task is currently processing the output key and
-                    /// the claimant will be notified once it is done.
-                    
-        Claimed     /// The output key has been successfully claimed, and the
-                    /// claimant is on the hook for completing the work.
-    };
-
-    /// Attempts to claim the output \p key for processing, and returns
-    /// whether the attempt was successful.
+    /// Attempts to claim the task identified by \p key, and returns whether the
+    /// attempt was succesful.
     /// 
-    /// This method will increment the reference count of the \p successor, if
-    /// the output key has already been claimed and \p successor needs to wait
-    /// for the results. Once the task is done, the \p successor will be
-    /// notified by decrementing its reference count, and if it reaches zero the
-    /// \p successor will automatically be spawned.
+    /// This method will increment the dependency count of the \p task, if the
+    /// key has already been claimed and \p task needs to wait for the results.
+    /// Once the dependency is fulfilled, the \p task will be notified by
+    /// decrementing its dependency count, and if it reaches zero the \p task
+    /// will automatically be spawned.
     ///
-    ClaimResult Claim(const Exec_OutputKey &key, tbb::task *successor);
+    ClaimResult Claim(const KeyType &key, Exec_CompilationTask *task);
 
-    /// Marks the task associated with the output \p key done.
+    /// Marks the task associated with \p key as done.
     /// 
     /// This method will notify any tasks depending on \p key by decrementing
-    /// their reference counts, and spawning them if their reference count
+    /// their dependency counts, and spawning them if their dependency count
     /// reaches 0.
     ///
-    void MarkDone(const Exec_OutputKey &key);
+    void MarkDone(const KeyType &key);
 
 private:
-    // The various states a task can be in.
-    enum _TaskState : uint8_t {
-        _TaskStateUnclaimed,
-        _TaskStateClaimed,
-        _TaskStateDone
-    };
-
-    // Entries in the map always begin life as unclaimed tasks with no
-    // nodes on their waitlist.
-    struct _Entry {
-        _Entry() : state(_TaskStateUnclaimed), waiting(nullptr) {}
-        std::atomic<uint8_t> state;
-        VdfParallelTaskWaitlist::HeadPtr waiting;
-    };
-
-    // The map of tasks that have been claimed during this round of
-    // compilation.
+    // The map of tasks that have been claimed during this round of compilation.
     using _ClaimedTasks =
-        tbb::concurrent_unordered_map<Exec_OutputKey, _Entry, TfHash>;
+        tbb::concurrent_unordered_map<KeyType, _Entry, TfHash>;
     _ClaimedTasks _claimedTasks;
-
-    // Manages the waitlists in the _claimedTasks entries.
-    VdfParallelTaskWaitlist _waitlists;
 };
+
+/// Synchronizes Exec_OutputProvidingCompilationTasks.
+///
+/// Tasks are identified by the identity of the output key being compiled.
+///
+using Exec_OutputProvidingTaskSync =
+    Exec_CompilerTaskSync<Exec_OutputKey::Identity>;
 
 PXR_NAMESPACE_CLOSE_SCOPE
 

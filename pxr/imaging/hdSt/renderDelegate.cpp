@@ -143,7 +143,7 @@ public:
         registry = result;
 
         // Also register with HdPerfLog.
-        HdPerfLog::GetInstance().AddResourceRegistry(result.get());
+        HD_PERF_ADD_RESOURCE_REGISTRY(result.get());
 
         return result;
     }
@@ -155,8 +155,8 @@ private:
 
         std::lock_guard<std::mutex> guard(_mutex);
 
-        HdPerfLog::GetInstance().RemoveResourceRegistry(registry);
-        
+        HD_PERF_REMOVE_RESOURCE_REGISTRY(registry);
+
         _map.erase(registry->GetHgi());
     }
 
@@ -202,6 +202,14 @@ HdStRenderDelegate::HdStRenderDelegate(HdRenderSettingsMap const& settingsMap)
             "Maximum number of lights",
             HdStRenderSettingsTokens->maxLights,
             VtValue(int(TfGetEnvSetting(HDST_MAX_LIGHTS))) },
+        HdRenderSettingDescriptor{
+            "Dome light camera visibility",
+            HdRenderSettingsTokens->domeLightCameraVisibility,
+            VtValue(true) },
+        HdRenderSettingDescriptor{
+            "Enable exposure compensation",
+            HdRenderSettingsTokens->enableExposureCompensation,
+            VtValue(true) }
     };
 
     _PopulateDefaultSettings(_settingDescriptors);
@@ -539,8 +547,15 @@ HdStRenderDelegate::CommitResources(HdChangeTracker *tracker)
 }
 
 bool
-HdStRenderDelegate::IsSupported()
+HdStRenderDelegate::IsSupported(
+    HdRendererCreateArgs const& rendererCreateArgs)
 {
+    if (rendererCreateArgs.hgi) {
+        return rendererCreateArgs.hgi->IsBackendSupported();
+    }
+
+    // If invalid Hgi instance is provided, check support for platform default
+    // Hgi.
     return Hgi::IsSupported();
 }
 

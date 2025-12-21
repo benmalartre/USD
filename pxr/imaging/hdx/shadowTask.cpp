@@ -359,6 +359,7 @@ HdxShadowTask::Execute(HdTaskContext* ctx)
     // GlfSimpleShadowArray's shadow textures to the textures backing the 
     // shadow render buffers.
     std::vector<uint32_t> textureIds;
+    HgiTextureHandleVector textureHandles;
     for (size_t shadowId = 0; shadowId < numShadowMaps; shadowId++) {
         if (shadowId < shadowAovBindings.size()) {
             HdRenderBuffer const * renderBuffer = 
@@ -368,6 +369,12 @@ HdxShadowTask::Execute(HdTaskContext* ctx)
                 HgiTextureHandle texture = aov.UncheckedGet<HgiTextureHandle>();
                 if (texture) {
                     textureIds.push_back((uint32_t)texture->GetRawResource());
+                    
+                    // While we're here, transition layout of texture to depth
+                    // target. Store textures in vector so we can transition
+                    // back after shadow render passes complete.
+                    texture->SubmitLayoutChange(HgiTextureUsageBitsDepthTarget);
+                    textureHandles.push_back(texture);
                 }
             }
         }
@@ -444,6 +451,11 @@ HdxShadowTask::Execute(HdTaskContext* ctx)
             }
         }
     }
+
+    // Transition layout of shadows maps to shader read for next render tasks.
+    for (HgiTextureHandle& texture : textureHandles) {
+        texture->SubmitLayoutChange(HgiTextureUsageBitsShaderRead);
+    }
 }
 
 const TfTokenVector &
@@ -459,11 +471,6 @@ HdxShadowTask::_UpdateDirtyParams(HdStRenderPassStateSharedPtr &renderPassState,
     renderPassState->SetOverrideColor(params.overrideColor);
     renderPassState->SetWireframeColor(params.wireframeColor);
     renderPassState->SetCullStyle(HdInvertCullStyle(params.cullStyle));
-
-    if (HdStRenderPassState* extendedState =
-            dynamic_cast<HdStRenderPassState*>(renderPassState.get())) {
-        extendedState->SetUseSceneMaterials(params.enableSceneMaterials);
-    }
 }
 
 // ---------------------------------------------------------------------------//
@@ -476,7 +483,6 @@ std::ostream& operator<<(std::ostream& out, const HdxShadowTaskParams& pv)
         << pv.overrideColor << " " 
         << pv.wireframeColor << " " 
         << pv.enableLighting << " "
-        << pv.enableSceneMaterials << " "
         << pv.alphaThreshold << " "
         << pv.depthBiasEnable << " "
         << pv.depthBiasConstantFactor << " "
@@ -492,7 +498,6 @@ bool operator==(const HdxShadowTaskParams& lhs, const HdxShadowTaskParams& rhs)
     return  lhs.overrideColor == rhs.overrideColor                      && 
             lhs.wireframeColor == rhs.wireframeColor                    && 
             lhs.enableLighting == rhs.enableLighting                    &&
-            lhs.enableSceneMaterials == rhs.enableSceneMaterials        &&
             lhs.alphaThreshold == rhs.alphaThreshold                    &&
             lhs.depthBiasEnable == rhs.depthBiasEnable                  && 
             lhs.depthBiasConstantFactor == rhs.depthBiasConstantFactor  && 

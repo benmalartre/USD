@@ -36,21 +36,6 @@ TF_DEFINE_PRIVATE_TOKENS(
 );
 
 /* static */
-NdrNodeDiscoveryResultVec 
-UsdShadeShaderDefUtils::GetNodeDiscoveryResults(
-    const UsdShadeShader &shaderDef,
-    const std::string &sourceUri)
-{
-    SdrShaderNodeDiscoveryResultVec sdrVec = GetDiscoveryResults(
-        shaderDef, sourceUri);
-    NdrNodeDiscoveryResultVec ndrVec;
-    for (const SdrShaderNodeDiscoveryResult& sdrRes : sdrVec) {
-        ndrVec.push_back(sdrRes.ToNdrNodeDiscoveryResult());
-    }
-    return ndrVec;
-}
-
-/* static */
 SdrShaderNodeDiscoveryResultVec 
 UsdShadeShaderDefUtils::GetDiscoveryResults(
     const UsdShadeShader &shaderDef,
@@ -249,6 +234,15 @@ _GetShaderPropertyTypeAndArraySize(
         _ConformIntTypeDefaultValue(typeName, defaultValue);
         return std::make_pair(SdrPropertyTypes->Int,
                               _GetArraySize(defaultValue));
+    } else if (typeName == SdfValueTypeNames->Int2 || 
+               typeName == SdfValueTypeNames->Int2Array) {
+        return std::make_pair(SdrPropertyTypes->Int, 2);
+    } else if (typeName == SdfValueTypeNames->Int3 || 
+               typeName == SdfValueTypeNames->Int3Array) {
+        return std::make_pair(SdrPropertyTypes->Int, 3);
+    } else if (typeName == SdfValueTypeNames->Int4 || 
+               typeName == SdfValueTypeNames->Int4Array) {
+        return std::make_pair(SdrPropertyTypes->Int, 4);
     } else if (typeName == SdfValueTypeNames->String ||
                typeName == SdfValueTypeNames->Token ||
                typeName == SdfValueTypeNames->Asset || 
@@ -337,7 +331,7 @@ _CreateSdrShaderProperty(
         VtTokenArray attrAllowedTokens;
         shaderProperty.GetAttr().GetMetadata(SdfFieldKeys->AllowedTokens, 
                 &attrAllowedTokens);
-        for (const TfToken &token : attrAllowedTokens) {
+        for (const TfToken &token : attrAllowedTokens.AsConst()) {
             options.emplace_back(std::make_pair(token, TfToken()));
         }
     }
@@ -361,19 +355,6 @@ _CreateSdrShaderProperty(
             isOutput,
             arraySize,
             metadata, hints, options));
-}
-
-/*static*/
-NdrPropertyUniquePtrVec 
-UsdShadeShaderDefUtils::GetShaderProperties(
-    const UsdShadeConnectableAPI &shaderDef)
-{
-    NdrPropertyUniquePtrVec vec;
-    SdrShaderPropertyUniquePtrVec sdrVec = GetProperties(shaderDef);
-    for (SdrShaderPropertyUniquePtr& sdrProp: sdrVec) {
-        vec.push_back(NdrPropertyUniquePtr(std::move(sdrProp)));
-    }
-    return vec;
 }
 
 /*static*/

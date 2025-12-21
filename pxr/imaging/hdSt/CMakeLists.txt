@@ -46,12 +46,11 @@ pxr_library(hdSt
         sdr
         tf
         trace
-        ${TBB_tbb_LIBRARY}
+        TBB::tbb
         ${OPENSUBDIV_LIBRARIES}
         ${optionalLibs}
 
     INCLUDE_DIRS
-        ${TBB_INCLUDE_DIRS}
         ${OPENSUBDIV_INCLUDE_DIR}
         ${optionalIncludeDirs}
 
@@ -73,6 +72,7 @@ pxr_library(hdSt
         drawItemInstance
         drawTarget
         drawTargetRenderPassState
+        dynamicCubemapTextureObject
         dynamicUvTextureObject
         extComputation
         extCompCpuComputation
@@ -106,6 +106,7 @@ pxr_library(hdSt
         primUtils
         ptexTextureObject
         renderBuffer
+        renderBufferPool
         renderDelegate
         renderParam
         renderPass
@@ -131,6 +132,7 @@ pxr_library(hdSt
         textureUtils
         tokens
         udimTextureObject
+        unboundMaterialPruningSceneIndexPlugin
         unitTestGLDrawing
         vboMemoryManager
         vboSimpleMemoryManager
@@ -140,6 +142,7 @@ pxr_library(hdSt
 
     PUBLIC_HEADERS
         api.h
+        dynamicCubemapTextureImplementation.h
         dynamicUvTextureImplementation.h
         enums.h
 
@@ -169,6 +172,8 @@ pxr_library(hdSt
         pipelineDrawBatch
         pointsShaderKey
         quadrangulate
+        renderPassPruneSceneIndexPlugin
+        renderPassVisibilitySceneIndexPlugin
         renderPassShaderKey
         resourceBinder
         shaderKey
@@ -416,16 +421,6 @@ pxr_build_test(testHdStHWFaceCulling
         gf
     CPPFILES
         testenv/testHdStHWFaceCulling.cpp
-)
-pxr_build_test(testHdStIndirectDrawBatchCodeGen
-    LIBRARIES
-        hdSt
-        hd
-        hio
-        glf
-        tf
-    CPPFILES
-        testenv/testHdStIndirectDrawBatchCodeGen.cpp
 )
 pxr_build_test(testHdStIndirectDrawBatchCulling
     LIBRARIES
@@ -780,6 +775,7 @@ pxr_register_test(testHdStBarAllocationLimit
     TESTENV testHdStBarAllocationLimit
     ENV
         TF_DEBUG=HD_SAFE_MODE
+        HD_MAX_VBO_SIZE=268435456 # 2^28
 )
 pxr_register_test(testHdStBasicDrawing_Adaptive_lighting_lv1_hull
     COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testHdStBasicDrawing --offscreen --lighting --repr hull --refineLevel 1 --write testHdStBasicDrawing_adaptive_lighting_lv1_hull.png"
@@ -2321,6 +2317,7 @@ pxr_register_test(testHdStBufferAggregation
     TESTENV testHdStBufferAggregation
     ENV
         TF_DEBUG=HD_SAFE_MODE
+        HD_MAX_VBO_SIZE=268435456 # 2^28
 )
 pxr_register_test(testHdStBufferArray
     COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testHdStBufferArray"
@@ -2740,13 +2737,6 @@ pxr_register_test(testHdStHWFaceCulling
     DIFF_COMPARE testHdStHWFaceCulling-Run1-stdout.txt
     TESTENV testHdStHWFaceCulling
 )
-pxr_register_test(testHdStIndirectDrawBatchCodeGen
-    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testHdStIndirectDrawBatchCodeGen"
-    EXPECTED_RETURN_CODE 0
-    ENV
-        HD_ENABLE_GPU_FRUSTUM_CULLING=false
-        HGI_ENABLE_VULKAN=0
-)
 pxr_register_test(testHdStIndirectDrawBatchCulling
     COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testHdStIndirectDrawBatchCulling"
     EXPECTED_RETURN_CODE 0
@@ -2879,13 +2869,6 @@ pxr_register_test(testHdStInstancingUnbalancedNoBindless
         TF_DEBUG=HD_SAFE_MODE
 )
 if (${PXR_ENABLE_MATERIALX_SUPPORT})
-pxr_register_test(testHdStMaterialXShaderGen_SSdefault
-    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testHdStMaterialXShaderGen --filename standard_surface_default.mtlx"
-    EXPECTED_RETURN_CODE 0
-    STDOUT_REDIRECT shadergen_SSdefault.out
-    DIFF_COMPARE shadergen_SSdefault.out
-    TESTENV testHdStMaterialXShaderGen
-)
 pxr_register_test(testHdStMaterialXShaderGen_UsdPSdefault
     COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testHdStMaterialXShaderGen --filename usd_preview_surface_default.mtlx"
     EXPECTED_RETURN_CODE 0
@@ -2907,15 +2890,22 @@ pxr_register_test(testHdStMaterialXShaderGen_SScopper
     DIFF_COMPARE shadergen_SScopper.out
     TESTENV testHdStMaterialXShaderGen
 )
+pxr_register_test(testHdStMaterialXShaderGen_SSdefault
+    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testHdStMaterialXShaderGen --filename standard_surface_default.mtlx --config materialTag:customTag"
+    EXPECTED_RETURN_CODE 0
+    STDOUT_REDIRECT shadergen_SSdefault.out
+    DIFF_COMPARE shadergen_SSdefault.out
+    TESTENV testHdStMaterialXShaderGen
+)
 pxr_register_test(testHdStMaterialXShaderGen_UsdPStextured
-    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testHdStMaterialXShaderGen --filename usd_preview_surface_brass_tiled.mtlx --textureMap image_color_file:diffuseColor --textureMap image_roughness_file:roughness"
+    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testHdStMaterialXShaderGen --filename usd_preview_surface_brass_tiled.mtlx --textureName image_color_file --textureName image_roughness_file"
     EXPECTED_RETURN_CODE 0
     STDOUT_REDIRECT shadergen_UsdPStextured.out
     DIFF_COMPARE shadergen_UsdPStextured.out
     TESTENV testHdStMaterialXShaderGen
 )
 pxr_register_test(testHdStMaterialXShaderGen_SStextured
-    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testHdStMaterialXShaderGen --filename standard_surface_brass_tiled.mtlx --textureMap image_color_file:diffuseColor --textureMap image_roughness_file:roughness --primvarMap uv:vector2"
+    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testHdStMaterialXShaderGen --filename standard_surface_brass_tiled.mtlx --textureName image_color_file --textureName image_roughness_file --primvarMap uv:vector2"
     EXPECTED_RETURN_CODE 0
     STDOUT_REDIRECT shadergen_SStextured.out
     DIFF_COMPARE shadergen_SStextured.out
@@ -2928,8 +2918,8 @@ pxr_register_test(testHdStMaterialXShaderGen_UsdPSglass
     DIFF_COMPARE shadergen_UsdPSglass.out
     TESTENV testHdStMaterialXShaderGen
 )
-pxr_register_test(testHdStMaterialXShaderGen8_SStextured_bindless
-    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testHdStMaterialXShaderGen --filename standard_surface_brass_tiled.mtlx --textureMap image_color_file:diffuseColor --textureMap image_roughness_file:roughness --primvarMap uv:vector2 --bindless"
+pxr_register_test(testHdStMaterialXShaderGen_SStextured_bindless
+    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testHdStMaterialXShaderGen --filename standard_surface_brass_tiled.mtlx --textureName image_color_file --textureName image_roughness_file --primvarMap uv:vector2 --bindless"
     EXPECTED_RETURN_CODE 0
     STDOUT_REDIRECT shadergen_SStextured_bindless.out
     DIFF_COMPARE shadergen_SStextured_bindless.out

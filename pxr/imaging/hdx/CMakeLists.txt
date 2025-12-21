@@ -63,6 +63,7 @@ pxr_library(hdx
         selectionTracker
         shadowTask
         simpleLightTask
+        stormCheck
         skydomeTask
         task
         taskController

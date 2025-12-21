@@ -13,6 +13,7 @@ pxr_library(usdviewq
         hd
 
     PUBLIC_CLASSES
+        debugCodes
         hydraObserver
         utils
         
@@ -60,11 +61,13 @@ pxr_library(usdviewq
         qt.py
         rootDataModel.py
         selectionDataModel.py
+        splineViewer.py
         viewSettingsDataModel.py
         freeCamera.py
         debugFlagsWidget.py
         configController.py
         usdviewstyle.qss
+        validationWidget.py
 
     PYSIDE_UI_FILES
         mainWindowUI.ui

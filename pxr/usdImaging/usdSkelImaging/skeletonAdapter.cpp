@@ -151,6 +151,10 @@ UsdSkelImagingSkeletonAdapter::Populate(
             
             // Insert two computations ...
             UsdPrim const& skinnedPrim = query.GetPrim();
+            if (!skinnedPrim) {
+                continue;
+            }
+
             SdfPath skinnedPrimPath = ResolveCachePath(
                 skinnedPrim.GetPath(), instancerContext);
 
@@ -703,7 +707,8 @@ UsdSkelImagingSkeletonAdapter::GetExtent(UsdPrim const& prim,
         // Note:
         // Usd stores extent as 2 float vecs. We do an implicit 
         // conversion to doubles
-        return GfRange3d(extent[0], extent[1]);
+        const VtVec3fArray &extentConst = extent.AsConst();
+        return GfRange3d(extentConst[0], extentConst[1]);
     } else {
         // Return empty range if no value was found.
         return GfRange3d();
@@ -1044,14 +1049,14 @@ UsdSkelImagingSkeletonAdapter::GetExtComputationSceneInputNames(
 
             static TfTokenVector sceneInputNames({
                     // From the skinned prim
-                    UsdSkelImagingExtComputationInputNameTokens
+                    UsdSkelImagingExtComputationLegacyInputNameTokens
                         ->primWorldToLocal,
                     // From the skeleton
                     UsdSkelImagingExtComputationInputNameTokens
                         ->blendShapeWeights,
                     UsdSkelImagingExtComputationInputNameTokens
                         ->skinningXforms,
-                    UsdSkelImagingExtComputationInputNameTokens
+                    UsdSkelImagingExtComputationLegacyInputNameTokens
                         ->skelLocalToWorld
             });
             return sceneInputNames;
@@ -1072,7 +1077,7 @@ UsdSkelImagingSkeletonAdapter::GetExtComputationSceneInputNames(
             // This should be revisited if/when this becomes a performance issue.
             static TfTokenVector sceneInputNames({
                     // From the skinned prim
-                    UsdSkelImagingExtComputationInputNameTokens
+                    UsdSkelImagingExtComputationLegacyInputNameTokens
                         ->primWorldToLocal,
                     // From the skeleton
                     UsdSkelImagingExtComputationInputNameTokens
@@ -1083,7 +1088,7 @@ UsdSkelImagingSkeletonAdapter::GetExtComputationSceneInputNames(
                         ->skinningScaleXforms,
                     UsdSkelImagingExtComputationInputNameTokens
                         ->skinningDualQuats,
-                    UsdSkelImagingExtComputationInputNameTokens
+                    UsdSkelImagingExtComputationLegacyInputNameTokens
                         ->skelLocalToWorld
                 });
             return sceneInputNames;
@@ -1459,7 +1464,7 @@ UsdSkelImagingSkeletonAdapter::_GetExtComputationInputForSkinningComputation(
     }
 
     // primWorldToLocal
-    if (name == UsdSkelImagingExtComputationInputNameTokens
+    if (name == UsdSkelImagingExtComputationLegacyInputNameTokens
                     ->primWorldToLocal) {
         UsdGeomXformCache xformCache(time);
         GfMatrix4d primWorldToLocal =
@@ -1475,7 +1480,7 @@ UsdSkelImagingSkeletonAdapter::_GetExtComputationInputForSkinningComputation(
                     ->skinningScaleXforms ||
         name == UsdSkelImagingExtComputationInputNameTokens
                     ->skinningDualQuats ||
-        name == UsdSkelImagingExtComputationInputNameTokens
+        name == UsdSkelImagingExtComputationLegacyInputNameTokens
                     ->skelLocalToWorld ||
         name == UsdSkelImagingExtComputationInputNameTokens
                     ->blendShapeWeights)
@@ -1556,7 +1561,7 @@ UsdSkelImagingSkeletonAdapter::_GetExtComputationInputForSkinningComputation(
 
         }
 
-        if (name == UsdSkelImagingExtComputationInputNameTokens
+        if (name == UsdSkelImagingExtComputationLegacyInputNameTokens
                         ->skelLocalToWorld) {
             // PERFORMANCE:
             // Would be better if we could access a shared xformCache here?
@@ -1721,6 +1726,17 @@ _InitIdentityXforms(
                            GfMatrix4f(1));
 }
 
+double
+UsdSkelImagingSkeletonAdapter::_GetDefaultSampleTime(UsdTimeCode time)
+{
+  // For computation inputs which are constant, report their sample time offset
+  // as the beginning of the interval. The boundaries are always included as
+  // time samples for the animation (see _UnionTimeSamples()) so this
+  // ensures we don't introduce an extra time sample to the computation.
+  const GfInterval interval = _GetCurrentTimeSamplingInterval();
+  return interval.GetMin() - time.GetValue();
+}
+
 size_t
 UsdSkelImagingSkeletonAdapter::_SampleExtComputationInputForSkinningComputation(
     UsdPrim const& prim,
@@ -1765,12 +1781,12 @@ UsdSkelImagingSkeletonAdapter::_SampleExtComputationInputForSkinningComputation(
                                         skinnedPrimCachePath, time);
         size_t numPoints = restPoints.size();
         sampleValues[0] = VtValue(numPoints);
-        sampleTimes[0] = 0.f;
+        sampleTimes[0] = _GetDefaultSampleTime(time);
         return 1;
     }
 
     // primWorldToLocal
-    if (name == UsdSkelImagingExtComputationInputNameTokens
+    if (name == UsdSkelImagingExtComputationLegacyInputNameTokens
                     ->primWorldToLocal) {
         // This "CAPACITY = 4" indicates the maximum size of the stack in these 
         // TfSmallVectors. Ideally, this would be configurable by higher level 
@@ -1801,7 +1817,7 @@ UsdSkelImagingSkeletonAdapter::_SampleExtComputationInputForSkinningComputation(
                     ->skinningScaleXforms ||
         name == UsdSkelImagingExtComputationInputNameTokens
                     ->skinningDualQuats ||
-        name == UsdSkelImagingExtComputationInputNameTokens
+        name == UsdSkelImagingExtComputationLegacyInputNameTokens
                     ->skelLocalToWorld ||
         name == UsdSkelImagingExtComputationInputNameTokens
                     ->blendShapeWeights)
@@ -1876,7 +1892,7 @@ UsdSkelImagingSkeletonAdapter::_SampleExtComputationInputForSkinningComputation(
                                     skinnedPrimData->skinningQuery,
                                     &skinningXforms);
                 sampleValues[0] = VtValue::Take(skinningXforms);
-                sampleTimes[0] = 0.f;
+                sampleTimes[0] = _GetDefaultSampleTime(time);
                 return 1;
             }
         }
@@ -1916,12 +1932,12 @@ UsdSkelImagingSkeletonAdapter::_SampleExtComputationInputForSkinningComputation(
 
             } else {
                 sampleValues[0] = VtValue(VtFloatArray());
-                sampleTimes[0] = 0.f;
+                sampleTimes[0] = _GetDefaultSampleTime(time);
                 return 1;
             }
         }
 
-        if (name == UsdSkelImagingExtComputationInputNameTokens
+        if (name == UsdSkelImagingExtComputationLegacyInputNameTokens
                         ->skelLocalToWorld) {
             UsdPrim skelPrim(skelData->skelQuery.GetPrim());
             if (skelPrim.IsInPrototype()) {
@@ -1996,7 +2012,7 @@ UsdSkelImagingSkeletonAdapter::_SampleExtComputationInputForInputAggregator(
         // Rest points aren't expected to be time-varying.
         sampleValues[0] =
             VtValue(_GetSkinnedPrimPoints(prim, skinnedPrimCachePath, time));
-        sampleTimes[0] = 0.f;
+        sampleTimes[0] = _GetDefaultSampleTime(time);
         return 1;
     }
 
@@ -2008,7 +2024,7 @@ UsdSkelImagingSkeletonAdapter::_SampleExtComputationInputForInputAggregator(
             skinnedPrimData->skinningQuery.GetSkinningMethod();
 
         sampleValues[0] = VtValue(skinningMethod);
-        sampleTimes[0] = 0.f;
+        sampleTimes[0] = _GetDefaultSampleTime(time);
         return 1;
     }
 
@@ -2022,7 +2038,7 @@ UsdSkelImagingSkeletonAdapter::_SampleExtComputationInputForInputAggregator(
 
         // Skinning computations use float precision.
         sampleValues[0] = GfMatrix4f(geomBindXform);
-        sampleTimes[0] = 0.f;
+        sampleTimes[0] = _GetDefaultSampleTime(time);
         return 1;
     }
 
@@ -2057,7 +2073,7 @@ UsdSkelImagingSkeletonAdapter::_SampleExtComputationInputForInputAggregator(
             sampleValues[0] = VtValue(usesConstantJointPrimvar);
         }
 
-        sampleTimes[0] = 0.f;
+        sampleTimes[0] = _GetDefaultSampleTime(time);
         return 1;
     }
 
@@ -2090,7 +2106,7 @@ UsdSkelImagingSkeletonAdapter::_SampleExtComputationInputForInputAggregator(
             sampleValues[0] = VtValue(static_cast<int>(ranges.size()));
         }
 
-        sampleTimes[0] = 0.f;
+        sampleTimes[0] = _GetDefaultSampleTime(time);
         return 1;
     }
 
@@ -2572,7 +2588,8 @@ UsdSkelImagingSkeletonAdapter::_SkelData::ComputeTopologyAndRestState()
 
     _numJoints = xforms.size();
 
-    UsdSkelImagingComputeBonePoints(skelQuery.GetTopology(), xforms,
+    const VtMatrix4dArray &xformsConst = xforms.AsConst();
+    UsdSkelImagingComputeBonePoints(skelQuery.GetTopology(), xformsConst,
                                     numPoints, &_boneMeshPoints);
 
     UsdSkelImagingComputeBoneJointIndices(skelQuery.GetTopology(),
@@ -2621,8 +2638,8 @@ UsdSkelImagingSkeletonAdapter::_SkelData::ComputePoints(
         }
 
         if(TF_VERIFY(_boneMeshPoints.size() == _boneMeshJointIndices.size())) {
-
             VtVec3fArray skinnedPoints(_boneMeshPoints);
+            skinnedPoints.MakeUnique();
 
             const int* jointIndices = _boneMeshJointIndices.cdata();
             const GfMatrix4d* jointXforms = xforms.cdata();

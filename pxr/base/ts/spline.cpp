@@ -110,8 +110,17 @@ bool TsSpline::IsTimeValued() const
 
 void TsSpline::SetCurveType(const TsCurveType curveType)
 {
-    _PrepareForWrite();
-    _data->curveType = curveType;
+    // Only do work if we're actually making a change.
+    if (!_data || _data->curveType != curveType) {
+        _PrepareForWrite();
+        _data->curveType = curveType;
+
+        // If we're switching to Hermite, we may need to recalculate tangent
+        // widths to ensure they're all 1/3 the segment width.
+        if (curveType == TsCurveTypeHermite) {
+            _UpdateAllTangents();
+        }
+    }
 }
 
 TsCurveType TsSpline::GetCurveType() const
@@ -198,11 +207,8 @@ void TsSpline::SetKnots(const TsKnotMap &knots)
     for (const TsKnot &knot : knots)
         _data->PushKnot(knot._GetData(), knot.GetCustomData());
 
-    // De-regress.
-    if (TsEditBehaviorBlock::GetStack().empty())
-    {
-        AdjustRegressiveTangents();
-    }
+    // Adjust auto tangents and de-regress as needed
+    _UpdateAllTangents();
 }
 
 bool TsSpline::CanSetKnot(
@@ -218,19 +224,6 @@ bool TsSpline::CanSetKnot(
                 "into spline of value type '%s'",
                 knot.GetValueType().GetTypeName().c_str(),
                 GetValueType().GetTypeName().c_str());
-        }
-        return false;
-    }
-
-    if (knot.GetCurveType() != GetCurveType())
-    {
-        if (reasonOut)
-        {
-            *reasonOut = TfStringPrintf(
-                "Cannot set knot of curve type '%s' "
-                "into spline of curve type '%s'",
-                TfEnum::GetName(knot.GetCurveType()).c_str(),
-                TfEnum::GetName(GetCurveType()).c_str());
         }
         return false;
     }
@@ -256,23 +249,8 @@ bool TsSpline::SetKnot(
     // Copy knot data.
     const size_t idx = _data->SetKnot(knot._GetData(), knot.GetCustomData());
 
-    // De-regress.
-    if (TsEditBehaviorBlock::GetStack().empty()
-        && _data->curveType == TsCurveTypeBezier)
-    {
-        // Find indices of knots bounding segments that the knot is part of.
-        const size_t first = (idx == 0 ? idx : idx - 1);
-        const size_t last = (idx == _data->times.size() - 1 ? idx : idx + 1);
-
-        // Process zero, one, or two segments.
-        for (size_t i = first; i < last; i++)
-        {
-            Ts_KnotData* const startKnot = _data->GetKnotPtrAtIndex(i);
-            Ts_KnotData* const endKnot = _data->GetKnotPtrAtIndex(i + 1);
-            Ts_RegressionPreventerBatchAccess::ProcessSegment(
-                startKnot, endKnot, GetAntiRegressionAuthoringMode());
-        }
-    }
+    // Update algorithmic tangents and deregress.
+    _UpdateKnotTangents(idx);
 
     return true;
 }
@@ -287,6 +265,11 @@ void TsSpline::_SetKnotUnchecked(
 TsKnotMap TsSpline::GetKnots() const
 {
     return TsKnotMap(_GetData());
+}
+
+TsKnotMap TsSpline::GetKnots(const GfInterval& timeInterval) const
+{
+    return TsKnotMap(_GetData(), timeInterval);
 }
 
 bool TsSpline::GetKnot(
@@ -331,6 +314,88 @@ void TsSpline::RemoveKnot(
     _data->RemoveKnotAtTime(time);
 
     // XXX TODO: compute affected interval
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Loop Baking
+
+bool TsSpline::BakeInnerLoops()
+{
+    if (!_data || !_data->HasInnerLoops()) {
+        // No inner loops to bake, we're done.
+        return true;
+    }
+
+    const GfInterval allTime = GfInterval::GetFullInterval();
+    const bool noExtrapLoops = false;
+
+    Ts_SplineData* bakedData = Ts_Bake(_GetData(),
+                                       allTime,
+                                       noExtrapLoops);
+
+    if (bakedData) {
+        // It worked, store the baked results back in this spline, releasing the
+        // old data.
+        _data.reset(bakedData);
+
+        return true;
+    }
+
+    return false;
+}
+
+TsKnotMap TsSpline::GetKnotsWithInnerLoopsBaked() const
+{
+    TsKnotMap result;
+
+    if (_data && _data->HasInnerLoops()) {
+        const GfInterval allTime = GfInterval::GetFullInterval();
+        const bool noExtrapLoops = false;
+
+        Ts_SplineData* bakedData = Ts_Bake(_GetData(),
+                                           allTime,
+                                           noExtrapLoops);
+
+        if (bakedData) {
+            result = TsKnotMap(bakedData);
+            delete bakedData;
+
+            return result;
+        }
+    }
+
+    result = GetKnots();
+    return result;
+}
+
+TsKnotMap TsSpline::GetKnotsWithLoopsBaked(
+    const GfInterval& timeInterval) const
+{
+    TsKnotMap result;
+
+    if (_data &&
+        !_data->times.empty() &&
+        (_data->HasInnerLoops() ||
+         _data->preExtrapolation.IsLooping() ||
+         _data->postExtrapolation.IsLooping()))
+    {
+        // We have looping somewhere.
+        const bool includeExtrapLoops = true;
+
+        Ts_SplineData* bakedData = Ts_Bake(_GetData(),
+                                           timeInterval,
+                                           includeExtrapLoops);
+
+        if (bakedData) {
+            result = TsKnotMap(bakedData);
+            delete bakedData;
+        }
+
+        return result;
+    }
+
+    result = GetKnots(timeInterval);
+    return result;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -584,6 +649,47 @@ void TsSpline::_PrepareForWrite(TfType valueType)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// Breakdown
+bool
+TsSpline::Breakdown(
+    TsTime time,
+    GfInterval *affectedIntervalOut /* = nullptr */)
+{
+    std::string reason;
+
+    GfInterval localAffectedInterval;
+    GfInterval* affectedIntervalPtr = (affectedIntervalOut
+                                       ? affectedIntervalOut
+                                       : &localAffectedInterval);
+
+    _PrepareForWrite();
+    return Ts_Breakdown(_data.get(),
+                        time,
+                        false,  // testOnly
+                        affectedIntervalPtr,
+                        &reason);
+}
+
+bool
+TsSpline::CanBreakdown(
+    TsTime time,
+    std::string *reason /* = nullptr */)
+{
+    std::string localReason;
+    std::string* reasonPtr = (reason
+                              ? reason
+                              : &localReason);
+
+    GfInterval affectedInterval;
+
+    return Ts_Breakdown(_data.get(),
+                        time,
+                        true,  // testOnly
+                        &affectedInterval,
+                        reasonPtr);
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // Anti-Regression
 
 #ifndef PXR_TS_DEFAULT_ANTI_REGRESSION_AUTHORING_MODE
@@ -700,6 +806,50 @@ bool TsSpline::AdjustRegressiveTangents()
     }
 
     return splineChanged;
+}
+
+bool TsSpline::_UpdateAllTangents()
+{
+    bool result = false;
+
+    // _UpdateAllTangents should only be called as part of updating spline knots
+    // so we should already be editing the spline data, but just to be safe...
+    _PrepareForWrite();
+
+    for (size_t i = 0; i < _data->times.size(); ++i) {
+        result = _data->UpdateKnotTangentsAtIndex(i) || result;
+    }
+
+    result = AdjustRegressiveTangents() || result;
+
+    return result;
+}
+
+bool TsSpline::_UpdateKnotTangents(const size_t idx)
+{
+    bool result = false;
+
+    // Find indices of knots bounding segments that the knot is part of.
+    const size_t first = (idx > 0 ? idx - 1 : idx);
+    const size_t last = (idx < _data->times.size() - 1 ? idx + 1 : idx);
+
+    // Process 1, 2, or 3 knots
+    for (size_t i = first; i <= last; ++i) {
+        result = _data->UpdateKnotTangentsAtIndex(i) || result;
+    }
+        
+    if (_data->curveType == TsCurveTypeBezier) {
+        // Process 0, 1, or 2 segments.
+        for (size_t i = first; i < last; i++)
+        {
+            Ts_KnotData* const startKnot = _data->GetKnotPtrAtIndex(i);
+            Ts_KnotData* const endKnot = _data->GetKnotPtrAtIndex(i + 1);
+            result = Ts_RegressionPreventerBatchAccess::ProcessSegment(
+                startKnot, endKnot, GetAntiRegressionAuthoringMode()) || result;
+        }
+    }
+
+    return result;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

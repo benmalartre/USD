@@ -58,7 +58,8 @@ public:
         SdfPath result = _inputDataSource->GetTypedValue(shutterOffset);
 
         if (result.IsAbsolutePath()) {
-            return result.ReplacePrefix(SdfPath::AbsoluteRootPath(), _prefix);
+            return result.ReplacePrefix(SdfPath::AbsoluteRootPath(), _prefix,
+                /* fixTargetPaths = */false);
         }
 
         return result;
@@ -116,7 +117,8 @@ public:
         // common so we acknowledge that this will trigger copy-on-write.
         for (SdfPath &path : result) {
             if (path.IsAbsolutePath()) {
-                path = path.ReplacePrefix(SdfPath::AbsoluteRootPath(), _prefix);
+                path = path.ReplacePrefix(SdfPath::AbsoluteRootPath(), _prefix,
+                    /* fixTargetPaths = */false);
             }
         }
 
@@ -287,7 +289,13 @@ HdSceneIndexPrim
 HdPrefixingSceneIndex::GetPrim(const SdfPath &primPath) const
 {
     if (!primPath.HasPrefix(_prefix)) {
-        return {TfToken(), nullptr};
+        if (_prefix.HasPrefix(primPath)) {
+            static HdContainerDataSourceHandle const empty =
+                HdRetainedContainerDataSource::New();
+            return {TfToken(), empty};
+        } else {
+            return {TfToken(), nullptr};
+        }
     }
 
     const SdfPath inputScenePath = _RemovePathPrefix(primPath);
@@ -423,13 +431,18 @@ HdPrefixingSceneIndex::_PrimsDirtied(
 inline SdfPath 
 HdPrefixingSceneIndex::_AddPathPrefix(const SdfPath &primPath) const 
 {
-    return primPath.ReplacePrefix(SdfPath::AbsoluteRootPath(), _prefix);
+    // We don't expect target paths, like `/a.foo[/target]`.
+    // primPath may contain a property, like `/a.foo`.
+    return primPath.ReplacePrefix(
+        SdfPath::AbsoluteRootPath(), _prefix, /* fixTargetPaths = */false);
 }
 
 inline SdfPath 
 HdPrefixingSceneIndex::_RemovePathPrefix(const SdfPath &primPath) const 
 {
-    return primPath.ReplacePrefix(_prefix, SdfPath::AbsoluteRootPath());
+    // See above.
+    return primPath.ReplacePrefix(
+        _prefix, SdfPath::AbsoluteRootPath(), /* fixTargetPaths = */false);
 }
 
 PXR_NAMESPACE_CLOSE_SCOPE

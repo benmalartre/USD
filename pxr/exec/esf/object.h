@@ -13,14 +13,21 @@
 
 #include "pxr/exec/esf/api.h"
 #include "pxr/exec/esf/fixedSizePolymorphicHolder.h"
+#include "pxr/exec/esf/schemaConfigKey.h"
+#include "pxr/exec/esf/stage.h"
 
 #include "pxr/usd/sdf/path.h"
 
 PXR_NAMESPACE_OPEN_SCOPE
 
+class EsfAttribute;
 class EsfJournal;
+class EsfObject;
 class EsfPrim;
+class EsfRelationship;
 class TfToken;
+class TfType;
+class VtValue;
 
 /// Scene object abstraction for scene adapter implementations.
 ///
@@ -48,9 +55,63 @@ public:
     /// \see UsdObject::GetName
     ESF_API TfToken GetName(EsfJournal *journal) const;
 
-    /// Returns the prim that owns this EsfObject. If this EsfObject is already
-    /// a prim, returns this object as a prim.
+    /// \see UsdObject::GetPrim
     ESF_API EsfPrim GetPrim(EsfJournal *journal) const;
+
+    /// \see UsdObject::GetStage
+    EsfStage GetStage() const {
+        return _GetStage();
+    }
+
+    /// Returns an opaque value that is guaranteed to be unique and stable.
+    /// 
+    /// Any prims that have the same typed schema and the same list of applied
+    /// schemas will have the same schema config key.
+    ///
+    ESF_API EsfSchemaConfigKey GetSchemaConfigKey(EsfJournal *journal) const;
+
+    /// \name Metadata
+    /// @{
+
+    /// Returns the value of the metadata field indicated by \p key.
+    ///
+    /// Emits an error if \p key is not a valid metadata key.
+    ///
+    ESF_API VtValue GetMetadata(const TfToken &key) const;
+
+    /// Returns true if the field indicated by \p key is a valid metadata field
+    /// for this object.
+    ///
+    ESF_API bool IsValidMetadataKey(const TfToken &key) const;
+
+    /// Returns the value type for the indicated \p key.
+    ///
+    /// Emits an error if \p key is not a valid metadata key.
+    ///
+    ESF_API TfType GetMetadataValueType(const TfToken &key) const;
+
+    /// @}
+
+    /// \see UsdObject::Is
+    virtual bool IsPrim() const = 0;
+
+    /// \see UsdObject::Is
+    virtual bool IsAttribute() const = 0;
+
+    /// \see UsdObject::Is
+    virtual bool IsRelationship() const = 0;
+
+    /// \see UsdObject::As
+    virtual EsfObject AsObject() const = 0;
+
+    /// \see UsdObject::As
+    virtual EsfAttribute AsAttribute() const = 0;
+
+    /// \see UsdObject::As
+    virtual EsfRelationship AsRelationship() const = 0;
+
+    /// \see UsdObject::As
+    virtual EsfPrim AsPrim() const = 0;
 
 protected:
     /// This constructor may only be called by the scene adapter implementation.
@@ -58,6 +119,12 @@ protected:
 
     /// Gets the path to this object used for journaling.
     const SdfPath &_GetPath() const { return _path; }
+
+    virtual EsfStage _GetStage() const = 0;
+
+    static EsfSchemaConfigKey CreateSchemaConfigKey(const void *const id) {
+        return EsfSchemaConfigKey(id);
+    }
 
 private:
     // Object path that will be added to EsfJournals.
@@ -67,6 +134,10 @@ private:
     virtual bool _IsValid() const = 0;
     virtual TfToken _GetName() const = 0;
     virtual EsfPrim _GetPrim() const = 0;
+    virtual EsfSchemaConfigKey _GetSchemaConfigKey() const = 0;
+    virtual VtValue _GetMetadata(const TfToken &key) const = 0;
+    virtual bool _IsValidMetadataKey(const TfToken &key) const = 0;
+    virtual TfType _GetMetadataValueType(const TfToken &key) const = 0;
 };
 
 /// Holds an implementation of EsfObjectInterface in a fixed-size buffer.
@@ -75,8 +146,7 @@ private:
 /// The size is specified as an integer literal to prevent introducing Usd as
 /// a dependency.
 ///
-class EsfObject
-    : public EsfFixedSizePolymorphicHolder<EsfObjectInterface, 48>
+class EsfObject : public EsfFixedSizePolymorphicHolder<EsfObjectInterface, 48>
 {
 public:
     using EsfFixedSizePolymorphicHolder::EsfFixedSizePolymorphicHolder;

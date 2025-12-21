@@ -362,6 +362,7 @@ class AppController(QtCore.QObject):
             self._console = None
             self._debugFlagsWindow = None
             self._interpreter = None
+            self._usdValidationWidget = None
             self._hydraSceneBrowser = None
             self._parserData = parserData
             self._noRender = parserData.noRender
@@ -819,6 +820,7 @@ class AppController(QtCore.QObject):
             self._ui.useExtentsHint.triggered.connect(self._setUseExtentsHint)
 
             self._ui.showInterpreter.triggered.connect(self._showInterpreter)
+            self._ui.showUsdValidation.triggered.connect(self._showUsdValidation)
 
             self._ui.showDebugFlags.triggered.connect(self._showDebugFlags)
 
@@ -1209,13 +1211,15 @@ class AppController(QtCore.QObject):
             if reasons:
                 err += "\n".join(reasons) + "\n"
             return err
-
-        if not Ar.GetResolver().Resolve(usdFilePath):
-            sys.stderr.write(_GetFormattedError(["File not found"]))
-            sys.exit(1)
-
+        
         if self._mallocTags != 'none':
             Tf.MallocTag.Initialize()
+
+        # Pull on the asset resolver here so that the "open stage" time does
+        # not include its initialization time for consistency with previous
+        # behavior. Otherwise, it would be instantiated when binding the
+        # resolver context prior to opening the root layer.
+        resolver = Ar.GetResolver()
 
         with self._makeTimer('open stage "%s"' % usdFilePath):
             loadSet = Usd.Stage.LoadNone if (self._unloaded or muteLayersRe) \
@@ -1223,13 +1227,20 @@ class AppController(QtCore.QObject):
             popMask = (None if populationMaskPaths is None else
                        Usd.StagePopulationMask())
 
-            # Open as a layer first to make sure its a valid file format
-            try:
-                layer = Sdf.Layer.FindOrOpen(usdFilePath)
-            except Tf.ErrorException as e:
-                sys.stderr.write(_GetFormattedError(
-                    [err.commentary.strip() for err in e.args]))
-                sys.exit(1)
+            ctx = self._resolverContextFn(usdFilePath)
+            with Ar.ResolverContextBinder(ctx):
+                # Open as a layer first to make sure its a valid file format
+                try:
+                    layer = Sdf.Layer.FindOrOpen(usdFilePath)
+                except Tf.ErrorException as e:
+                    sys.stderr.write(_GetFormattedError(
+                        [err.commentary.strip() for err in e.args]))
+                    sys.exit(1)
+
+                if not layer:
+                    if not Ar.GetResolver().Resolve(usdFilePath):
+                        sys.stderr.write(_GetFormattedError(["File not found"]))
+                        sys.exit(1)
 
             if sessionFilePath:
                 try:
@@ -1250,12 +1261,12 @@ class AppController(QtCore.QObject):
                     popMask.Add(p)
                 stage = Usd.Stage.OpenMasked(layer,
                                              sessionLayer,
-                                             self._resolverContextFn(usdFilePath),
+                                             ctx,
                                              popMask, loadSet)
             else:
                 stage = Usd.Stage.Open(layer,
                                        sessionLayer,
-                                       self._resolverContextFn(usdFilePath), 
+                                       ctx, 
                                        loadSet)
 
             self._applyStageOpenLayerMutes(stage, muteLayersRe)
@@ -1329,6 +1340,9 @@ class AppController(QtCore.QObject):
         elif self._dataModel.stage.HasAuthoredTimeCodeRange():
             self.realStartTimeCode = stageStartTimeCode
             self.realEndTimeCode = stageEndTimeCode
+
+        self._dataModel.frameRangeBegin = self.realStartTimeCode
+        self._dataModel.frameRangeEnd = self.realEndTimeCode
 
         self._ui.stageBegin.setText(str(stageStartTimeCode))
         self._ui.stageEnd.setText(str(stageEndTimeCode))
@@ -2090,6 +2104,8 @@ class AppController(QtCore.QObject):
             self._qtimer.stop()
             self._primViewUpdateTimer.start()
             self._updateOnFrameChange()
+        if self._usdValidationWidget:
+            self._usdValidationWidget.updateRunButtonState()
 
     def _advanceFrameForPlayback(self):
         sleep(max(0, 1. / self.framesPerSecond - (time() - self._lastFrameTime)))
@@ -2143,6 +2159,7 @@ class AppController(QtCore.QObject):
         value = float(self._ui.rangeBegin.text())
         if value != self.realStartTimeCode:
             self.realStartTimeCode = value
+            self._dataModel.frameRangeBegin = value
             self._UpdateTimeSamples(resetStageDataOnly=False)
 
     def _stepSizeChanged(self):
@@ -2156,6 +2173,7 @@ class AppController(QtCore.QObject):
         value = float(self._ui.rangeEnd.text())
         if value != self.realEndTimeCode:
             self.realEndTimeCode = value
+            self._dataModel.frameRangeEnd = value
             self._UpdateTimeSamples(resetStageDataOnly=False)
 
     def _frameStringChanged(self):
@@ -2679,6 +2697,13 @@ class AppController(QtCore.QObject):
         self._interpreter.activateWindow()
         self._interpreter.setFocus()
 
+    def _showUsdValidation(self):
+        if self._usdValidationWidget is None:
+            from .validationWidget import ValidationWidget
+            self._usdValidationWidget = ValidationWidget(self)
+
+        self._usdValidationWidget.show()
+
     def _showDebugFlags(self):
         if self._debugFlagsWindow is None:
             from .debugFlagsWidget import DebugFlagsWidget
@@ -2900,6 +2925,9 @@ class AppController(QtCore.QObject):
         if ext not in ('.jpg', '.png'):
             saveName += '.png'
 
+        self.SaveViewerImageToFile(saveName)
+
+    def SaveViewerImageToFile(self, saveName):
         with BusyContext():
             self.GrabViewportShot().save(saveName)
 
@@ -5453,3 +5481,41 @@ class AppController(QtCore.QObject):
             return
         if self._stageView.PollForAsynchronousUpdates():
             self._usdviewApi.UpdateViewport()
+
+    def getActiveRenderSettingsPrim(self):
+        """Returns the active render settings prim, if any. Called when
+           populating the context menu on a render settings prim."""
+        if self._stageView:
+            activeRspPath = self._stageView.GetActiveRenderSettingsPrimPath()
+
+            if activeRspPath != Sdf.Path.emptyPath:
+                return self._dataModel.stage.GetPrimAtPath(activeRspPath)
+
+        return None
+
+    def getActiveRenderPassPrim(self):
+        """Returns the active render pass prim, if any. Called when populating
+           the context menu on a render pass prim."""
+        if self._stageView:
+            activeRpPath = self._stageView.GetActiveRenderPassPrimPath()
+
+            if activeRpPath != Sdf.Path.emptyPath:
+                return self._dataModel.stage.GetPrimAtPath(activeRpPath)
+
+        return None
+
+    def setActiveRenderSettingsPrim(self, prim):
+        if not prim or not prim.IsValid():
+            return
+        
+        if self._stageView:
+            self._stageView.SetActiveRenderSettingsPrim(prim)
+            self._stageView.updateView()
+    
+    def setActiveRenderPassPrim(self, prim):
+        if not prim or not prim.IsValid():
+            return
+        
+        if self._stageView:
+            self._stageView.SetActiveRenderPassPrim(prim)
+            self._stageView.updateView()

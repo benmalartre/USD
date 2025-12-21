@@ -17,7 +17,7 @@
 #include "pxr/exec/vdf/evaluationState.h"
 #include "pxr/exec/vdf/executorBufferData.h"
 #include "pxr/exec/vdf/executionStats.h"
-#include "pxr/exec/vdf/fallbackValueRegistry.h"
+#include "pxr/exec/vdf/executionTypeRegistry.h"
 #include "pxr/exec/vdf/mask.h"
 #include "pxr/exec/vdf/networkUtil.h"
 #include "pxr/exec/vdf/node.h"
@@ -29,14 +29,8 @@
 #include "pxr/exec/vdf/vector.h"
 
 #include "pxr/base/tf/bits.h"
-#include "pxr/base/trace/trace.h"
-
 #include "pxr/base/tf/mallocTag.h"
-
-#define _VDF_PBEE_TRACE_ON 0
-#if _VDF_PBEE_TRACE_ON
-#include <iostream>
-#endif
+#include "pxr/base/trace/trace.h"
 
 PXR_NAMESPACE_OPEN_SCOPE
 
@@ -337,7 +331,7 @@ VdfPullBasedExecutorEngine<DataManagerType>::RunSchedule(
     _dataManager->Resize(*schedule.GetNetwork());
 
     // Indicates which nodes have been executed.
-    TfBits executedNodes(schedule.GetNetwork()->GetNodeCapacity());
+    TfBits executedNodes(schedule.GetScheduleNodeVector().size());
 
     // The persistent evaluation state
     VdfEvaluationState state(_GetExecutor(), schedule, errorLogger);
@@ -700,9 +694,8 @@ VdfPullBasedExecutorEngine<DataManagerType>::_ExecuteOutput(
     const VdfOutput &output, 
     TfBits *executedNodes)
 {
-#if _VDF_PBEE_TRACE_ON
-    std::cout << "----------------- _ExecuteOutput --------- " << std::endl;
-#endif
+    TF_DEBUG(VDF_PBEE_TRACE).Msg(
+        "----------------- _ExecuteOutput --------- \n");
 
     // The current schedule
     const VdfSchedule &schedule = state.GetSchedule();
@@ -746,10 +739,8 @@ VdfPullBasedExecutorEngine<DataManagerType>::_ExecuteOutput(
 
         case ExecutionStageStart:
 
-#if _VDF_PBEE_TRACE_ON
-            std::cout << "{ BeginNode(\"" 
-                      << node.GetDebugName() << "\");" << std::endl;
-#endif
+            TF_DEBUG(VDF_PBEE_TRACE)
+                .Msg("{ BeginNode(\"%s\");\n", node.GetDebugName().c_str());
 
             // We have to compute if 
             //   o The node has not been executed, yet
@@ -759,15 +750,13 @@ VdfPullBasedExecutorEngine<DataManagerType>::_ExecuteOutput(
             //     schedule.
             output = schedule.GetOutput(outputId);
             requestMask = &schedule.GetRequestMask(outputId);
-            if (executedNodes->IsSet(VdfNode::GetIndexFromId(node.GetId())) ||
+            if (executedNodes->IsSet(schedule.GetScheduleNodeIndex(outputId)) ||
                 _GetExecutor().GetOutputValue(*output, *requestMask)) {
 
                 // Pop off the top of the output stack
                 outputsStack.pop_back();
 
-#if _VDF_PBEE_TRACE_ON
-                std::cout << " EndNodeFoundCache(); }" << std::endl;
-#endif
+                TF_DEBUG(VDF_PBEE_TRACE).Msg(" EndNodeFoundCache(); }\n");
                 continue;
             }
 
@@ -886,27 +875,24 @@ VdfPullBasedExecutorEngine<DataManagerType>::_ExecuteOutput(
         default:
 
             // Set a bit indicating that this node has been executed.
-            executedNodes->Set(VdfNode::GetIndexFromId(node.GetId()));
+            executedNodes->Set(schedule.GetScheduleNodeIndex(outputId));
 
             // Compute the node.
             if (affective) {
                 _ComputeNode(state, node, absorbLockedCache);
-#if _VDF_PBEE_TRACE_ON
-            std::cout << "ComputedNode(\"" 
-                      << node.GetDebugName() 
-                      << "\"); }" << std::endl;
-#endif
+
+                TF_DEBUG(VDF_PBEE_TRACE).Msg(
+                    "ComputedNode(\"%s\"); }\n", node.GetDebugName().c_str());
 
             } else {
                 // The node doesn't have any outputs that need to be computed.
                 // Skip the node passing through the data for read/write
                 // outputs.
                 _PassThroughNode(schedule, node, absorbLockedCache);
-#if _VDF_PBEE_TRACE_ON
-                std::cout << "ComputedNodeInaffective(\"" 
-                          << node.GetDebugName() 
-                          << "\"); }" << std::endl;
-#endif
+
+                TF_DEBUG(VDF_PBEE_TRACE)
+                    .Msg("ComputedNodeInaffective(\"%s\"); }\n",
+                         node.GetDebugName().c_str());
             }
 
             // Pop the output off the stack, once we are done with it
@@ -1045,11 +1031,11 @@ VdfPullBasedExecutorEngine<DataManagerType>::_ComputeNode(
             //     to package into the output.  This can happen anywhere
             //     in the network, but for now, I only added a workaround
             //     in the EfCopyToPoolNode.
-            Vdf_FallbackValueRegistry::GetInstance().FillVector(
+            VdfExecutionTypeRegistry::FillVector(
                 output.GetSpec().GetType(),
+                requestMask.GetSize(),
                 _dataManager->GetOrCreateOutputValueForWriting(
-                    output, dataHandle),
-                requestMask.GetSize());
+                    output, dataHandle));
         }
 
         // If the node has been interrupted, make sure to reset the computed

@@ -14,6 +14,7 @@
 #include "pxr/base/tf/diagnostic.h"
 #include "pxr/base/tf/envSetting.h"
 
+#include <algorithm>
 #include <vulkan/vk_enum_string_helper.h>
 
 #include <cstring>
@@ -47,14 +48,34 @@ _VulkanDebugCallback(
     const VkDebugUtilsMessengerCallbackDataEXT* callbackData,
     void* userData)
 {
-    const char* type =
-        (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) ?
-            "VULKAN_ERROR" : "VULKAN_MESSAGE";
+    using namespace std::literals::string_view_literals;
+    static constexpr auto ignoredMessages = {
+        // This warning happens because render passes such as OIT and volume do 
+        // not write to the attachments (i.e. color AOV) specified in the 
+        // graphics pipeline.
+        "Validation Warning: [ Undefined-Value-ShaderInputNotProduced ]"sv,
+        // This warning happens during render passes, such as the shadow pass, 
+        // in which we write to a shader output (e.g. color) with no 
+        // corresponding attachment.
+        "Validation Warning: [ Undefined-Value-ShaderOutputNotConsumed ]"sv,
+    };
+
+    // If verbose debug is not enabled, we ignore messages included in 
+    // ignoredMessages.
+    const std::string_view message(callbackData->pMessage);
+    if (!HgiVulkanIsVerboseDebugEnabled() && std::any_of(
+        ignoredMessages.begin(), ignoredMessages.end(),
+        [message](const std::string_view ignoredMessage) {
+            return message.rfind(ignoredMessage, 0) == 0; })) {
+        return VK_FALSE;
+    }
 
     if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
-        TF_CODING_ERROR("%s: %s\n", type, callbackData->pMessage);
+        TF_CODING_ERROR("VULKAN_ERROR: %s\n", callbackData->pMessage);
+    } else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
+        TF_WARN("VULKAN_WARNING: %s\n", callbackData->pMessage);
     } else {
-        TF_WARN("%s: %s\n", type, callbackData->pMessage);
+        TF_STATUS("VULKAN_MESSAGE: %s\n", callbackData->pMessage);
     }
 
     return VK_FALSE;
@@ -201,7 +222,8 @@ void
 HgiVulkanBeginLabel(
     HgiVulkanDevice* device,
     HgiVulkanCommandBuffer* cb,
-    const char* label)
+    const char* label,
+    const GfVec4f& color)
 {
     if (!HgiVulkanIsDebugEnabled() || !label) {
         return;
@@ -214,6 +236,10 @@ HgiVulkanBeginLabel(
     VkCommandBuffer vkCmbuf = cb->GetVulkanCommandBuffer();
     VkDebugUtilsLabelEXT labelInfo = {VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT};
     labelInfo.pLabelName = label;
+    labelInfo.color[0] = color[0];
+    labelInfo.color[1] = color[1];
+    labelInfo.color[2] = color[2];
+    labelInfo.color[3] = color[3];
     device->vkCmdBeginDebugUtilsLabelEXT(vkCmbuf, &labelInfo);
 }
 

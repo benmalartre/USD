@@ -9,14 +9,11 @@ pxr_library(usdValidation
         gf
         usd
         work
-        ${TBB_tbb_LIBRARY}
-
-    INCLUDE_DIRS
-        ${TBB_INCLUDE_DIRS}
 
     PUBLIC_CLASSES
         context 
         error
+        fixer
         registry
         timeRange
         validator
@@ -32,6 +29,7 @@ pxr_library(usdValidation
         module.cpp
         wrapContext.cpp
         wrapError.cpp
+        wrapFixer.cpp
         wrapRegistry.cpp
         wrapTimeRange.cpp
         wrapValidator.cpp

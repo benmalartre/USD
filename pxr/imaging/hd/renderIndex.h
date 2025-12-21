@@ -130,6 +130,21 @@ public:
         const std::string &instanceName=std::string(),
         const std::string &appName=std::string());
 
+    /// Create a render index with the given render delegate that populates
+    /// itself by observing the given scene index.
+    /// Returns null if renderDelegate is null.
+    /// The render delegate and render tasks may require access to a renderer's
+    /// device provided by the application. The objects can be
+    /// passed in as 'drivers'. Hgi is an example of a HdDriver.
+    ///   hgi = Hgi::CreatePlatformDefaultHgi()
+    ///   hgiDriver = new HdDriver<Hgi*>(HgiTokens→renderDriver, hgi)
+    ///   HdRenderIndex::New(_renderDelegate, {_hgiDriver})
+    ///
+    static HdRenderIndex *New(
+        HdRenderDelegate *renderDelegate, 
+        HdDriverVector const& drivers,
+        HdSceneIndexBaseRefPtr const &terminalSceneIndex);
+
     HD_API
     ~HdRenderIndex();
 
@@ -270,14 +285,29 @@ public:
     /// \name Task Support
     // ---------------------------------------------------------------------- //
 
+    /// \deprecated
+    ///
+    /// In Hydra 2.0, tasks are managed by a scene index such as the
+    /// HdxTaskControllerSceneIndex (reimplementing HdxTaskController).
+    ///
     /// Inserts a new task into the render index with an identifier of \p id.
     template <typename T>
     void InsertTask(HdSceneDelegate* delegate, SdfPath const& id);
 
+    /// \deprecated
+    ///
+    /// In Hydra 2.0, tasks are managed by a scene index such as the
+    /// HdxTaskControllerSceneIndex (reimplementing HdxTaskController).
+    ///
     /// Removes the given task from the RenderIndex.
     HD_API
     void RemoveTask(SdfPath const& id);
 
+    /// \deprecated
+    ///
+    /// In Hydra 2.0, tasks are managed by a scene index such as the
+    /// HdxTaskControllerSceneIndex (reimplementing HdxTaskController).
+    ///
     /// Returns true if a task exists in the index with the given \p id.
     bool HasTask(SdfPath const& id) {
         return _taskMap.find(id) != _taskMap.end();
@@ -435,8 +465,9 @@ private:
         HdRenderDelegate *renderDelegate, 
         HdDriverVector const& drivers,
         const std::string &instanceName,
-        const std::string &appName);
-
+        const std::string &appName,
+        HdSceneIndexBaseRefPtr const &terminalSceneIndex);
+    
     // ---------------------------------------------------------------------- //
     // Private Helper methods 
     // ---------------------------------------------------------------------- //

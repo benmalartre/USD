@@ -48,54 +48,61 @@ public:
     ///
     static const EsfEditReason ChangedPropertyList;
 
+    /// The list of connection paths on an attribute has changed.
+    ///
+    static const EsfEditReason ChangedConnectionPaths;
+
+    /// The list of target paths on a relationship has changed.
+    ///
+    static const EsfEditReason ChangedTargetPaths;
+
     /// @}
 
     /// \name Bitwise operations
     /// @{
 
     /// Return true if this object contains any edit reasons.
-    constexpr explicit operator bool() const { return _bits; }
+    constexpr explicit operator bool() const {
+        return _bits;
+    }
 
-    constexpr bool operator==(EsfEditReason other) const
-    {
+    constexpr bool operator==(EsfEditReason other) const {
         return _bits == other._bits;
     }
 
-    constexpr EsfEditReason& operator&=(EsfEditReason other)
-    {
+    constexpr bool operator!=(EsfEditReason other) const {
+        return _bits != other._bits;
+    }
+
+    constexpr EsfEditReason& operator&=(EsfEditReason other) {
         _bits &= other._bits;
         return *this;
     }
 
-    constexpr EsfEditReason& operator|=(EsfEditReason other)
-    {
+    constexpr EsfEditReason& operator|=(EsfEditReason other) {
         _bits |= other._bits;
         return *this;
     }
 
-    constexpr EsfEditReason operator&(EsfEditReason other) const
-    {
+    constexpr EsfEditReason operator&(EsfEditReason other) const {
         return {_bits & other._bits};
     }
 
-    constexpr EsfEditReason operator|(EsfEditReason other) const
-    {
+    constexpr EsfEditReason operator|(EsfEditReason other) const {
         return {_bits | other._bits};
     }
 
     /// Return true if \p other's reasons are entirely contained by this set
     /// of reasons.
     ///
-    constexpr bool Contains(EsfEditReason other) const
-    {
+    constexpr bool Contains(EsfEditReason other) const {
         return (_bits & other._bits) == other._bits;
     }
 
     /// @}
 
     /// Enables consistent sorting of EsfEditReasons.
-    bool operator<(const EsfEditReason &other) const
-    {
+    bool operator<(const EsfEditReason &other) const {
         return _bits < other._bits;
     }
 
@@ -120,6 +127,8 @@ private:
     enum class _BitIndex : uint8_t {
         ResyncedObject,
         ChangedPropertyList,
+        ChangedConnectionPaths,
+        ChangedTargetPaths,
         Max
     };
 
@@ -141,6 +150,12 @@ inline constexpr EsfEditReason EsfEditReason::ResyncedObject(
 
 inline constexpr EsfEditReason EsfEditReason::ChangedPropertyList(
     EsfEditReason::_BitIndex::ChangedPropertyList);
+
+inline constexpr EsfEditReason EsfEditReason::ChangedConnectionPaths(
+    EsfEditReason::_BitIndex::ChangedConnectionPaths);
+
+inline constexpr EsfEditReason EsfEditReason::ChangedTargetPaths(
+    EsfEditReason::_BitIndex::ChangedTargetPaths);
 
 PXR_NAMESPACE_CLOSE_SCOPE
 

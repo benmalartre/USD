@@ -10,12 +10,18 @@
 #include "pxr/pxr.h"
 
 #include "pxr/exec/exec/compilerTaskSync.h"
+#include "pxr/exec/exec/taskCycleDetector.h"
+
+#include "pxr/base/work/dispatcher.h"
+
+#include <utility>
 
 PXR_NAMESPACE_OPEN_SCOPE
 
 class EsfStage;
 class Exec_CompilationTask;
 class Exec_Program;
+class WorkDispatcher;
 
 /// Data shared between all compilation tasks.
 /// 
@@ -28,12 +34,19 @@ class Exec_CompilationState
 {
 public:
     Exec_CompilationState(
+        WorkDispatcher &dispatcher,
         const EsfStage &stage,
-        Exec_Program *program) :
-        _stage(stage),
-        _program(program)
-    {
+        Exec_Program *program)
+        : _dispatcher(dispatcher)
+        , _stage(stage)
+        , _outputTasks(dispatcher)
+        , _program(program) {
         TF_VERIFY(_program);
+    }
+
+    /// The dispatcher for running tasks.
+    WorkDispatcher &GetDispatcher() {
+        return _dispatcher;
     }
 
     /// The scene adapter stage.
@@ -46,20 +59,42 @@ public:
         return _program;
     }
 
-    class OutputTasksAccess {
+    /// Gets object for tracking potential task cycles.
+    Exec_TaskCycleDetector &GetTaskCycleDetector() {
+        return _taskCycleDetector;
+    }
+
+    /// Extends access to the various Exec_CompilerTaskSync<T> members.
+    class TaskSyncAccess {
         friend class Exec_CompilationTask;
 
-        static Exec_CompilerTaskSync &_Get(Exec_CompilationState *state) {
+        static Exec_OutputProvidingTaskSync &
+        _GetOutputProvidingTaskSync(Exec_CompilationState *state) {
             return state->_outputTasks;
         }
     };
 
-private:
+    /// Constructs and runs a new top-level compilation task.
+    template<class TaskType, class ... Args>
+    static void NewTask(Exec_CompilationState &state, Args&&... args);
 
+private:
+    WorkDispatcher &_dispatcher;
     const EsfStage &_stage;
-    Exec_CompilerTaskSync _outputTasks;
+    Exec_TaskCycleDetector _taskCycleDetector;
+    Exec_OutputProvidingTaskSync _outputTasks;
     Exec_Program *_program;
 };
+
+template<class TaskType, class ... Args>
+void
+Exec_CompilationState::NewTask(Exec_CompilationState &state, Args&&... args)
+{
+    // TODO: We need a small-object task allocator.
+    // Tasks manage their own lifetime, and delete themselves after completion.
+    TaskType *const task = new TaskType(state, std::forward<Args>(args)...);
+    state._dispatcher.Run(std::ref(*task));
+}
 
 PXR_NAMESPACE_CLOSE_SCOPE
 

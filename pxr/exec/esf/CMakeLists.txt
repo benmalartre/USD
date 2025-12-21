@@ -12,18 +12,24 @@ pxr_library(esf
     PUBLIC_HEADERS
         api.h
         journal.h
+        schemaConfigKey.h
 
     PUBLIC_CLASSES
         attribute
+        attributeQuery
         editReason
         fixedSizePolymorphicHolder
         object
         prim
         property
+        relationship
         stage
 
     RESOURCE_FILES
         plugInfo.json
+
+    DOXYGEN_FILES
+        README.md
 )
 
 pxr_build_test(testEsfFixedSizePolymorphicHolder

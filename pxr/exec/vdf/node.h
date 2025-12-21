@@ -12,10 +12,10 @@
 #include "pxr/pxr.h"
 
 #include "pxr/exec/vdf/api.h"
+#include "pxr/exec/vdf/connectorMap.h"
 #include "pxr/exec/vdf/connectorSpecs.h"
 #include "pxr/exec/vdf/input.h"
 #include "pxr/exec/vdf/inputAndOutputSpecs.h"
-#include "pxr/exec/vdf/linearMap.h"
 #include "pxr/exec/vdf/mask.h"
 #include "pxr/exec/vdf/output.h"
 #include "pxr/exec/vdf/request.h"
@@ -24,12 +24,14 @@
 #include "pxr/base/arch/demangle.h"
 #include "pxr/base/arch/functionLite.h"
 #include "pxr/base/tf/iterator.h"
+#include "pxr/base/tf/mallocTag.h"
 #include "pxr/base/tf/token.h"
 
 #include <functional>
 #include <string>
 #include <typeinfo>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 PXR_NAMESPACE_OPEN_SCOPE
@@ -53,11 +55,11 @@ private:
 
     // Map of tokens to output connectors.
     //
-    typedef VdfLinearMap<TfToken, VdfOutput *> _TokenOutputMap;
+    using _TokenOutputMap = VdfConnectorMap<VdfOutput>;
 
     // Map of tokens to input connectors.
     //
-    typedef VdfLinearMap<TfToken, VdfInput *> _TokenInputMap;
+    using _TokenInputMap = VdfConnectorMap<VdfInput>;
 
 public:
 
@@ -302,28 +304,26 @@ public:
     VDF_API
     void SetDebugName(const std::string &name);
 
-    /// Sets the debug name for this node with a lazily invoked callback
-    ///
-    /// The callback is formed from callable object 'f' and wrapped in a
-    /// std::function instance. If the callback is not invocable, we return
-    /// without setting the debug name.
+    /// Sets the debug name for this node with a lazily invoked callback.
     ///
     /// By default, a node's debug name is the node type name; this function
-    /// appends \p name to the node type name.
+    /// appends the string returned by \p f to the node type name.
     ///
     template <class F>
     void SetDebugNameCallback(F &&f) {
-        TfAutoMallocTag2 tag("Vdf", __ARCH_PRETTY_FUNCTION__);
-
-        VdfNodeDebugNameCallback callback = 
-            [fn = std::forward<F>(f)] { return fn(); };
-        if (!callback) {
-            TF_CODING_ERROR("Null callback for node: %s",
-                ArchGetDemangled(typeid(*this)).c_str());
-        } else {
-            _network._RegisterNodeDebugName(*this, callback);
-        }  
+        TfAutoMallocTag tag("Vdf", __ARCH_PRETTY_FUNCTION__);
+        SetDebugNameCallback(VdfNodeDebugNameCallback(std::forward<F>(f)));
     }
+
+    /// Sets the debug name for this node with a lazily invoked callback.
+    ///
+    /// By default, a node's debug name is the node type name; this function
+    /// appends the string returned by \p callback to the node type name.
+    ///
+    /// If \p callback is empty, return without setting the debug name.
+    ///
+    VDF_API
+    void SetDebugNameCallback(VdfNodeDebugNameCallback &&callback);
 
     /// Returns the debug name for this node, if one is registered. Otherwise,
     /// returns the node type name by default. 

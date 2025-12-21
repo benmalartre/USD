@@ -13,6 +13,7 @@
 #include "pxr/imaging/hd/changeTracker.h"
 #include "pxr/imaging/hd/command.h"
 #include "pxr/imaging/hd/dataSource.h"
+#include "pxr/imaging/hd/rendererCreateArgs.h"
 #include "pxr/base/vt/dictionary.h"
 #include "pxr/base/tf/token.h"
 
@@ -29,6 +30,7 @@ class HdRenderIndex;
 class HdRenderPass;
 class HdInstancer;
 class HdDriver;
+class Hgi;
 
 TF_DECLARE_REF_PTRS(HdSceneIndexBase);
 
@@ -73,6 +75,9 @@ public:
     /// Since this method can be called by client code, it must be thread-safe.
     HD_API
     virtual bool HasArbitraryValue(const TfToken& key) const;
+
+    HD_API
+    virtual bool IsValid() const;
 
 private:
     // Hydra will not attempt to copy the class.

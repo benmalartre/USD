@@ -13,10 +13,7 @@ pxr_library(ef
         trace
         usd
         work
-        ${TBB_tbb_LIBRARY}
-
-    INCLUDE_DIRS
-        ${TBB_INCLUDE_DIRS}
+        TBB::tbb
 
     PUBLIC_HEADERS
         api.h
@@ -33,6 +30,7 @@ pxr_library(ef
         leafNode
         leafNodeCache
         leafNodeIndexer
+        loftedOutputSet
         maskedSubExecutor
         outputValueCache
         pageCache
@@ -42,6 +40,9 @@ pxr_library(ef
         timeInputNode
         timeInterval
         vectorKey
+
+    DOXYGEN_FILES
+        README.md
 )
 
 pxr_build_test(testEfDependencyCache

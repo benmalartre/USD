@@ -19,7 +19,7 @@ HdStStagingBuffer::HdStStagingBuffer(HdStResourceRegistry *resourceRegistry)
     , _capacity(0)
     , _activeSlot(0)
 {
-    _tripleBuffered = resourceRegistry->GetHgi()->GetCapabilities()->
+    _isUma = resourceRegistry->GetHgi()->GetCapabilities()->
                           IsSet(HgiDeviceCapabilitiesBitsUnifiedMemory);
 }
 
@@ -70,8 +70,8 @@ HdStStagingBuffer::StageCopy(HgiBufferCpuToGpuOp const &copyOp)
     // expensive than just submitting the CPU to GPU copy operation directly.
     // The value of 'queueThreshold' is estimated (when is the extra memcpy
     // into the staging buffer slower than immediately issuing a gpu upload)
-    static const int queueThreshold = 512*1024;
-    if (!_tripleBuffered && copyOp.byteSize > queueThreshold) {
+    static constexpr int queueThreshold = 512 * 1024;
+    if (!_isUma && copyOp.byteSize > queueThreshold) {
         HgiBlitCmds* blitCmds = _resourceRegistry->GetGlobalBlitCmds();
         blitCmds->CopyBufferCpuToGpu(copyOp);
         return;
@@ -86,6 +86,7 @@ HdStStagingBuffer::StageCopy(HgiBufferCpuToGpuOp const &copyOp)
         buffer->GetDescriptor().byteSize < _capacity ||
         buffer->GetDescriptor().byteSize > _capacity * recoveryRatio) {
         HgiBufferDesc bufferDesc;
+        bufferDesc.debugName = "HdStStagingBuffer";
         bufferDesc.byteSize = _capacity;
 
         Hgi* hgi = _resourceRegistry->GetHgi();
@@ -153,7 +154,7 @@ HdStStagingBuffer::Flush()
 
     blitCmds->PushDebugGroup(__ARCH_PRETTY_FUNCTION__);
 
-    if (!_tripleBuffered) {
+    if (!_isUma) {
         // If this isn't UMA then blit the staging buffer to GPU.
         HgiBufferCpuToGpuOp op;
         HgiBufferHandle buffer = _handles[_activeSlot];
@@ -166,9 +167,9 @@ HdStStagingBuffer::Flush()
         op.destinationByteOffset = 0;
         op.byteSize = _head;
         blitCmds->CopyBufferCpuToGpu(op);
-        blitCmds->InsertMemoryBarrier(HgiMemoryBarrierAll);
     }
 
+    blitCmds->InsertMemoryBarrier(HgiMemoryBarrierAll);
     for (auto const &copyOp : _gpuCopyOps) {
         blitCmds->CopyBufferGpuToGpu(copyOp);
     }
@@ -178,7 +179,7 @@ HdStStagingBuffer::Flush()
     _gpuCopyOps.clear();
     _head = 0;
 
-    if (_tripleBuffered) {
+    if (_isUma) {
         _activeSlot++;
         _activeSlot = (_activeSlot < MULTIBUFFERING) ? _activeSlot : 0;
     }

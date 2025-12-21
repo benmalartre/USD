@@ -2917,6 +2917,82 @@ class TestUsdNamespaceEditorDependentEditsBasicClassArcs(
 
         self._RunTestNestedClassClassArcs("specializes")
 
+    def _RunTestSiblingClassArcs(self, classArcType):
+        layer1 = Sdf.Layer.CreateAnonymous("layer1.usda")
+        layer1ImportString = '''#usda 1.0
+            def "Model"
+            {
+                def "Child"
+                {
+                    int modelChildAttr
+                }
+
+                def "SiblingArc" (
+                    ''' + classArcType + ''' = </Model/Child>
+                ) {
+                    int siblingArcAttr
+                }
+            }
+
+        '''
+        layer1.ImportFromString(layer1ImportString)
+
+        stage1 = Usd.Stage.Open(layer1, Usd.Stage.LoadAll)
+        editor = Usd.NamespaceEditor(stage1)
+
+        # Verify the initial composition fields.
+        self.assertEqual(self._GetCompositionFieldsInLayer(layer1), {
+            '/Model/SiblingArc' : {
+                classArcType : ('/Model/Child',)
+            },
+        })
+
+        modelContents = {
+            'Child': {
+                '.' : ['modelChildAttr']
+            },
+            'SiblingArc': {
+                '.': ['siblingArcAttr', 'modelChildAttr']
+            }
+        }
+
+        # Verify the expected contents of stage 1
+        self._VerifyStageContents(stage1, {
+            'Model': modelContents, 
+        })
+
+        # Edit: Rename /Model to /RenamedModel
+        # This is to check that class arcs targeting sibling prims have their 
+        # paths correctly updated when a parent is renamed.
+        with self.ApplyEdits(editor, "Move /Model-> /RenamedModel"):
+            self.assertTrue(editor.MovePrimAtPath(
+                '/Model', '/RenamedModel'))
+            
+        # Verify the updated composition fields in layer1.
+        self.assertEqual(self._GetCompositionFieldsInLayer(layer1), {
+            '/RenamedModel/SiblingArc' : {
+                classArcType : ('/RenamedModel/Child',)
+            },
+        })
+
+        self._VerifyStageContents(stage1, {
+            'RenamedModel' : modelContents
+        })
+        self._VerifyStageResyncNotices(stage1, {
+            "/Model" : self.PrimResyncType.RenameSource,
+            "/RenamedModel" : self.PrimResyncType.RenameDestination,
+        })
+
+    def test_TestSiblingInherits(self):
+        """Test that a prim that inherits from a sibling has its inherit path 
+        correctly updated when the parent path is changed."""
+        self._RunTestSiblingClassArcs("inherits")
+
+    def test_TestSiblingSpecializes(self):
+        """Test that a prim that specializes from a sibling has its specializes 
+        path correctly updated when the parent path is changed."""
+        self._RunTestSiblingClassArcs("specializes")
+
     def test_TestMixedInheritAndSpecializesClassHierarchies(self):
         """Tests downstream dependency namespace edits across a mix of inherits
         and specializes arcs in a single nested class hierarchy."""
@@ -3534,11 +3610,6 @@ class TestUsdNamespaceEditorDependentEditsBasicClassArcs(
             "/Instance3": self.PrimResyncType.UnchangedPrimStack
         })
 
-        # XXX: The verifications of stage2 and stage3 contents are commnented
-        # out do to a bug/limitation with the prim index graph that prevents us
-        # from being able to find all the implied class spec dependencies when
-        # inherits arcs are nested under specializes arcs.
-
         # Verify the changed contents of stage2 where "Child" is renamed to
         # "RenamedChild" under every implied class spec to match the renames in
         # classes they were implied from. Instance1 has its child prim "Child"
@@ -3551,68 +3622,69 @@ class TestUsdNamespaceEditorDependentEditsBasicClassArcs(
         # dependencies in stage3 on all the specs in layer2 as stage2 was not 
         # added as a dependent stage of the namespace editor. If stage3 didn't 
         # have prims that depend on these layer2 specs, the layer2 specs would
-        # not have updated to reflect the rename.
-        #
-        # self._VerifyStageContents(stage2, {
-        #     'ClassD' : {
-        #         '.' : ['implied2ClassDAttr'],
-        #         'RenamedChild' : {
-        #             '.' : ['implied2ChildDAttr'],
-        #             'GrandChild' : {
-        #                 '.' : ['implied2GrandChildDAttr']
-        #             }
-        #         }    
-        #     },
-        #     'ClassC' : {
-        #         '.' : ['implied2ClassCAttr'],
-        #         'RenamedChild' : {
-        #             '.' : ['implied2ChildCAttr'],
-        #             'GrandChild' : {
-        #                 '.' : ['implied2GrandChildCAttr']
-        #             }
-        #         }    
-        #     },
-        #     'ClassB' : {
-        #         '.' : ['implied2ClassBAttr'],
-        #         'RenamedChild' : {
-        #             '.' : ['implied2ChildBAttr'],
-        #             'GrandChild' : {
-        #                 '.' : ['implied2GrandChildBAttr']
-        #             }
-        #         }    
-        #     },
-        #     'ClassA' : {
-        #         '.' : ['implied2ClassAAttr'],
-        #         'RenamedChild' : {
-        #             '.' : ['implied2ChildAAttr'],
-        #             'GrandChild' : {
-        #                 '.' : ['implied2GrandChildAAttr']
-        #             }
-        #         }    
-        #     },
-        #     'Instance1' : {
-        #         '.' : stage2RefComposedAttrs, 
-        #         'RenamedChild' : stage2ChildComposedContents,
-        #     },
-        #     'Instance2' : stage2ChildComposedContents,
-        #     'Instance3' : {
-        #         '.' : stage2GrandChildComposedAttrs
-        #     },
-        # })
-        # self._VerifyStageResyncNotices(stage2, {
-        #     "/ClassD/Child" : self.PrimResyncType.Delete,
-        #     "/ClassD/RenamedChild" : self.PrimResyncType.Other,
-        #     "/ClassC/Child" : self.PrimResyncType.Delete,
-        #     "/ClassC/RenamedChild" : self.PrimResyncType.Other,
-        #     "/ClassB/Child" : self.PrimResyncType.Delete,
-        #     "/ClassB/RenamedChild" : self.PrimResyncType.Other,
-        #     "/ClassA/Child" : self.PrimResyncType.Delete,
-        #     "/ClassA/RenamedChild" : self.PrimResyncType.Other,
-        #     "/Instance1/Child" : self.PrimResyncType.Delete,
-        #     "/Instance1/RenamedChild" : self.PrimResyncType.Other,
-        #     "/Instance2": self.PrimResyncType.UnchangedPrimStack,
-        #     "/Instance3": self.PrimResyncType.UnchangedPrimStack
-        # })
+        # not have updated to reflect the rename. Also, stage2 can only report
+        # "Delete" or "Other" resyncs, since the analysis for finer-grained
+        # classifications only occurs on dependent stages.
+        self._VerifyStageContents(stage2, {
+            'ClassD' : {
+                '.' : ['implied2ClassDAttr'],
+                'RenamedChild' : {
+                    '.' : ['implied2ChildDAttr'],
+                    'GrandChild' : {
+                        '.' : ['implied2GrandChildDAttr']
+                    }
+                }    
+            },
+            'ClassC' : {
+                '.' : ['implied2ClassCAttr'],
+                'RenamedChild' : {
+                    '.' : ['implied2ChildCAttr'],
+                    'GrandChild' : {
+                        '.' : ['implied2GrandChildCAttr']
+                    }
+                }    
+            },
+            'ClassB' : {
+                '.' : ['implied2ClassBAttr'],
+                'RenamedChild' : {
+                    '.' : ['implied2ChildBAttr'],
+                    'GrandChild' : {
+                        '.' : ['implied2GrandChildBAttr']
+                    }
+                }    
+            },
+            'ClassA' : {
+                '.' : ['implied2ClassAAttr'],
+                'RenamedChild' : {
+                    '.' : ['implied2ChildAAttr'],
+                    'GrandChild' : {
+                        '.' : ['implied2GrandChildAAttr']
+                    }
+                }    
+            },
+            'Instance1' : {
+                '.' : stage2RefComposedAttrs, 
+                'RenamedChild' : stage2ChildComposedContents,
+            },
+            'Instance2' : stage2ChildComposedContents,
+            'Instance3' : {
+                '.' : stage2GrandChildComposedAttrs
+            },
+        })
+        self._VerifyStageResyncNotices(stage2, {
+            "/ClassD/Child" : self.PrimResyncType.Delete,
+            "/ClassD/RenamedChild" : self.PrimResyncType.Other,
+            "/ClassC/Child" : self.PrimResyncType.Delete,
+            "/ClassC/RenamedChild" : self.PrimResyncType.Other,
+            "/ClassB/Child" : self.PrimResyncType.Delete,
+            "/ClassB/RenamedChild" : self.PrimResyncType.Other,
+            "/ClassA/Child" : self.PrimResyncType.Delete,
+            "/ClassA/RenamedChild" : self.PrimResyncType.Other,
+            "/Instance1/Child" : self.PrimResyncType.Delete,
+            "/Instance1/RenamedChild" : self.PrimResyncType.Other,
+            "/Instance2": self.PrimResyncType.Other,
+            "/Instance3": self.PrimResyncType.Other
+        })
 
         # Verify the changed contents of stage3 where "Child" is renamed to
         # "RenamedChild" under every implied class spec to match the renames in
@@ -3621,67 +3693,66 @@ class TestUsdNamespaceEditorDependentEditsBasicClassArcs(
         # reference. The contents of /Instance2 and /Instance3 are completely 
         # unchanged as the composed prims they reference in layer2 were 
         # unchanged due the the changes in layer1.
-        #
-        # self._VerifyStageContents(stage3, {
-        #     'ClassD' : {
-        #         '.' : ['implied3ClassDAttr'],
-        #         'RenamedChild' : {
-        #             '.' : ['implied3ChildDAttr'],
-        #             'GrandChild' : {
-        #                 '.' : ['implied3GrandChildDAttr']
-        #             }
-        #         }    
-        #     },
-        #     'ClassC' : {
-        #         '.' : ['implied3ClassCAttr'],
-        #         'RenamedChild' : {
-        #             '.' : ['implied3ChildCAttr'],
-        #             'GrandChild' : {
-        #                 '.' : ['implied3GrandChildCAttr']
-        #             }
-        #         }    
-        #     },
-        #     'ClassB' : {
-        #         '.' : ['implied3ClassBAttr'],
-        #         'RenamedChild' : {
-        #             '.' : ['implied3ChildBAttr'],
-        #             'GrandChild' : {
-        #                 '.' : ['implied3GrandChildBAttr']
-        #             }
-        #         }    
-        #     },
-        #     'ClassA' : {
-        #         '.' : ['implied3ClassAAttr'],
-        #         'RenamedChild' : {
-        #             '.' : ['implied3ChildAAttr'],
-        #             'GrandChild' : {
-        #                 '.' : ['implied3GrandChildAAttr']
-        #             }
-        #         }    
-        #     },
-        #     'Instance1' : {
-        #         '.' : stage3RefComposedAttrs,
-        #         'RenamedChild' : stage3ChildComposedContents
-        #     },
-        #     'Instance2' : stage3ChildComposedContents,
-        #     'Instance3' : {
-        #         '.' : stage3GrandChildComposedAttrs
-        #     },
-        # })
-        # self._VerifyStageResyncNotices(stage3, {
-        #     "/ClassD/Child" : self.PrimResyncType.RenameSource,
-        #     "/ClassD/RenamedChild" : self.PrimResyncType.RenameDestination,
-        #     "/ClassC/Child" : self.PrimResyncType.RenameSource,
-        #     "/ClassC/RenamedChild" : self.PrimResyncType.RenameDestination,
-        #     "/ClassB/Child" : self.PrimResyncType.RenameSource,
-        #     "/ClassB/RenamedChild" : self.PrimResyncType.RenameDestination,
-        #     "/ClassA/Child" : self.PrimResyncType.RenameSource,
-        #     "/ClassA/RenamedChild" : self.PrimResyncType.RenameDestination,
-        #     "/Instance1/Child" : self.PrimResyncType.RenameSource,
-        #     "/Instance1/RenamedChild" : self.PrimResyncType.RenameDestination,
-        #     "/Instance2": self.PrimResyncType.UnchangedPrimStack,
-        #     "/Instance3": self.PrimResyncType.UnchangedPrimStack
-        # })
+        self._VerifyStageContents(stage3, {
+            'ClassD' : {
+                '.' : ['implied3ClassDAttr'],
+                'RenamedChild' : {
+                    '.' : ['implied3ChildDAttr'],
+                    'GrandChild' : {
+                        '.' : ['implied3GrandChildDAttr']
+                    }
+                }    
+            },
+            'ClassC' : {
+                '.' : ['implied3ClassCAttr'],
+                'RenamedChild' : {
+                    '.' : ['implied3ChildCAttr'],
+                    'GrandChild' : {
+                        '.' : ['implied3GrandChildCAttr']
+                    }
+                }    
+            },
+            'ClassB' : {
+                '.' : ['implied3ClassBAttr'],
+                'RenamedChild' : {
+                    '.' : ['implied3ChildBAttr'],
+                    'GrandChild' : {
+                        '.' : ['implied3GrandChildBAttr']
+                    }
+                }    
+            },
+            'ClassA' : {
+                '.' : ['implied3ClassAAttr'],
+                'RenamedChild' : {
+                    '.' : ['implied3ChildAAttr'],
+                    'GrandChild' : {
+                        '.' : ['implied3GrandChildAAttr']
+                    }
+                }    
+            },
+            'Instance1' : {
+                '.' : stage3RefComposedAttrs,
+                'RenamedChild' : stage3ChildComposedContents
+            },
+            'Instance2' : stage3ChildComposedContents,
+            'Instance3' : {
+                '.' : stage3GrandChildComposedAttrs
+            },
+        })
+        self._VerifyStageResyncNotices(stage3, {
+            "/ClassD/Child" : self.PrimResyncType.RenameSource,
+            "/ClassD/RenamedChild" : self.PrimResyncType.RenameDestination,
+            "/ClassC/Child" : self.PrimResyncType.RenameSource,
+            "/ClassC/RenamedChild" : self.PrimResyncType.RenameDestination,
+            "/ClassB/Child" : self.PrimResyncType.RenameSource,
+            "/ClassB/RenamedChild" : self.PrimResyncType.RenameDestination,
+            "/ClassA/Child" : self.PrimResyncType.RenameSource,
+            "/ClassA/RenamedChild" : self.PrimResyncType.RenameDestination,
+            "/Instance1/Child" : self.PrimResyncType.RenameSource,
+            "/Instance1/RenamedChild" : self.PrimResyncType.RenameDestination,
+            "/Instance2": self.PrimResyncType.UnchangedPrimStack,
+            "/Instance3": self.PrimResyncType.UnchangedPrimStack
+        })
 
 if __name__ == '__main__':
     unittest.main()

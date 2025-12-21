@@ -15,6 +15,8 @@
 #include "pxr/exec/vdf/output.h"
 #include "pxr/exec/vdf/types.h"
 
+#include "pxr/base/work/zeroAllocator.h"
+
 #include <tbb/concurrent_vector.h>
 #include <tbb/spin_mutex.h>
 
@@ -419,7 +421,24 @@ private:
         // each piece of data. Once the checksum has reached a specific value,
         // all data is guaranteed to be constructed.
         //
-        std::atomic<uint8_t> constructionChecksum;
+        // The correctness of the checksum implementation requires that this
+        // member be initialized to zero prior to becoming visible to other
+        // threads.  Due to the design of concurrent_vector, zero_allocator is
+        // used to ensure that the storage is zeroed but the lifetime of the
+        // _OutputData object is not guaranteed to begin before other threads
+        // are able to observe its entry in the vector.  Aside from this
+        // undefined behavior, there is another issue.  As of C++20,
+        // std::atomic's default constructor does value-initialization.  This
+        // zeroes the checksum again *after* other threads may have already
+        // incremented its value.  Placing the checksum in a union and
+        // omitting any explicit initialization in the _OutputData constructor
+        // dodges this specific re-zeroing problem.  However, the workaround
+        // cannot solve the fundamental issue of object lifetime outlined
+        // above.
+        //
+        union {
+            std::atomic<uint8_t> constructionChecksum;
+        };
 
         // The invalidation timestamp. We store this information in the
         // generic data vector in order to make it available during evaluation
@@ -570,7 +589,7 @@ private:
     // The output data.
     //
     using _OutputDataVector =
-        tbb::concurrent_vector<_OutputData, tbb::zero_allocator<_OutputData>>;
+        tbb::concurrent_vector<_OutputData, WorkZeroAllocator<_OutputData>>;
     mutable _OutputDataVector _outputData;
 
     // The arrays of buffer data corresponding with the output data.
