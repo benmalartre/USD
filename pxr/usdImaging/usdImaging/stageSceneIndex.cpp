@@ -14,8 +14,9 @@
 #include "pxr/usdImaging/usdImaging/primAdapter.h"
 #include "pxr/usdImaging/usdImaging/tokens.h"
 
-#include "pxr/imaging/hd/overlayContainerDataSource.h"
 #include "pxr/imaging/hd/dataSourceTypeDefs.h"
+#include "pxr/imaging/hd/overlayContainerDataSource.h"
+#include "pxr/imaging/hd/retainedDataSource.h"
 
 #include "pxr/base/tf/denseHashSet.h"
 
@@ -272,9 +273,18 @@ UsdImagingStageSceneIndex::GetPrim(const SdfPath &path) const
     const AdapterEntries &entries =
         _adapterManager->LookupAdapters(prim).allAdapters;
 
+    HdContainerDataSourceHandle dataSource =
+        _GetImagingSubprimData(entries, prim, subprim, _stageGlobals);
+
+    if (subprim.IsEmpty() && !dataSource) {
+        static HdContainerDataSourceHandle const empty =
+            HdRetainedContainerDataSource::New();
+        dataSource = empty;
+    }
+
     return {
         _GetImagingSubprimType(entries, prim, subprim),
-        _GetImagingSubprimData(entries, prim, subprim, _stageGlobals)
+        dataSource
     };
 }
 
@@ -331,8 +341,8 @@ UsdImagingStageSceneIndex::GetChildPrimPaths(
     }
 
     if (path.IsAbsoluteRootPath()) {
-        for (const UsdPrim &prim : _stage->GetPrototypes()) {
-            result.push_back(prim.GetPath());
+        for (const UsdPrim &protoPrim : _stage->GetPrototypes()) {
+            result.push_back(protoPrim.GetPath());
         }
     }
 
@@ -672,6 +682,12 @@ UsdImagingStageSceneIndex::_ApplyPendingResyncs()
         removedPrims.emplace_back(primPath);
         _PopulateSubtree(prim, &addedPrims);
 
+        if (primPath.IsAbsoluteRootPath()) {
+            for (const UsdPrim &protoPrim : _stage->GetPrototypes()) {
+                _PopulateSubtree(protoPrim, &addedPrims);
+            }
+        }
+        
         // Prune property updates of resynced prims, which are redundant.
         _DeletePrefix(primPath, &_usdPropertiesToResync);
         _DeletePrefix(primPath, &_usdPropertiesToUpdate);

@@ -783,6 +783,7 @@ struct Task {
                 return std::tie(a.node, a.vsetPath, a.vsetNum) >
                     std::tie(b.node, b.vsetPath, b.vsetNum);
             case EvalImpliedClasses:
+            {
                 // When multiple implied classes tasks are queued for different
                 // nodes, ordering matters in that ancestor nodes must be 
                 // processed after their descendants. This minimally guarantees
@@ -802,7 +803,40 @@ struct Task {
                 // minimal (though still complex) case that requires this 
                 // ordering be correct and should be referred to if a detailed
                 // explanation is desired.
-                return b.node > a.node;
+                //
+                // If a.node and b.node are not ancestrally related, a and b
+                // must be evaluated in strength order to ensure that the
+                // strongest implied arcs are added in the case where there
+                // multiple class-based arcs in the prim index that would be
+                // implied to the same site under the same parent node. In that
+                // case we want the implied arc with the strongest origin,
+                // which we get by handling these tasks in strong-to-weak
+                // order. See <test> for an example where this is relevant.
+                //
+                // XXX: See various comments throughout this file about
+                // duplicate node handling and how we might clean this up
+                // in the future.
+                //
+                auto isAncestorAndDescendant = [](PcpNodeRef x, PcpNodeRef y) {
+                    for (; !y.IsRootNode(); y = y.GetParentNode()) {
+                        if (x == y) {
+                            return true;
+                        }
+                    }
+                    return false;
+                };
+
+                if (b.node > a.node
+                    && isAncestorAndDescendant(a.node, b.node)) {
+                    return true;
+                }
+                else if (a.node > b.node
+                    && isAncestorAndDescendant(b.node, a.node)) {
+                    return false;
+                }
+
+                return PcpCompareNodeStrength(a.node, b.node) == 1;
+            }
             default:
                 // Arbitrary order
                 return a.node > b.node;
@@ -1823,7 +1857,12 @@ _AddArc(
             newNode.SetHasSpecs(PcpComposeSiteHasPrimSpecs(newNode));
 
             if (!newNode.IsInert() && newNode.HasSpecs()) {
-                if (!indexer->inputs.usd) {
+                if (indexer->inputs.usd) {
+                    // Compose the existence of value clips and update HasValueClips
+                    // accordingly.
+                    newNode.SetHasValueClips(
+                        PcpComposeSiteHasValueClips(newNode));
+                } else {
                     // Determine whether opinions from this site can be accessed
                     // from other sites in the graph.
                     newNode.SetPermission(
@@ -2135,18 +2174,9 @@ _EvalRefOrPayloadArcs(PcpNodeRef node,
         }
 
         const bool isNegativeScale = layerOffset.GetScale() < 0.0;
-        const bool negativeScaleAllowed = PcpNegativeLayerOffsetScaleAllowed();
-
-        if (isNegativeScale && negativeScaleAllowed) {
-            TF_WARN("Found negative scale in layer offset for %s to @%s@<%s>. "
-                    "Negative offset scale is deprecated.",
-                    ARC_TYPE == PcpArcTypePayload ? "payload" : "reference",
-                    info.authoredAssetPath.c_str(), 
-                    refOrPayload.GetPrimPath().GetText());
-        }
 
         // Validate layer offset in original reference or payload.
-        if ((isNegativeScale && !negativeScaleAllowed) ||
+        if (isNegativeScale ||
             !layerOffset.IsValid() ||
             !layerOffset.GetInverse().IsValid()) {
             PcpErrorInvalidReferenceOffsetPtr err =
@@ -4706,17 +4736,26 @@ _ConvertNodeForChild(
     // Inert nodes are just placeholders, so we can skip computing these
     // bits of information since these nodes shouldn't have any opinions to
     // contribute.
-    if (!inputs.usd && !node.IsInert() && node.HasSpecs()) {
-        // If the parent's permission is private, it will be inherited by the
-        // child. Otherwise, we recompute it here.
-        if (node.GetPermission() == SdfPermissionPublic) {
-            node.SetPermission(PcpComposeSitePermission(node));
-        }
-        
-        // If the parent had symmetry, it will be inherited by the child.
-        // Otherwise, we recompute it here.
-        if (!node.HasSymmetry()) {
-            node.SetHasSymmetry(PcpComposeSiteHasSymmetry(node));
+    if (!node.IsInert() && node.HasSpecs()) {
+        if (inputs.usd) {
+            // The child site inherits the parent's value clips status, but if
+            // no ancestor has clips, check whether it has value clips.
+            if (!node.HasValueClips()) {
+                node.SetHasValueClips(
+                    PcpComposeSiteHasValueClips(node));
+            }
+        } else {
+            // If the parent's permission is private, it will be inherited by the
+            // child. Otherwise, we recompute it here.
+            if (node.GetPermission() == SdfPermissionPublic) {
+                node.SetPermission(PcpComposeSitePermission(node));
+            }
+            
+            // If the parent had symmetry, it will be inherited by the child.
+            // Otherwise, we recompute it here.
+            if (!node.HasSymmetry()) {
+                node.SetHasSymmetry(PcpComposeSiteHasSymmetry(node));
+            }
         }
     }
 
@@ -4781,6 +4820,15 @@ _NodeCanBeCulled(
         return false;
     }
 
+    // Nodes that have value clips or that have a namespace ancestor with
+    // value clips should not be culled. Otherwise, composition arcs without
+    // clips authored directly on them may be culled; this is undesirable
+    // because a clip authored on a namespace ancestor may contain opinions
+    // for its namespace descendants.
+    if (node.HasValueClips()) {
+        return false;
+    }
+
     // CsdPrim::GetBases wants to return the path of all prims in the
     // composed scene from which this prim inherits opinions. To ensure
     // Csd has all the info it needs for this, Pcp has to avoid culling any
@@ -4832,44 +4880,16 @@ _NodeCanBeCulled(
     return true;
 }
 
-// Cull all nodes in the subtree rooted at the given node whose site
-// is given in culledSites.
-static bool
-_CullMatchingChildrenInSubtree(
-    PcpNodeRef node,
-    const std::unordered_set<PcpLayerStackSite, TfHash>& culledSites)
-{
-    bool allChildrenCulled = true;
-    TF_FOR_ALL(child, Pcp_GetChildrenRange(node)) {
-        allChildrenCulled &=
-            _CullMatchingChildrenInSubtree(*child, culledSites);
-    }
-
-    if (allChildrenCulled && culledSites.count(node.GetSite())) {
-        node.SetCulled(true);
-    }
-
-    return node.IsCulled();
-}
-
 // Helper that recursively culls subtrees at and under the given node.
 static void
 _CullSubtreesWithNoOpinionsHelper(
     PcpNodeRef node,
     const PcpLayerStackSite& rootSite,
-    std::vector<PcpCulledDependency>* culledDeps,
-    std::unordered_set<PcpLayerStackSite, TfHash>* culledSites = nullptr)
+    std::vector<PcpCulledDependency>* culledDeps)
 {
     // Recurse and attempt to cull all children first. Order doesn't matter.
     TF_FOR_ALL(child, Pcp_GetChildrenRange(node)) {
-        // Skip culling for specializes subtrees here; these will be handled
-        // by _CullSubtreesWithNoOpinions. See comments there for more info.
-        if (PcpIsSpecializeArc(child->GetArcType())) {
-            continue;
-        }
-
-        _CullSubtreesWithNoOpinionsHelper(
-            *child, rootSite, culledDeps, culledSites);
+        _CullSubtreesWithNoOpinionsHelper(*child, rootSite, culledDeps);
     }
 
     // Now, mark this node as culled if we can. These nodes will be
@@ -4882,10 +4902,6 @@ _CullSubtreesWithNoOpinionsHelper(
         // index when Finalize() is called, so they must be saved separately
         // for later use.
         Pcp_AddCulledDependency(node, culledDeps);
-
-        if (culledSites) {
-            culledSites->insert(node.GetSite());
-        }
     }
 }
 
@@ -4895,39 +4911,8 @@ _CullSubtreesWithNoOpinions(
     const PcpLayerStackSite& rootSite,
     std::vector<PcpCulledDependency>* culledDeps)
 {
-    // We propagate and maintain duplicate node structure in the graph
-    // for specializes arcs so when we cull we need to ensure we do so
-    // in both places consistently. 
-    //
-    // The origin subtree is marked inert as part of propagation, which
-    // means culling would remove it entirely which is not what we want.
-    // Instead, we cull whatever nodes we can in the propagated subtree
-    // under the root of the prim index, then cull the corresponding
-    // nodes underneath the origin subtree.
-    //
-    // We do a first pass to handle of all these propagated specializes
-    // nodes first to ensure that nodes in the origin subtrees are marked
-    // culled before other subtrees are processed. Otherwise, subtrees
-    // containing those origin subtrees won't be culled. 
-    //
-    // Note that this first pass must be done in weakest-to-strongest order
-    // to handle hierarchies of specializes arcs. See the test case
-    // test_PrimIndexCulling_SpecializesHierarchy in testPcpPrimIndex for
-    // an example.
-    TF_REVERSE_FOR_ALL(child, Pcp_GetChildrenRange(primIndex->GetRootNode())) {
-        if (Pcp_IsPropagatedSpecializesNode(*child)) {
-            std::unordered_set<PcpLayerStackSite, TfHash> culledSites;
-            _CullSubtreesWithNoOpinionsHelper(
-                *child, rootSite, culledDeps, &culledSites);
-
-            _CullMatchingChildrenInSubtree(child->GetOriginNode(), culledSites);
-        }
-    }
-
     TF_FOR_ALL(child, Pcp_GetChildrenRange(primIndex->GetRootNode())) {
-        if (!Pcp_IsPropagatedSpecializesNode(*child)) {
-            _CullSubtreesWithNoOpinionsHelper(*child, rootSite, culledDeps);
-        }
+        _CullSubtreesWithNoOpinionsHelper(*child, rootSite, culledDeps);
     }
 }    
 

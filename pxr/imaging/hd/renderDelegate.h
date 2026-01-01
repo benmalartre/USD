@@ -13,6 +13,7 @@
 #include "pxr/imaging/hd/changeTracker.h"
 #include "pxr/imaging/hd/command.h"
 #include "pxr/imaging/hd/dataSource.h"
+#include "pxr/imaging/hd/rendererCreateArgs.h"
 #include "pxr/base/vt/dictionary.h"
 #include "pxr/base/tf/token.h"
 
@@ -29,6 +30,7 @@ class HdRenderIndex;
 class HdRenderPass;
 class HdInstancer;
 class HdDriver;
+class Hgi;
 
 TF_DECLARE_REF_PTRS(HdSceneIndexBase);
 

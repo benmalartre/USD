@@ -1283,6 +1283,7 @@ _GetDrawPipeline(
 
         pipeDesc.shaderProgram = state.glslProgram->GetProgram();
         pipeDesc.vertexBuffers = _GetVertexBuffersForDrawing(state);
+        pipeDesc.debugName = "Draw Pipeline";
 
         Hgi* hgi = resourceRegistry->GetHgi();
         HgiGraphicsPipelineHandle pso = hgi->CreateGraphicsPipeline(pipeDesc);
@@ -1329,6 +1330,7 @@ _GetPTCSPipeline(
         pipeDesc.vertexBuffers = _GetVertexBuffersForDrawing(state);
         pipeDesc.tessellationState.tessFactorMode =
             HgiTessellationState::TessControl;
+        pipeDesc.debugName = "PTCS Pipeline";
 
         Hgi* hgi = resourceRegistry->GetHgi();
         HgiGraphicsPipelineHandle pso = hgi->CreateGraphicsPipeline(pipeDesc);
@@ -1551,7 +1553,7 @@ _GetCullPipeline(
         // Create a points primitive, vertex shader only pipeline that uses
         // a uniform block data for the 'cullParams' in the shader.
         HgiComputePipelineDesc pipeDesc;
-        pipeDesc.debugName = "FrustumCulling";
+        pipeDesc.debugName = "FrustumCulling Pipeline";
         pipeDesc.shaderProgram = programHandle;
         pipeDesc.shaderConstantsDesc.byteSize = byteSizeUniforms;
 

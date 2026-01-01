@@ -9,15 +9,13 @@ pxr_library(vdf
         trace
         vt
         work
-        ${TBB_tbb_LIBRARY}
+        TBB::tbb
 
-    INCLUDE_DIRS
-        ${TBB_INCLUDE_DIRS}
-        
     PUBLIC_HEADERS
         api.h
         boxedContainer.h
         boxedContainerTraits.h
+        connectorMap.h
         countingIterator.h
         parallelExecutorDataManager.h
         parallelExecutorDataManagerInterface.h
@@ -41,7 +39,6 @@ pxr_library(vdf
         inputValuesPointer.h
         iteratorRange.h
         iterators.h
-        linearMap.h
         lruCache.h
         maskMemoizer.h
         maskedIterator.h
@@ -323,12 +320,12 @@ pxr_build_test(testVdfIterators
         testenv/testVdfIterators.cpp
 )
 
-pxr_build_test(testVdfLinearMap
+pxr_build_test(testVdfConnectorMap
     LIBRARIES
         vdf
 
     CPPFILES
-        testenv/testVdfLinearMap.cpp
+        testenv/testVdfConnectorMap.cpp
 )
 
 pxr_build_test(testVdfMask
@@ -487,7 +484,7 @@ pxr_register_test(testVdfVector
 pxr_register_test(testVdfGrapher
     COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testVdfGrapher"
     EXPECTED_RETURN_CODE 0
-    POST_COMMAND "${PYTHON_EXECUTABLE} normalizeDotFile.py test.dot test.out"
+    POST_COMMAND "${PYTHON_EXECUTABLE} normalizeDotFiles.py test.dot"
     DIFF_COMPARE test.out
     DIFF_COMPARE traverse.out
     DIFF_COMPARE network.dot
@@ -516,8 +513,8 @@ pxr_register_test(testVdfIterators
     EXPECTED_RETURN_CODE 0
 )
 
-pxr_register_test(testVdfLinearMap
-    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testVdfLinearMap"
+pxr_register_test(testVdfConnectorMap
+    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testVdfConnectorMap"
     EXPECTED_RETURN_CODE 0
 )
 

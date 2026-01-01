@@ -19,15 +19,15 @@ Our test machines have the following software versions installed.
 | Python        | 3.9.16               | 3.9.13                       | 3.9.13                         |
 | Intel TBB     | 2020.3               | 2020.3                       | 2020.3                         |
 | OneTBB        | 2021.9               | 2021.9                       | 2021.9                         |
-| OpenSubdiv    | 3.6.0                | 3.6.0                        | 3.6.0                          |
+| OpenSubdiv    | 3.6.1                | 3.6.1                        | 3.6.1                          |
 | OpenImageIO   | 2.5.16.0             | 2.5.16.0                     | 2.5.16.0                       |
 | OpenColorIO   | 2.2.1                | 2.2.1                        | 2.2.1                          |
 | OSL           | 1.13.11              |                              |                                |
 | Ptex          | 2.4.2                | 2.4.2                        | 2.4.2                          |
 | Qt for Python | PySide2 5.15.2.1     | PySide6 6.3.1                | PySide2 5.15.2.1               |
 | PyOpenGL      | 3.1.5                | 3.1.5                        | 3.1.5                          |
-| Embree        | 3.2.2                | 3.13.3                       | 3.2.2                          |
-| RenderMan     | 25.3                 | 25.3                         | 25.3                           |
+| Embree        | 4.3.3                | 4.3.3                        | 4.3.3                          |
+| RenderMan     | 26.3, 27.0           | 26.3, 27.0                   | 26.3, 27.0                     |
 | Alembic       | 1.8.5                | 1.8.5                        | 1.8.5                          |
 | OpenEXR       | 3.1.13               | 3.1.13                       | 3.1.13                         |
 | MaterialX     | 1.39.3               | 1.39.3                       | 1.39.3                         |
@@ -37,5 +37,5 @@ Our test machines have the following software versions installed.
 | Doxygen       | 1.9.6                |                              |                                |
 | GraphViz      | 2.40.1               |                              |                                |
 | OpenVDB       | 10.1.0               | 10.1.0                       | 10.1.0                         |
-| Vulkan SDK    | 1.3.296.0            | 1.3.296.0                    | 1.3.296.0                      |
+| Vulkan SDK    | 1.4.321.0            | 1.4.321.0                    | 1.4.321.0                      |
 | Draco         | 1.5.6                | 1.5.6                        | 1.5.6                          |

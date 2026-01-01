@@ -206,20 +206,20 @@ class _PrimvarValueDataSourceFactory
 {
 public:
     template <class T>
-    HdDataSourceBaseHandle operator()(const T &v) const
+    HdDataSourceBaseHandle operator()(const T &) const
     {
-        return _PrimvarValueDataSource<T>::New(
-            _inputSceneIndex, _instances, _primvarName);
-
+        return _MakeDataSource<T>();
     }
 
     template <class T>
-    HdDataSourceBaseHandle operator()(const VtArray<T> &array) const {
-        return _PrimvarValueDataSource<T>::New(
-            _inputSceneIndex, _instances, _primvarName);
+    HdDataSourceBaseHandle operator()(const VtArray<T> &) const {
+        return _MakeDataSource<T>();
     }
 
     HdDataSourceBaseHandle operator()(const VtValue &v) const {
+        if (v.IsHolding<SdfAssetPath>()) {
+            return _MakeDataSource<SdfAssetPath>();
+        }
         return nullptr;
     }
 
@@ -234,6 +234,13 @@ public:
     }
 
 private:
+    template<class T>
+    HdDataSourceBaseHandle _MakeDataSource() const
+    {
+        return _PrimvarValueDataSource<T>::New(
+            _inputSceneIndex, _instances, _primvarName);
+    }
+
     HdSceneIndexBaseRefPtr const _inputSceneIndex;
     std::shared_ptr<SdfPathSet> const _instances;
     TfToken const _primvarName;
@@ -1064,7 +1071,6 @@ private:
         const SdfPath &primPath,
         _RetainedSceneIndexOperations * retainedSceneIndexOperations);
     _PathToInstanceInfo::iterator _RemoveInstance(
-        const SdfPath &primPath,
         const _PathToInstanceInfo::iterator &it,
         _RetainedSceneIndexOperations * retainedSceneIndexOperations);
     void _ResyncPrim(
@@ -1310,7 +1316,7 @@ _InstanceObserver::PrimsRemoved(const HdSceneIndexBase &sender,
         auto it = _instanceToInfo.lower_bound(path);
         while (it != _instanceToInfo.end() &&
                it->first.HasPrefix(path)) {
-            it = _RemoveInstance(path, it, &retainedSceneIndexOperations);
+            it = _RemoveInstance(it, &retainedSceneIndexOperations);
         }
     }
 }
@@ -1498,7 +1504,7 @@ _InstanceObserver::_RemovePrim(
 {
     auto it = _instanceToInfo.find(primPath);
     if (it != _instanceToInfo.end()) {
-        _RemoveInstance(primPath, it, retainedSceneIndexOperations);
+        _RemoveInstance(it, retainedSceneIndexOperations);
     }
 }
 
@@ -1513,21 +1519,20 @@ _InstanceObserver::_ResyncPrim(
 
 _InstanceObserver::_PathToInstanceInfo::iterator
 _InstanceObserver::_RemoveInstance(
-    const SdfPath &primPath,
     const _PathToInstanceInfo::iterator &it,
     _RetainedSceneIndexOperations * const retainedSceneIndexOperations)
 {
+    const SdfPath &instancePath = it->first;
     const _InstanceInfo &info = it->second;
-
     const SdfPath instancerPath = info.GetInstancerPath();
 
     const _RemovalLevel level =
-        _RemoveInstanceFromInfoToInstance(primPath, info);
+        _RemoveInstanceFromInfoToInstance(instancePath, info);
 
     if (level > _RemovalLevel::None) {
         // Remove instance data source we added in _AddInstance.
         retainedSceneIndexOperations->RemovePrim(
-            primPath);
+            instancePath);
     }
 
     if (level == _RemovalLevel::Instance) {

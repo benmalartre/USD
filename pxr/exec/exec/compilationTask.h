@@ -12,7 +12,9 @@
 #include "pxr/exec/exec/api.h"
 
 #include "pxr/exec/exec/compilationState.h"
-#include "pxr/exec/exec/compilerTaskSync.h"
+#include "pxr/exec/exec/compilerTaskSyncBase.h"
+
+#include "pxr/base/work/dispatcher.h"
 
 #include <atomic>
 #include <cstdint>
@@ -33,9 +35,7 @@ public:
     /// As long as there are unfulfilled dependencies, this task will not be
     /// re-run to continue its next phase(s).
     /// 
-    void AddDependency() {
-        _numDependents.fetch_add(1, std::memory_order_acquire);
-    }
+    void AddDependency();
 
     /// Removes a dependency after it has been fulfilled.
     ///
@@ -43,9 +43,7 @@ public:
     /// is `0`, this task can be re-run to continue its next phase(s). The
     /// caller is responsible for re-running the task.
     ///
-    int RemoveDependency() {
-        return _numDependents.fetch_sub(1, std::memory_order_release) - 1;
-    }
+    int RemoveDependency();
 
     /// Executes the task.
     ///
@@ -61,12 +59,7 @@ protected:
     /// All compilation tasks are heap allocated and must be constructed through
     /// NewTask() and NewSubtask().
     /// 
-    explicit Exec_CompilationTask(Exec_CompilationState &compilationState)
-        : _parent(nullptr)
-        , _numDependents(0)
-        , _taskPhase(0)
-        , _compilationState(compilationState)
-    {}
+    explicit Exec_CompilationTask(Exec_CompilationState &compilationState);
 
     /// Main entry point of a compilation task to be implemented in the
     /// derived class.
@@ -119,7 +112,7 @@ public:
     /// method will automatically be re-executed once all dependencies have been
     /// fulfilled.
     /// 
-    Exec_CompilerTaskSync::ClaimResult ClaimSubtask(
+    Exec_CompilerTaskSyncBase::ClaimResult ClaimSubtask(
         const Exec_OutputKey::Identity &key);
 
 private:
@@ -166,8 +159,7 @@ Exec_CompilationTask::TaskDependencies::NewSubtask(
     // this new subtask as the one to run next. This will ensure that the last
     // sub-task is the one eventually returned by _GetNextSubtask().
     if (_nextSubtask) {
-        Exec_CompilationState::OutputTasksAccess::_Get(&state).Run(
-            _nextSubtask);
+        state.GetDispatcher().Run(std::ref(*_nextSubtask));
     }
     _nextSubtask = subTask;
 }

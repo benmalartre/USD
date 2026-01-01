@@ -28,6 +28,7 @@ pxr_library(hd
         bufferArrayRange
         bufferSource
         bufferSpec
+        builtinMaterialSchema
         cachingSceneIndex
         camera
         cameraSchema
@@ -114,6 +115,8 @@ pxr_library(hd
         materialConnectionSchema
         materialFilteringSceneIndexBase
         materialInterfaceMappingSchema
+        materialInterfaceParameterSchema
+        materialInterfaceSchema
         materialNetworkSchema
         materialNetwork2Interface
         materialNodeSchema
@@ -134,9 +137,9 @@ pxr_library(hd
         perfLog
         planeSchema
         pluginRenderDelegateUniqueHandle
+        pluginRendererUniqueHandle
         points
         prefixingSceneIndex
-        primDataSourceOverlayCache
         primGather
         primOriginSchema
         primTypeIndex
@@ -147,6 +150,7 @@ pxr_library(hd
         renderBufferSchema
         renderCapabilitiesSchema
         renderDelegate
+        renderer
         rendererPlugin
         rendererPluginHandle
         rendererPluginRegistry
@@ -215,6 +219,7 @@ pxr_library(hd
         driver.h
         invalidatableContainerDataSource.h
         materialNetworkInterface.h
+        rendererCreateArgs.h
         schemaTypeDefs.h
         vectorSchemaTypeDefs.h
         version.h
@@ -334,6 +339,16 @@ pxr_build_test(testHdDataSource
        testenv/testHdDataSource.cpp
 )
 
+pxr_build_test(testHdMergingSceneIndex
+   LIBRARIES
+       hd
+       sdf
+       tf
+
+   CPPFILES
+       testenv/testHdMergingSceneIndex.cpp
+)
+
 pxr_build_test(testHdSceneIndex
    LIBRARIES
        hd
@@ -435,6 +450,10 @@ pxr_register_test(testHdPerfLog
 
 pxr_register_test(testHdDataSource
     COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testHdDataSource"
+)
+
+pxr_register_test(testHdMergingSceneIndex
+    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testHdMergingSceneIndex"
 )
 
 pxr_register_test(testHdSceneIndex

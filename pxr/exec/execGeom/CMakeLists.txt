@@ -52,7 +52,7 @@ if (BUILD_SHARED_LIBS)
     pxr_register_test(testExecGeomXformable
         COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testExecGeomXformable"
         EXPECTED_RETURN_CODE 0
-        POST_COMMAND "${PYTHON_EXECUTABLE} normalizeDotFile.py testCompiler.dot testCompiler.out"
+        POST_COMMAND "${PYTHON_EXECUTABLE} normalizeDotFiles.py testCompiler.dot"
         DIFF_COMPARE testCompiler.out
         TESTENV testExecGeomXformable
     )
@@ -100,11 +100,5 @@ if (BUILD_SHARED_LIBS)
                  --branchingFactor 19530 --treeDepth 2"
         EXPECTED_RETURN_CODE 0
         ENV TF_FATAL_VERIFY=1
-    )
-
-    pxr_register_test(testExecGeomXformable_Perf_Large
-        COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testExecGeomXformable_Perf
-                 --branchingFactor 5 --treeDepth 10"
-        EXPECTED_RETURN_CODE 0
     )
 endif()

@@ -19,6 +19,7 @@ pxr_library(sdf
         allowed
         assetPath
         attributeSpec
+        booleanExpression
         changeBlock
         changeList
         children
@@ -31,6 +32,7 @@ pxr_library(sdf
         crateInfo
         data
         declareHandles
+        declareSpec
         fileFormat
         fileVersion
         identity
@@ -70,7 +72,7 @@ pxr_library(sdf
         siteUtils
         spec
         specType
-        textFileFormat
+        textParserUtils
         timeCode
         tokens
         types
@@ -81,6 +83,7 @@ pxr_library(sdf
         usdzFileFormat
         valueTypeName
         variableExpression
+        variableExpressionAST
         variantSetSpec
         variantSpec
         zipFile
@@ -98,7 +101,6 @@ pxr_library(sdf
     PUBLIC_HEADERS
         api.h
         accessorHelpers.h
-        declareSpec.h
         layerHints.h
         pathPatternParser.h
         predicateExpressionParser.h
@@ -107,6 +109,8 @@ pxr_library(sdf
 
     PRIVATE_CLASSES
         assetPathResolver
+        booleanExpressionEval
+        booleanExpressionParsing
         changeManager
         cleanupTracker
         connectionListEditor
@@ -171,6 +175,7 @@ pxr_library(sdf
         wrapReference.cpp
         wrapSpec.cpp
         wrapVariableExpression.cpp
+        wrapVariableExpressionAST.cpp
         wrapTimeCode.cpp
         wrapTypes.cpp
         wrapUsdFileFormat.cpp
@@ -187,6 +192,7 @@ pxr_library(sdf
 
     DOXYGEN_FILES
         overview.dox
+        doxygen/booleanExpressions.md
         doxygen/fileFormatPlugin.dox
         doxygen/variableExpressions.dox
 )
@@ -221,6 +227,7 @@ pxr_test_scripts(
     testenv/testSdfTimeCode.py
     testenv/testSdfTypes.py
     testenv/testSdfVariableExpression.py
+    testenv/testSdfVariableExpressionAST.py
     testenv/testSdfVariants.py
     testenv/testSdfZipFile.py
     testenv/testSdfZipFileLimits.py
@@ -301,6 +308,13 @@ pxr_build_test(testSdfAttributeBlocking_Cpp
         sdf
     CPPFILES
         testenv/testSdfAttributeBlocking.cpp
+)
+
+pxr_build_test(testSdfBooleanExpression
+    LIBRARIES
+        sdf
+    CPPFILES
+        testenv/testSdfBooleanExpression.cpp
 )
 
 pxr_build_test(testSdfHardToReach
@@ -384,6 +398,15 @@ pxr_build_test(testSdfUsdaFileFormatParsing
         testenv/testSdfUsdaFileFormatParsing.cpp
 )
 
+
+pxr_build_test(testSdfUsdaFileFormatValueParsing
+    LIBRARIES
+        sdf
+        tf
+    CPPFILES
+        testenv/testSdfUsdaFileFormatValueParsing.cpp
+)
+
 pxr_build_test(testSdfUsdzResolver
     LIBRARIES
         ar
@@ -392,6 +415,22 @@ pxr_build_test(testSdfUsdzResolver
         sdf
     CPPFILES
         testenv/testSdfUsdzResolver.cpp
+)
+
+pxr_build_test(testSdfVariableExpression_Cpp
+    LIBRARIES
+        tf
+        sdf
+    CPPFILES
+        testenv/testSdfVariableExpression.cpp
+)
+
+pxr_build_test(testSdfVariableExpressionAST_Cpp
+    LIBRARIES
+        tf
+        sdf
+    CPPFILES
+        testenv/testSdfVariableExpressionAST.cpp
 )
 
 pxr_build_test(testSdfFileVersion_Cpp
@@ -410,6 +449,16 @@ pxr_build_test(testSdfZipFile_CPP
         sdf
     CPPFILES
         testenv/testSdfZipFile.cpp
+)
+
+pxr_build_test(testSdfUsdcInvalidPrimChildren
+    LIBRARIES
+        ar
+        arch
+        tf
+        sdf
+    CPPFILES
+        testenv/testSdfUsdcInvalidPrimChildren.cpp
 )
 
 pxr_install_test_dir(
@@ -461,6 +510,11 @@ pxr_install_test_dir(
     SRC testenv/testSdfUsdzResolver
     DEST testSdfUsdzResolver
 )
+    
+pxr_install_test_dir(
+    SRC testenv/testSdfUsdcInvalidPrimChildren.testenv
+    DEST testSdfUsdcInvalidPrimChildren
+)
 
 pxr_register_test(testSdfAbstractData_Cpp
     COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testSdfAbstractData_Cpp"
@@ -488,6 +542,10 @@ pxr_register_test(testSdfAttributeBlocking_Cpp
 pxr_register_test(testSdfBatchNamespaceEdit
     PYTHON
     COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testSdfBatchNamespaceEdit"
+)
+
+pxr_register_test(testSdfBooleanExpression
+    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testSdfBooleanExpression"
 )
 
 pxr_register_test(testSdfCopyUtils
@@ -630,6 +688,10 @@ pxr_register_test(testSdfUsdaFileFormatParsing
    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testSdfUsdaFileFormatParsing"
 )
 
+pxr_register_test(testSdfUsdaFileFormatValueParsing
+   COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testSdfUsdaFileFormatValueParsing"
+)
+
 pxr_register_test(testSdfPayload
     PYTHON
     COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testSdfPayload"
@@ -700,7 +762,21 @@ pxr_register_test(testSdfVariableExpression
     PYTHON
     COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testSdfVariableExpression"
 )
+pxr_register_test(testSdfVariableExpression_Cpp
+    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testSdfVariableExpression_Cpp"
+)
+pxr_register_test(testSdfVariableExpressionAST
+    PYTHON
+    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testSdfVariableExpressionAST"
+)
+pxr_register_test(testSdfVariableExpressionAST_Cpp
+    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testSdfVariableExpressionAST_Cpp"
+)
 pxr_register_test(testSdfVariants
     PYTHON
     COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testSdfVariants"
+)
+pxr_register_test(testSdfUsdcInvalidPrimChildren
+    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testSdfUsdcInvalidPrimChildren"
+    EXPECTED_RETURN_CODE 0
 )

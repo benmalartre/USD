@@ -12,6 +12,8 @@
 #include "pxr/imaging/hd/dependenciesSchema.h"
 #include "pxr/imaging/hd/materialSchema.h"
 #include "pxr/imaging/hd/materialInterfaceMappingSchema.h"
+#include "pxr/imaging/hd/materialInterfaceParameterSchema.h"
+#include "pxr/imaging/hd/materialInterfaceSchema.h"
 #include "pxr/imaging/hd/materialNetworkSchema.h"
 #include "pxr/imaging/hd/materialNodeParameterSchema.h"
 #include "pxr/imaging/hd/materialNodeSchema.h"
@@ -45,63 +47,6 @@ using TfTokenMap = std::unordered_map<TfToken, TfToken, TfToken::HashFunctor>;
 using NestedTfTokenMap = 
     std::unordered_map<TfToken, TfTokenMap, TfToken::HashFunctor>;
 using NestedTfTokenMapPtr = std::shared_ptr<NestedTfTokenMap>;
-
-// Given a material network container data source, returns a map of reversed
-// interface mappings.  If no interface mappings were found, returns an empty
-// map.
-// 
-// Interface mappings are mapped like this:
-// publicUIName -> [(nodePath, inputName),...]
-// 
-// The returned map of reversed interface mappings is mapped like this:
-// nodePath -> (inputName -> publicUIName)
-NestedTfTokenMap
-_BuildReverseInterfaceMappings(
-    const HdContainerDataSourceHandle& matNetworkDsContainer)
-{
-    NestedTfTokenMap reverseInterfaceMappings;
-
-    const HdMaterialNetworkSchema matNetworkSchema(matNetworkDsContainer);
-    if (!matNetworkSchema) {
-        return reverseInterfaceMappings;
-    }
-
-    HdMaterialInterfaceMappingsContainerSchema interfaceMappingsSchema = 
-        matNetworkSchema.GetInterfaceMappings();
-    if (!interfaceMappingsSchema) {
-        return reverseInterfaceMappings;
-    }
-
-    for (const TfToken& publicUIName : interfaceMappingsSchema.GetNames()) {
-        // Each publicUIName maps to a list of material node parameters ie.
-        // [(nodePath, inputName), ...]
-        const HdMaterialInterfaceMappingVectorSchema 
-            interfaceMappingsVectorSchema =
-            interfaceMappingsSchema.Get(publicUIName);
-        if (!interfaceMappingsVectorSchema) {
-            continue;
-        }
-
-        const size_t numElems = 
-            interfaceMappingsVectorSchema.GetNumElements();
-        for (size_t i = 0; i < numElems; i++) {
-            // Each interfaceMapping should be a (nodePath, inputName) pair 
-            HdMaterialInterfaceMappingSchema interfaceMappingSchema =
-                interfaceMappingsVectorSchema.GetElement(i);
-            if (!interfaceMappingSchema) {
-                continue;
-            }
-
-            const TfToken nodePath = 
-                interfaceMappingSchema.GetNodePath()->GetTypedValue(0);
-            const TfToken inputName = 
-                interfaceMappingSchema.GetInputName()->GetTypedValue(0);
-
-            reverseInterfaceMappings[nodePath][inputName] = publicUIName;
-        }
-    }
-    return reverseInterfaceMappings;
-}
 
 class _ParametersContainerDataSource : public HdContainerDataSource
 {
@@ -161,16 +106,40 @@ public:
     }
 
 private:
-    // If the current _nodePath has any publicUI overrides, return the names
-    // of the material network parameters that have publicUI overrides.
+    // If the current _nodePath has any publicUI or parameter edit overrides, 
+    // return the names of the material network parameters that have overrides.
     TfTokenSet 
     _GetOverrideNames()
     {
         TfTokenSet overrideNames;
 
-        // 1. Check if our nodePath has interface mappings. If there are
-        // no interface mappings, then there are no override names to
-        // consider.
+        // If there are no overrides for this material, return an empty set.
+        const HdMaterialOverrideSchema matOverSchema(
+            _materialOverrideDsContainer);
+        if (!matOverSchema) {
+            return overrideNames;
+        }
+
+        // 1. Check for parameter edits.
+        // Get the parameterValues data source and check if there are any 
+        // parameter edits affecting the shader node at _nodePath.
+        const HdNodeToInputToMaterialNodeParameterSchema parameterValuesSchema =
+            matOverSchema.GetParameterValues();
+        if (parameterValuesSchema) {
+            HdMaterialNodeParameterContainerSchema nodeNameSchema = 
+                parameterValuesSchema.Get(_nodePath);
+            if (nodeNameSchema) {
+                for (const TfToken& paramName : nodeNameSchema.GetNames()) {
+                    // If we found a shader parameter override then we should
+                    // add its name to GetNames()
+                    overrideNames.insert(paramName);
+                }                
+            }
+        }
+
+        // 2. Check if our nodePath has interface mappings. If there are
+        // no interface mappings, then there are no additional public UI 
+        // override names to consider.
         if (!_reverseInterfaceMappingsPtr) {
             return overrideNames;
         }
@@ -181,14 +150,8 @@ private:
             return overrideNames;
         }
 
-        // 2. From the MaterialOverrides, check if we have an overridingDs
+        // 3. From the MaterialOverrides, check if we have an overridingDs
         // for the publicUI name
-        const HdMaterialOverrideSchema matOverSchema(
-            _materialOverrideDsContainer);
-        if (!matOverSchema) {
-            return overrideNames;
-        }
-
         HdMaterialNodeParameterContainerSchema 
             interfaceValuesContainerSchema = 
             matOverSchema.GetInterfaceValues();
@@ -201,7 +164,7 @@ private:
             HdMaterialNodeParameterSchema overrideNodeParameterSchema =
                 interfaceValuesContainerSchema.Get(publicUIName);
             if (overrideNodeParameterSchema) {
-                // If we found an override , then we should add its name
+                // If we found a public UI override, then we should add its name
                 // to GetNames()
                 overrideNames.emplace(name);
             }
@@ -210,13 +173,51 @@ private:
     }
 
     // Given 'name' of a material network parameter, return the overriding
-    // data source (ie. the publicUI data source) if there is one specified.
+    // data source (ie. the publicUI or parameter edit data source) if there is 
+    // one specified.
+    // Note that if both a publicUI and a parameter edit overrides for the same
+    // data source exit, the public UI override takes precedence and will be
+    // returned.
     HdContainerDataSourceHandle
     _GetOverrideContainerDataSource(const TfToken& name)
     {
         // Not using 'static' so we benefit from return value optimization
         const HdContainerDataSourceHandle emptyOverrideDs;
-        
+
+        // Nothing to do if there is no materialOverride data source
+        const HdMaterialOverrideSchema matOverSchema(
+            _materialOverrideDsContainer);
+        if (!matOverSchema) {
+            return emptyOverrideDs;
+        }
+
+        // If the same input is overridden both by an interface value and by
+        // a parameter edit, the interface value edit should take precedence.
+        // To enforce this requirement, process overrides to the PublicUI first,
+        // and if one is found targeting the current parameter, return its data
+        // source without bothering to look for a parameter edit.
+        HdContainerDataSourceHandle overriddeContainerDs = 
+            _GetPublicUIDataSource(name);
+        if (overriddeContainerDs) {
+            return overriddeContainerDs;
+        }
+
+        // If no interface edit was found, check for a parameter edit instead.
+        overriddeContainerDs = _GetParameterEditDataSource(name);
+        if (overriddeContainerDs) {
+            return overriddeContainerDs;
+        }
+
+        return emptyOverrideDs;
+    }
+
+    // Given 'name' of a material network parameter, return its PublicUI data
+    // source, if one is specified.
+    HdContainerDataSourceHandle
+    _GetPublicUIDataSource(const TfToken& name)
+    {
+        const HdContainerDataSourceHandle emptyOverrideDs;
+
         // 1. Look up the MaterialNodeParameter from our 
         // reverseInterfaceMappingsPtr to see if it has a publicUI name
         // ie. nodePath -> (name -> publicUIName)
@@ -260,6 +261,28 @@ private:
         }
 
         return overrideNodeParameterSchema.GetContainer();    
+    }
+
+    // Given 'name' of a material network parameter, return its Parameter Edit 
+    // data source, if one is specified.
+    HdContainerDataSourceHandle
+    _GetParameterEditDataSource(const TfToken& name)
+    {   
+        const HdContainerDataSourceHandle emptyOverrideDs;
+
+        const HdMaterialOverrideSchema matOverSchema(
+            _materialOverrideDsContainer);
+        if (!matOverSchema) {
+            return emptyOverrideDs;
+        }
+
+        HdMaterialNodeParameterSchema overrideNodeParameterSchema =
+            matOverSchema.GetParameterOverride(_nodePath, name);
+        if (!overrideNodeParameterSchema) {
+            return emptyOverrideDs;
+        }
+
+        return overrideNodeParameterSchema.GetContainer();  
     }
      
 private:
@@ -475,21 +498,20 @@ public:
             return result;
         }
 
-        // Only do work if the material network has interface mappings
-        const HdMaterialInterfaceMappingsContainerSchema 
-            interfaceMappingsSchema = matNetworkSchema.GetInterfaceMappings();
-        if (!interfaceMappingsSchema) {
-            return result;
+        // Get the material network's public interface, which is required for
+        // material override operations, but not for parameter edit operations
+        const HdMaterialInterfaceSchema
+            interfaceSchema = matNetworkSchema.GetInterface();
+        std::shared_ptr<NestedTfTokenMap> reverseInterfaceMappingsPtr = nullptr;
+        if (interfaceSchema) {
+            // Build a reverse look-up for interface mappings which is keyed by
+            // the material node parameter locations, which will be more 
+            // efficient for look-ups when we later override the material node 
+            // parameter
+            reverseInterfaceMappingsPtr = 
+                std::make_shared<NestedTfTokenMap>(
+                    interfaceSchema.GetReverseInterfaceMappings());
         }
-
-        // Build a reverse look-up for interface mappings which is keyed by
-        // the material node parameter locations, which will be more 
-        // efficient for look-ups when we later override the material node 
-        // parameter
-        auto reverseInterfaceMappingsPtr(
-            std::make_shared<NestedTfTokenMap>(
-                _BuildReverseInterfaceMappings(matNetworkSchema.GetContainer()))
-            );
 
         return _MaterialNetworkContainerDataSource::New(
             matNetworkSchema.GetContainer(),

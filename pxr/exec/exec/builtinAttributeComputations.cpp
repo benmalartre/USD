@@ -8,8 +8,6 @@
 
 #include "pxr/exec/exec/attributeInputNode.h"
 #include "pxr/exec/exec/builtinComputations.h"
-#include "pxr/exec/exec/definitionRegistry.h"
-#include "pxr/exec/exec/inputKey.h"
 #include "pxr/exec/exec/program.h"
 #include "pxr/exec/exec/providerResolution.h"
 
@@ -41,6 +39,7 @@ Exec_ComputeValueComputationDefinition::~Exec_ComputeValueComputationDefinition(
 TfType
 Exec_ComputeValueComputationDefinition::GetResultType(
     const EsfObjectInterface &providerObject,
+    const TfToken &,
     EsfJournal *const journal) const
 {
     if (!TF_VERIFY(providerObject.IsAttribute())) {
@@ -78,6 +77,7 @@ Exec_ComputeValueComputationDefinition::GetInputKeys(
 VdfNode *
 Exec_ComputeValueComputationDefinition::CompileNode(
     const EsfObjectInterface &providerObject,
+    const TfToken &,
     EsfJournal *const nodeJournal,
     Exec_Program *const program) const
 {
@@ -108,6 +108,7 @@ Exec_ComputeValueComputationDefinition::_MakeInputKeys()
         Exec_InputKeyVector::MakeShared(std::initializer_list<Exec_InputKey>{{
                 Exec_AttributeInputNodeTokens->time,
                 ExecBuiltinComputations->computeTime,
+                /* disambiguatingId */ TfToken(),
                 TfType::Find<EfTime>(),
                 ExecProviderResolution{
                     SdfPath::AbsoluteRootPath(),

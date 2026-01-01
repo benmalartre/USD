@@ -15,6 +15,7 @@
 #include "pxr/base/tf/token.h"
 #include "pxr/base/tf/weakBase.h"
 #include "pxr/base/vt/value.h"
+#include "pxr/usd/sdf/booleanExpression.h"
 #include "pxr/usd/sdr/api.h"
 #include "pxr/usd/sdr/declare.h"
 #include "pxr/usd/sdr/sdfTypeIndicator.h"
@@ -52,8 +53,10 @@ PXR_NAMESPACE_OPEN_SCOPE
     ((Hints, "hints"))                               \
     ((Options, "options"))                           \
     ((IsDynamicArray, "isDynamicArray"))             \
+    ((TupleSize, "tupleSize"))                       \
     ((Connectable, "connectable"))                   \
     ((Tag, "tag"))                                   \
+    ((ShownIf, "shownIf"))                           \
     ((ValidConnectionTypes, "validConnectionTypes")) \
     ((VstructMemberOf, "vstructMemberOf"))           \
     ((VstructMemberName, "vstructMemberName"))       \
@@ -150,6 +153,18 @@ public:
     SDR_API
     int GetArraySize() const { return _arraySize; }
 
+    /// Gets this property's tuple size.
+    ///
+    /// The tuple size indicates an array's "column count", or how many elements
+    /// it takes to form a logical row. For non-dynamic arrays, the array size
+    /// should be a multiple of the tuple size.
+    ///
+    /// If no tuple size is specified, returns 0.
+    ///
+    /// \sa GetArraySize()
+    SDR_API
+    int GetTupleSize() const { return _tupleSize; }
+
     /// Gets a string with basic information about this property. Helpful for
     /// things like adding this property to a log.
     SDR_API
@@ -210,6 +225,17 @@ public:
     /// correct.
     SDR_API
     std::string GetImplementationName() const;
+
+    /// A boolean expression (\c SdfBooleanExpression) that determines if the
+    /// property should be shown in the UI based on the state of other
+    /// properties of the same node.
+    ///
+    /// If an expression is not provided for `SdrPropertyMetadata->ShownIf` and
+    /// the property instead contains conditional visibility metadata expressed
+    /// in the style of Katana "args" files, an attempt will be made to convert
+    /// the condition into an SdfBooleanExpression-style boolean expression.
+    SDR_API
+    std::string GetShownIf() const;
 
     /// @}
 
@@ -335,6 +361,11 @@ protected:
     // different default value
     void _ConvertToVStruct();
 
+    // If a shownIf expression is not provided, attempt to synthesize one from
+    // other conditional visibility metadata.
+    void _ConvertExpressions(const SdrShaderPropertyUniquePtrVec& properties,
+        SdrShaderNodeConstPtr shader);
+
     // This function is called by SdrShaderNode::_PostProcessProperties once all
     // information is locked in and won't be changed anymore. This allows each
     // property to take some extra steps once all information is available.
@@ -345,6 +376,7 @@ protected:
     VtValue _defaultValue;
     bool _isOutput;
     size_t _arraySize;
+    size_t _tupleSize;
     bool _isDynamicArray;
     bool _isConnectable;
     SdrTokenMap _metadata;

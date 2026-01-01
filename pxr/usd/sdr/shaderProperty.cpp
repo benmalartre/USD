@@ -22,6 +22,7 @@ TF_DEFINE_PUBLIC_TOKENS(SdrPropertyRole, SDR_PROPERTY_ROLE_TOKENS);
 TF_DEFINE_PUBLIC_TOKENS(SdrPropertyTokens, SDR_PROPERTY_TOKENS);
 
 using ShaderMetadataHelpers::GetRoleFromMetadata;
+using ShaderMetadataHelpers::IntVal;
 using ShaderMetadataHelpers::IsTruthy;
 using ShaderMetadataHelpers::StringVal;
 using ShaderMetadataHelpers::TokenVal;
@@ -675,6 +676,8 @@ SdrShaderProperty::SdrShaderProperty(
       _isOutput(isOutput),
       _arraySize(_ConvertSdrPropertyTypeAndArraySize(
                 type, arraySize, metadata).second),
+      _tupleSize(
+          IntVal(SdrPropertyMetadata->TupleSize, metadata, 0)),
       _metadata(metadata),
       _hints(hints),
       _options(options),
@@ -736,6 +739,12 @@ SdrShaderProperty::GetImplementationName() const
 {
     return StringVal(SdrPropertyMetadata->ImplementationName, _metadata,
                      GetName().GetString());
+}
+
+std::string
+SdrShaderProperty::GetShownIf() const
+{
+    return StringVal(SdrPropertyMetadata->ShownIf, _metadata);
 }
 
 bool
@@ -869,6 +878,21 @@ SdrShaderProperty::_ConvertToVStruct()
     SdrSdfTypeIndicator typeIndicator = GetTypeAsSdfType();
     SdfValueTypeName typeName = typeIndicator.GetSdfType();
     _defaultValue = typeName.GetDefaultValue();
+}
+
+void
+SdrShaderProperty::_ConvertExpressions(
+    const SdrShaderPropertyUniquePtrVec& properties,
+    SdrShaderNodeConstPtr shader)
+{
+    const TfToken& shownIf = SdrPropertyMetadata->ShownIf;
+    if (_metadata.count(shownIf) == 0) {
+        std::string expr = ShaderMetadataHelpers::ComputeShownIfFromMetadata(
+            this, properties, shader);
+        if (!expr.empty()) {
+            _metadata[shownIf] = expr;
+        }
+    }
 }
 
 void

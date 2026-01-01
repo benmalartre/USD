@@ -10,7 +10,6 @@
 #ifndef PXR_USD_IMAGING_USD_IMAGING_GL_ENGINE_H
 #define PXR_USD_IMAGING_USD_IMAGING_GL_ENGINE_H
 
-#include "pxr/imaging/hd/noticeBatchingSceneIndex.h"
 #include "pxr/pxr.h"
 #include "pxr/usdImaging/usdImagingGL/api.h"
 #include "pxr/usdImaging/usdImagingGL/version.h"
@@ -62,7 +61,7 @@ TF_DECLARE_REF_PTRS(UsdImagingStageSceneIndex);
 TF_DECLARE_REF_PTRS(UsdImagingRootOverridesSceneIndex);
 TF_DECLARE_REF_PTRS(UsdImagingSelectionSceneIndex);
 TF_DECLARE_REF_PTRS(HdsiLegacyDisplayStyleOverrideSceneIndex);
-TF_DECLARE_REF_PTRS(HdsiPrimTypePruningSceneIndex);
+TF_DECLARE_REF_PTRS(HdsiPrimTypeAndPathPruningSceneIndex);
 TF_DECLARE_REF_PTRS(HdsiSceneGlobalsSceneIndex);
 TF_DECLARE_REF_PTRS(HdSceneIndexBase);
 TF_DECLARE_REF_PTRS(HdxTaskControllerSceneIndex);
@@ -494,6 +493,21 @@ public:
     /// @{
     // ---------------------------------------------------------------------
 
+    /// Returns the active render pass prim path by querying the terminal scene
+    /// index. Returns an empty path if none was found. 
+    USDIMAGINGGL_API
+    SdfPath GetActiveRenderPassPrimPath() const;
+
+    /// Returns the active render settings prim path by querying the terminal
+    /// scene index. Returns an empty path if none was found.
+    USDIMAGINGGL_API
+    SdfPath GetActiveRenderSettingsPrimPath() const;
+
+    /// Utility method to query available render settings prims.
+    USDIMAGINGGL_API
+    static SdfPathVector
+    GetAvailableRenderSettingsPrimPaths(UsdPrim const &root);
+
     /// Set active render pass prim to use to drive rendering.
     USDIMAGINGGL_API
     void SetActiveRenderPassPrimPath(SdfPath const &);
@@ -502,10 +516,6 @@ public:
     USDIMAGINGGL_API
     void SetActiveRenderSettingsPrimPath(SdfPath const &);
 
-    /// Utility method to query available render settings prims.
-    USDIMAGINGGL_API
-    static SdfPathVector
-    GetAvailableRenderSettingsPrimPaths(UsdPrim const &root);
 
     /// @}
 
@@ -676,12 +686,6 @@ protected:
     USDIMAGINGGL_API
     HdRenderIndex *_GetRenderIndex() const;
 
-    /// \deprecated.
-    /// Use _Execute(const UsdImaginGLRenderParams &, const SdfPathVector &).
-    USDIMAGINGGL_API
-    void _Execute(const UsdImagingGLRenderParams &params,
-                  const HdTaskSharedPtrVector tasks);
-
     USDIMAGINGGL_API
     void _Execute(const UsdImagingGLRenderParams &params,
                   const SdfPathVector &taskPaths);
@@ -737,6 +741,9 @@ protected:
     void _SetRenderDelegate(HdPluginRenderDelegateUniqueHandle &&);
 
     USDIMAGINGGL_API
+    SdfPath _ComputeControllerPath(const TfToken &pluginId);
+
+    USDIMAGINGGL_API
     SdfPath _ComputeControllerPath(const HdPluginRenderDelegateUniqueHandle &);
 
     USDIMAGINGGL_API
@@ -753,11 +760,17 @@ protected:
     USDIMAGINGGL_API
     HdEngine *_GetHdEngine();
 
+    /// \deprecated The HdxTaskController is replaced by the
+    ///             HdxTaskControllerSceneIndex.
     USDIMAGINGGL_API
     HdxTaskController *_GetTaskController() const;
 
     USDIMAGINGGL_API
     HdSelectionSharedPtr _GetSelection() const;
+
+    // Create UsdImagingStageSceneIndex and subsequent scene indices.
+    void
+    _CreateUsdImagingSceneIndices();
 
 protected:
 
@@ -798,24 +811,13 @@ protected:
     bool _isPopulated;
 
 private:
-    // Registers app-managed scene indices with the scene index plugin registry.
-    // This needs to be called once *before* the render index is constructed.
-    static void _RegisterApplicationSceneIndices();
-
-    // Creates and returns the scene globals scene index. This callback is
-    // registered prior to render index construction and is invoked during
-    // render index construction via
-    // HdSceneIndexPluginRegistry::AppendSceneIndicesForRenderer(..).
-    static HdSceneIndexBaseRefPtr
-    _AppendSceneGlobalsSceneIndexCallback(
-        const std::string &renderInstanceId,
-        const HdSceneIndexBaseRefPtr &inputScene,
-        const HdContainerDataSourceHandle &inputArgs);
+    bool _HasRenderer() const;
+    HdSceneIndexBaseRefPtr _GetTerminalSceneIndex() const;
 
     HdSceneIndexBaseRefPtr
     _AppendOverridesSceneIndices(
         const HdSceneIndexBaseRefPtr &inputScene);
-    
+
     UsdImagingGLEngine_Impl::_AppSceneIndicesSharedPtr _appSceneIndices;
 
     void _DestroyHydraObjects();
@@ -827,10 +829,11 @@ private:
     UsdImagingSelectionSceneIndexRefPtr _selectionSceneIndex;
     UsdImagingRootOverridesSceneIndexRefPtr _rootOverridesSceneIndex;
     HdsiLegacyDisplayStyleOverrideSceneIndexRefPtr _displayStyleSceneIndex;
-    HdsiPrimTypePruningSceneIndexRefPtr _materialPruningSceneIndex;
-    HdsiPrimTypePruningSceneIndexRefPtr _lightPruningSceneIndex;
+    HdsiPrimTypeAndPathPruningSceneIndexRefPtr _lightPruningSceneIndex;
+    // State of the _lightPruningSceneIndex.
+    bool _lightPruningSceneIndexEnableSceneLights;
     HdSceneIndexBaseRefPtr _sceneIndex;
-    
+
     std::unique_ptr<UsdImagingDelegate> _sceneDelegate;
 
     std::unique_ptr<HdEngine> _engine;

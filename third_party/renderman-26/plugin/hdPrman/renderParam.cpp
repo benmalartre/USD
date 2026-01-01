@@ -15,22 +15,27 @@
 #include "hdPrman/instancer.h"
 #include "hdPrman/material.h"
 #include "hdPrman/motionBlurSceneIndexPlugin.h"
-#include "hdPrman/prmanArchDefs.h" // required for stats/Session.h
+#include "hdPrman/prmanArchDefs.h" // IWYU pragma: keep for stats/Session.h
 #include "hdPrman/renderDelegate.h"
 #include "hdPrman/renderViewContext.h"
 #include "hdPrman/rixStrings.h"
-#include "hdPrman/utils.h"
+#include "hdPrman/statsListener.h"
 #include "hdPrman/tokens.h"
+#include "hdPrman/utils.h"
+#include "hdPrman/worldOffsetSceneIndexPlugin.h"
 
 #include "pxr/imaging/hd/aov.h"
+#include "pxr/imaging/hd/dataSourceLocator.h"
 #include "pxr/imaging/hd/enums.h"
 #include "pxr/imaging/hd/extComputationUtils.h"
 #include "pxr/imaging/hd/material.h"
 #include "pxr/imaging/hd/renderBuffer.h"
 #include "pxr/imaging/hd/renderDelegate.h"
 #include "pxr/imaging/hd/renderThread.h"
+#include "pxr/imaging/hd/retainedSceneIndex.h"
 #include "pxr/imaging/hd/rprim.h"
 #include "pxr/imaging/hd/sceneDelegate.h"
+#include "pxr/imaging/hd/sceneIndex.h"
 #include "pxr/imaging/hd/sprim.h"
 #include "pxr/imaging/hd/timeSampleArray.h"
 #include "pxr/imaging/hd/tokens.h"
@@ -48,15 +53,15 @@
 #include "pxr/base/gf/vec2d.h"
 #include "pxr/base/gf/vec2f.h"
 #include "pxr/base/gf/vec2i.h"
+#include "pxr/base/gf/vec3f.h"
 #include "pxr/base/plug/plugin.h"
 #include "pxr/base/plug/registry.h"
 #include "pxr/base/tf/debug.h"
 #include "pxr/base/tf/diagnostic.h"
 #include "pxr/base/tf/enum.h"
 #include "pxr/base/tf/envSetting.h"
-#include "pxr/base/tf/getenv.h"
 #include "pxr/base/tf/iterator.h"
-#include "pxr/base/tf/pathUtils.h"  // Extract extension from tf token
+#include "pxr/base/tf/pathUtils.h"
 #include "pxr/base/tf/registryManager.h"
 #include "pxr/base/tf/scopeDescription.h"
 #include "pxr/base/tf/staticData.h"
@@ -67,14 +72,15 @@
 #include "pxr/base/vt/array.h"
 #include "pxr/base/vt/dictionary.h"
 #include "pxr/base/vt/types.h"
+
 #include "pxr/pxr.h"
 
 #include <prmanapi.h>
 #include <ri.h>
 #include <RiEntrypoints.h>
 #include <Riley.h>
-#include <RiTypesHelper.h>
 #include <RileyIds.h>
+#include <RiTypesHelper.h>
 #include <RixEventCallbacks.h>
 #include <RixInterfaces.h>
 #include <RixRiCtl.h>
@@ -91,7 +97,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <functional>
+#include <ios>
 #include <iterator>
 #include <map>
 #include <memory>
@@ -106,13 +114,20 @@
 #include <utility>
 #include <vector>
 
+#ifdef WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
+
 #if PXR_VERSION >= 2302
-#include "pxr/imaging/hd/retainedDataSource.h"
 #include "pxr/imaging/hd/containerDataSourceEditor.h"
+#include "pxr/imaging/hd/retainedDataSource.h"
 #endif
 
 #if PXR_VERSION >= 2308
 #include "hdPrman/renderSettings.h"
+
 #include "pxr/imaging/hd/renderSettings.h"
 #endif
 
@@ -128,6 +143,10 @@ TF_DEFINE_PRIVATE_TOKENS(
     (sourceName)
     (sourceType)
     (lpe)
+
+    // pixelFilterName
+    (gaussian)
+    (box)
 
     // Product/driver tokens
     (deepRaster)
@@ -189,6 +208,8 @@ extern TfEnvSetting<bool> HD_PRMAN_ENABLE_QUICKINTEGRATE;
 static bool _enableQuickIntegrate =
     TfGetEnvSetting(HD_PRMAN_ENABLE_QUICKINTEGRATE);
 
+static TfToken _defaultIntegratorOverride;
+
 // Used when Creating Riley RenderView from the RenderSettings or RenderSpec
 static GfVec2i _fallbackResolution = GfVec2i(512,512);
 
@@ -196,6 +217,12 @@ TF_MAKE_STATIC_DATA(std::vector<HdPrman_RenderParam::IntegratorCameraCallback>,
                     _integratorCameraCallbacks)
 {
     _integratorCameraCallbacks->clear();
+}
+
+TF_MAKE_STATIC_DATA(std::vector<HdPrman_RenderParam::RileyOptionsCallback>,
+                    _rileyOptionsCallbacks)
+{
+    _rileyOptionsCallbacks->clear();
 }
 
 HdPrman_RenderParam::HdPrman_RenderParam(
@@ -210,7 +237,6 @@ HdPrman_RenderParam::HdPrman_RenderParam(
     _ri(nullptr),
     _mgr(nullptr),
     _statsSession(nullptr),
-    _progressPercent(0),
     _progressMode(0),
     _startTime(0),
     _stopTime(0),
@@ -229,6 +255,7 @@ HdPrman_RenderParam::HdPrman_RenderParam(
     _resolutionStr(""),
     _sampleFilterId(riley::SampleFilterId::InvalidId()),
     _displayFilterId(riley::DisplayFilterId::InvalidId()),
+    _pixelFilter(GetDefaultPixelFilter()),
     _renderDelegate(renderDelegate),
     _huskFrameStart(1),
     _huskFrameIncrement(1),
@@ -1879,6 +1906,29 @@ HdPrman_RenderParam::SetFiltersFromRenderSettings(
     }
 }
 
+HdPrman_RenderParam::PixelFilter
+HdPrman_RenderParam::GetDefaultPixelFilter()
+{
+    // WARNING: Defaults are hardcoded.
+    // Make sure they match the values in PRManOptions.args.
+    return
+#if _PRMANAPI_VERSION_MAJOR_ >= 26
+        { _tokens->gaussian, GfVec2f(2.f, 2.f) };
+#else
+        { _tokens->box, GfVec2f(1.f, 1.f) };
+#endif
+}
+
+bool
+HdPrman_RenderParam::SetPixelFilter(PixelFilter const& pixelFilter)
+{
+    if (_pixelFilter != pixelFilter) {
+        _pixelFilter = pixelFilter;
+        return true;
+    }
+    return false;
+}
+
 void
 HdPrman_RenderParam::SetIntegratorParamsFromCamera(
     HdPrmanRenderDelegate *renderDelegate,
@@ -1896,6 +1946,19 @@ HdPrman_RenderParam::RegisterIntegratorCallbackForCamera(
     IntegratorCameraCallback const& callback)
 {
    _integratorCameraCallbacks->push_back(callback);
+}
+
+void
+HdPrman_RenderParam::RegisterRileyOptionsCallback(
+    const RileyOptionsCallback& callback)
+{
+    _rileyOptionsCallbacks->push_back(callback);
+}
+
+void
+HdPrman_RenderParam::SetDefaultIntegratorOverride(const TfToken& integrator)
+{
+    _defaultIntegratorOverride = integrator;
 }
 
 void
@@ -1984,6 +2047,15 @@ HdPrman_RenderParam::_CreateStatsSession(void)
     // Finalize addition of scene index information
     _statsSceneIndex->AddPrims({{SdfPath("/globals"), TfToken("globals"),
         editor.Finish()}});
+
+    // Create and register listener for progress metric
+    _statsListener = new HdPrmanStatsListener("HdPrman Stats Listenr",
+                                              IsInteractive());
+    if (_statsListener) {
+        _statsSession->AttachListener(_statsListener);
+    } else {
+        TF_RUNTIME_ERROR("Could not initialize Stats Listener.");
+    }
 #endif
 #endif
 }
@@ -2092,12 +2164,6 @@ HdPrman_RenderParam::_CreateRiley(const std::string &rileyVariant,
     // Register an Xcpt handler
     RixXcpt* rix_xcpt = (RixXcpt*)_rix->GetRixInterface(k_RixXcpt);
     rix_xcpt->Register(&_xcpt);
-
-    // Register progress callback
-     RixEventCallbacks* rix_event_callbacks =
-        (RixEventCallbacks*)_rix->GetRixInterface(k_RixEventCallbacks);
-     rix_event_callbacks->RegisterCallback(RixEventCallbacks::k_Progress,
-                                           _ProgressCallback, this);
 
     // Populate RixStr struct
     RixSymbolResolver* sym = (RixSymbolResolver*)_rix->GetRixInterface(
@@ -2292,7 +2358,7 @@ _ToRtParamList(VtDictionary const& dict, TfToken prefix=TfToken())
 }
 
 static
-RtUString
+TfToken
 _GetOutputDisplayDriverType(const std::string &extension)
 {
     static const std::map<std::string,TfToken> extToDisplayDriver{
@@ -2304,19 +2370,19 @@ _GetOutputDisplayDriverType(const std::string &extension)
 
     const auto it = extToDisplayDriver.find(extension);
     if (it != extToDisplayDriver.end()) {
-        return RtUString(it->second.GetText());
+        return it->second;
     }
 
     TF_WARN(
         "Could not determine display driver for product filename extension %s."
         "Falling back to openexr.", extension.c_str());
 
-    return RtUString(_tokens->openexr.GetText());
+    return _tokens->openexr;
 }
 
 // Overload used when creating the render view from a renderSpec dict.
 static
-RtUString
+TfToken
 _GetOutputDisplayDriverType(const TfToken &name)
 {
     const std::string outputExt = TfGetExtension(name.GetString());
@@ -2326,7 +2392,7 @@ _GetOutputDisplayDriverType(const TfToken &name)
 #if PXR_VERSION >= 2308
 // Overload used when creating the render view from a render settings' product.
 static
-RtUString
+TfToken
 _GetOutputDisplayDriverType(
     const VtDictionary &productSettings,
     const TfToken &productName,
@@ -2334,14 +2400,20 @@ _GetOutputDisplayDriverType(
 {
     // Use "ri:productType" from the product's namespaced settings if
     // available.
-    const TfToken driverName =
+    const TfToken riProductType =
         VtDictionaryGet<TfToken>(
             productSettings,
             _tokens->riProductType.GetText(),
             VtDefault = TfToken());
 
-    if (!driverName.IsEmpty()) {
-        return RtUString(driverName.GetText());
+    if (riProductType == HdPrmanRenderProductTokens->idMap) {
+        // The idMap product is not a standard display output, instead produced
+        // by a file write on render pass execution completion.
+        return TfToken("");
+    }
+
+    if (!riProductType.IsEmpty()) {
+        return riProductType;
     }
 
     // Otherwise, use the extension from the product name and product type
@@ -2350,7 +2422,7 @@ _GetOutputDisplayDriverType(
     const std::string outputExt = TfGetExtension(productName.GetString());
 
     if (productType == _tokens->deepRaster && outputExt == std::string("exr")) {
-        return RtUString(_tokens->deepexr.GetText());
+        return _tokens->deepexr;
     }
 
     return _GetOutputDisplayDriverType(outputExt);
@@ -2364,7 +2436,8 @@ _ComputeRenderViewDesc(
     const riley::CameraId cameraId,
     const riley::IntegratorId integratorId,
     const riley::SampleFilterList &sampleFilterList,
-    const riley::DisplayFilterList &displayFilterList)
+    const riley::DisplayFilterList &displayFilterList,
+    const HdPrman_RenderParam::PixelFilter &pixelFilter)
 {
     HdPrman_RenderViewDesc renderViewDesc;
 
@@ -2413,6 +2486,8 @@ _ComputeRenderViewDesc(
                     HdPrmanExperimentalRenderSpecTokens->type)));
         renderOutputDesc.sourceName = sourceName;
         renderOutputDesc.rule = RixStr.k_filter;
+        renderOutputDesc.filter = RtUString(pixelFilter.name.GetText());
+        renderOutputDesc.filterWidth = pixelFilter.width;
         renderOutputDesc.params = _ToRtParamList(
             VtDictionaryGet<VtDictionary>(
                 renderVar,
@@ -2439,7 +2514,8 @@ _ComputeRenderViewDesc(
                 HdPrmanExperimentalRenderSpecTokens->name));
 
         displayDesc.name = RtUString(name.GetText());
-        displayDesc.driver = _GetOutputDisplayDriverType(name);
+        displayDesc.driver = RtUString(
+            _GetOutputDisplayDriverType(name).GetText());
         displayDesc.params = _ToRtParamList(
             VtDictionaryGet<VtDictionary>(
                 renderProduct,
@@ -2465,7 +2541,7 @@ static RtUString
 _AddRenderOutput(RtUString aovName,
     const TfToken &dataType, HdFormat aovFormat,
     RtUString sourceName, const RtParamList &params,
-    const RtUString& filter, const GfVec2f& filterWidth,
+    const HdPrman_RenderParam::PixelFilter &pixelFilter,
     std::vector<HdPrman_RenderViewDesc::RenderOutputDesc> *renderOutputDescs,
     std::vector<size_t> *renderOutputIndices);
 
@@ -2477,7 +2553,8 @@ _ComputeRenderViewDesc(
     const riley::CameraId cameraId,
     const riley::IntegratorId integratorId,
     const riley::SampleFilterList &sampleFilterList,
-    const riley::DisplayFilterList &displayFilterList)
+    const riley::DisplayFilterList &displayFilterList,
+    const HdPrman_RenderParam::PixelFilter &pixelFilter)
 {
     HdPrman_RenderViewDesc renderViewDesc;
     renderViewDesc.cameraId = cameraId;
@@ -2490,24 +2567,25 @@ _ComputeRenderViewDesc(
         renderViewDesc.resolution = {1024, 768};
     }
 
-    // TODO: Get filter and filterWidth from renderSettings prim
-    // See comments in _UpdatePixelFilter method
-    static const RtUString defaultPixelFilter = RixStr.k_box;
-    static const GfVec2f defaultPixelFilterWidth(1.f, 1.f);
-
     /* RenderProduct */
     int renderVarIndex = 0;
     std::map<SdfPath, int> seenRenderVars;
 
 
     for (const HdRenderSettings::RenderProduct &product : products) {
+
+        const TfToken driverType = _GetOutputDisplayDriverType(
+            product.namespacedSettings, product.name, product.type);
+        if (driverType.IsEmpty()) {
+            continue;
+        }
+
         // Create a DisplayDesc for this RenderProduct
         HdPrman_RenderViewDesc::DisplayDesc displayDesc;
         displayDesc.name = RtUString(product.name.GetText());
         displayDesc.params = _ToRtParamList(product.namespacedSettings,
             _tokens->riDisplayDriverNamespace);
-        displayDesc.driver = _GetOutputDisplayDriverType(
-            product.namespacedSettings, product.name, product.type);
+        displayDesc.driver = RtUString(driverType.GetText());
 
         /* RenderVar */
         for (const HdRenderSettings::RenderProduct::RenderVar &renderVar :
@@ -2544,7 +2622,7 @@ _ComputeRenderViewDesc(
                              sourceName,
                              _ToRtParamList(renderVar.namespacedSettings,
                                             _tokens->riDisplayChannelNamespace),
-                             defaultPixelFilter, defaultPixelFilterWidth,
+                             pixelFilter,
                              &renderViewDesc.renderOutputDescs,
                              &renderOutputIndices);
         }
@@ -2565,7 +2643,8 @@ HdPrman_RenderParam::CreateRenderViewFromRenderSpec(
             GetCameraContext().GetCameraId(),
             GetActiveIntegratorId(),
             GetSampleFilterList(),
-            GetDisplayFilterList());
+            GetDisplayFilterList(),
+            GetPixelFilter());
 
     TF_DEBUG(HDPRMAN_RENDER_PASS)
         .Msg("Create Riley RenderView from the RenderSpec.\n");
@@ -2588,7 +2667,8 @@ HdPrman_RenderParam::CreateRenderViewFromRenderSettingsProducts(
             GetCameraContext().GetCameraId(),
             GetActiveIntegratorId(),
             GetSampleFilterList(),
-            GetDisplayFilterList());
+            GetDisplayFilterList(),
+            GetPixelFilter());
 
     renderViewContext->CreateRenderView(renderViewDesc, AcquireRiley());
 
@@ -2605,11 +2685,6 @@ HdPrman_RenderParam::FatalError(const char* msg)
 void
 HdPrman_RenderParam::_DestroyRiley()
 {
-     RixEventCallbacks* rix_event_callbacks =
-        (RixEventCallbacks*)_rix->GetRixInterface(k_RixEventCallbacks);
-     rix_event_callbacks->UnregisterCallback(RixEventCallbacks::k_Progress,
-                                             _ProgressCallback, this);
-
     if (_mgr) {
         if (_riley) {
             // Riley/RIS crashes if SetOptions hasn't been called prior to
@@ -2667,7 +2742,8 @@ HdPrman_RenderParam::UpdateRenderStats(VtDictionary &stats)
     // is a callback that returns stats to hydra.  This method adds to
     // the dictionary the progress value that comes from
     // the rix progress callback.
-    stats[_tokens->percentDone.GetString()] = _progressPercent;
+    stats[_tokens->percentDone.GetString()] =
+        _statsListener->GetCurrentProgress();
     // Stop time gets set at end of _RenderThreadCallback
     // after riley->Render returns. Until that happens, log the time so far.
     stats[_tokens->totalClockTime.GetString()] = (_stopTime == 0) ?
@@ -2773,15 +2849,20 @@ static
 std::string
 _GetIntegratorName(HdRenderDelegate * const renderDelegate)
 {
-    const std::string &integratorNameFromRS =
+    const std::string defaultIntegrator = _defaultIntegratorOverride.IsEmpty()
+      ? HdPrmanIntegratorTokens->PxrPathTracer.GetString()
+      : _defaultIntegratorOverride.GetString();
+
+    const auto& integratorName =
         renderDelegate->GetRenderSetting<std::string>(
             HdPrmanRenderSettingsTokens->integratorName,
-            HdPrmanIntegratorTokens->PxrPathTracer.GetString());
+            defaultIntegrator); // only used if integratorName is not set
 
-    // Avoid potentially empty integrator
-    return integratorNameFromRS.empty() ?
-            HdPrmanIntegratorTokens->PxrPathTracer.GetString() :
-            integratorNameFromRS;
+    // integratorName might have been set to empty string,
+    // in which case we should use the default.
+    return integratorName.empty()
+      ? defaultIntegrator
+      : integratorName;
 }
 
 riley::ShadingNode
@@ -2789,6 +2870,13 @@ HdPrman_RenderParam::_ComputeIntegratorNode(
     HdRenderDelegate * const renderDelegate,
     const HdPrmanCamera * const cam)
 {
+    // The priority order should be:
+    //   1) RenderSettings prim + Integrator prim
+    //   2) Legacy RenderSettingsMap
+    //   3) HD_PRMAN_INTEGRATOR
+    //   4) HdPrman_RenderParam::SetDefaultIntegratorOverride()
+    //   5) PxrPathTracer
+    // (1) is handled here, (2)-(5) in _GetIntegratorName()
 #if PXR_VERSION >= 2308
     // Use the integrator node from a terminal connection on the
     // renderSettingsPrim if we can
@@ -3017,22 +3105,6 @@ HdPrman_RenderParam::_RenderThreadCallback()
     _stopTime = ArchGetTickTime();
 }
 
-void
-HdPrman_RenderParam::_ProgressCallback(RixEventCallbacks::Event,
-                                       RtConstPointer data, RtPointer clientData)
-{
-    int const* pp = static_cast<int const*>(data);
-    HdPrman_RenderParam *param = static_cast<HdPrman_RenderParam*>(clientData);
-    param->_progressPercent = *pp;
-
-    if (!param->IsInteractive()) {
-        // XXX Placeholder to simulate RenderMan's built-in writeProgress
-        // option, until iether HdPrman can pass that in, and/or it gets
-        // replaced with Roz-based client-side progress reporting
-        printf("R90000  %3i%%\n", param->_progressPercent);
-    }
-}
-
 bool
 HdPrman_RenderParam::IsValid() const
 {
@@ -3259,6 +3331,33 @@ HdPrman_RenderParam::SetRileyOptions()
             prunedOptions = HdPrman_Utils::PruneBatchOnlyOptions(prunedOptions);
         }
 
+        // Set the world origin as "world offset" and the world offset as our camera/offset.
+        // Geometry/Lights/Camera all enter into riley in "world offset" space.
+        // This is handled by the world offset scene index plugin.
+        // However we still need this setting so that we can transform them back to world space
+        // in certain tasks like AOVs and OSL patterns.
+        // We always set this as "world offset" and set it with the exact offset the scene index
+        // is using. If we set to camera it may use all the time samples where as the scene index is
+        // only transforming around time zero for simplicity.
+        // TODO: This task should be moved into the scene index itself. However we cannot do this
+        // yet as there is a dependency on knowing  which rendersetting/camera is being used in
+        // the scene which is not known until after the scene index. If we change the rendersetting
+        // in the scene index it would be pushed forward to the render delegate, which would pass
+        // it back to the scene index, which would be pushed forward to the render delegate,
+        // creating a feedback loop.
+        // Once the SceneGlobals is properly supported we can move everything into the scene index
+        // plugin.
+        const GfVec3f worldOffset = GfVec3f(
+            HdPrman_WorldOffsetSceneIndexPlugin::GetCameraOffset() +
+            HdPrman_WorldOffsetSceneIndexPlugin::GetWorldOffset()
+        );
+        prunedOptions.SetFloatArray(RixStr.k_trace_worldoffset, worldOffset.GetArray(), 3);
+        prunedOptions.SetString(RixStr.k_trace_worldorigin, RixStr.k_worldoffset);
+
+        for(const auto& cb: *_rileyOptionsCallbacks) {
+            cb(prunedOptions);
+        }
+
         riley::Riley * const riley = AcquireRiley();
         riley->SetOptions(prunedOptions);
 
@@ -3311,9 +3410,11 @@ HdPrman_RenderParam::StartRender()
     }
 
     // Clear out old stats values
-    if (_statsSession)
-    {
+    if (_statsSession) {
         _statsSession->RemoveOldMetricData();
+        if( _statsListener ) {
+            _statsListener->reset();
+        }
     }
 
     // If render restarts without recreating delegate, start timing here.
@@ -3402,39 +3503,24 @@ HdPrman_RenderParam::DeleteRenderThread()
 }
 
 bool
-HdPrman_RenderParam::_UpdatePixelFilter()
+HdPrman_RenderParam::_OverridePixelFilterFromLegacyHdRenderSettingMap()
 {
     // Currently we still use the legacy Riley API where each AOV sets it's own
     // filter and filter width. This is impossible now that we only support
     // importance sampling and all AOVs must have the same value. Until the
     // Riley API is modified to set filter and filter width as an option, we
     // need to get the render setting ourselves and set it for each AOV.
-
-    // WARNING: Defaults are hardcoded.
-    // Make sure they match the values in PRManOptions.args.
-#if _PRMANAPI_VERSION_MAJOR_ >= 26
-    static const std::string defaultPixelFilter("gaussian");
-    static const GfVec2f defaultPixelFilterWidth(2.f, 2.f);
-#else
-    static const std::string defaultPixelFilter("box");
-    static const GfVec2f defaultPixelFilterWidth(1.f, 1.f);
-#endif
-
-    const RtUString pixelFilter(
-        _renderDelegate
+    return SetPixelFilter( {
+        // Name.  XXX Note conversion from std::string to TfToken.
+        TfToken( _renderDelegate
             ->GetRenderSetting<std::string>(
-                HdPrmanRenderSettingsTokens->pixelFilter, defaultPixelFilter)
-            .c_str());
-    const GfVec2f pixelFilterWidth = _renderDelegate->GetRenderSetting<GfVec2f>(
-        HdPrmanRenderSettingsTokens->pixelFilterWidth, defaultPixelFilterWidth);
-
-    if (pixelFilter != _pixelFilter || pixelFilterWidth != _pixelFilterWidth) {
-        _pixelFilter = pixelFilter;
-        _pixelFilterWidth = pixelFilterWidth;
-        return true;
-    }
-
-    return false;
+                HdPrmanRenderSettingsTokens->pixelFilter,
+                GetDefaultPixelFilter().name.GetString())),
+        // Width
+        _renderDelegate->GetRenderSetting<GfVec2f>(
+            HdPrmanRenderSettingsTokens->pixelFilterWidth,
+            GetDefaultPixelFilter().width)
+    });
 }
 
 bool
@@ -3684,8 +3770,7 @@ _AddRenderOutput(
     HdFormat aovFormat,
     RtUString sourceName,
     const RtParamList& params,
-    const RtUString& filter,
-    const GfVec2f& filterWidth,
+    const HdPrman_RenderParam::PixelFilter &pixelFilter,
     std::vector<HdPrman_RenderViewDesc::RenderOutputDesc> * renderOutputDescs,
     std::vector<size_t> * renderOutputIndices)
 {
@@ -3766,8 +3851,8 @@ _AddRenderOutput(
         renderOutputDesc.type = rType;
         renderOutputDesc.sourceName = sourceName;
         renderOutputDesc.rule = rule;
-        renderOutputDesc.filter = filter;
-        renderOutputDesc.filterWidth = filterWidth;
+        renderOutputDesc.filter = RtUString(pixelFilter.name.GetText());
+        renderOutputDesc.filterWidth = pixelFilter.width;
         renderOutputDesc.relativePixelVariance = relativePixelVariance;
         renderOutputDesc.params = extraParams;
 
@@ -3775,7 +3860,7 @@ _AddRenderOutput(
             .Msg("Add RenderOutputDesc: \n - name: '%s'\n - type: '%d'\n"
                  " - sourceName: '%s'\n - rule: '%s'\n - filter: '%s'\n\n",
                  aovName.CStr(), int(rType), sourceName.CStr(),
-                 rule.CStr(), filter.CStr());
+                 rule.CStr(), pixelFilter.name.GetText());
 
         renderOutputDescs->push_back(std::move(renderOutputDesc));
         renderOutputIndices->push_back(renderOutputDescs->size()-1);
@@ -3790,8 +3875,8 @@ _AddRenderOutput(
         renderOutputDesc.type = riley::RenderOutputType::k_Float;
         renderOutputDesc.sourceName = RixStr.k_a;
         renderOutputDesc.rule = rule;
-        renderOutputDesc.filter = filter;
-        renderOutputDesc.filterWidth = filterWidth;
+        renderOutputDesc.filter = RtUString(pixelFilter.name.GetText());
+        renderOutputDesc.filterWidth = pixelFilter.width;
         renderOutputDesc.relativePixelVariance = relativePixelVariance;
         renderOutputDesc.params = extraParams;
 
@@ -3845,8 +3930,13 @@ HdPrman_RenderParam::CreateFramebufferAndRenderViewFromAovs(
     false;
 #endif
 
-    // Update the Pixel Filter and Pixel Filter Width
-    const bool pixelFilterChanged = _UpdatePixelFilter();
+    // If we are using the HdRenderSettings map, rather than scene-defined
+    // render settings, allow it to override the pixel filter here.
+    bool pixelFilterChanged = false;
+    if (!useRenderSettingsProductsForInteractiveRenderView) {
+        pixelFilterChanged = _OverridePixelFilterFromLegacyHdRenderSettingMap();
+    }
+
     const bool qnChanged = _UpdateQNSettings();
 
     // Early exit if the render output is unchanged
@@ -3908,8 +3998,7 @@ HdPrman_RenderParam::CreateFramebufferAndRenderViewFromAovs(
                                               aovFormat,
                                               rmanSourceName,
                                               renderOutputParams,
-                                              _pixelFilter,
-                                              _pixelFilterWidth,
+                                              GetPixelFilter(),
                                               &renderViewDesc.renderOutputDescs,
                                               &renderOutputIndices);
 
@@ -3959,7 +4048,8 @@ HdPrman_RenderParam::CreateFramebufferAndRenderViewFromAovs(
                                    renderViewDesc.cameraId,
                                    renderViewDesc.integratorId,
                                    renderViewDesc.sampleFilterList,
-                                   renderViewDesc.displayFilterList);
+                                   renderViewDesc.displayFilterList,
+                                   GetPixelFilter());
 
         // Adjust indices to account for the ones we already have.  The
         // entries in rsrvd.renderOutputIndices index into
@@ -4007,8 +4097,9 @@ HdPrman_RenderParam::CreateRenderViewFromLegacyProducts(
         return;
     }
 
-    // Update the Pixel Filter and Pixel Filter Width
-    _UpdatePixelFilter();
+    // Legacy products use the legacy HdRenderSettings map, so pull
+    // the pixel filter setting from there.
+    _OverridePixelFilterFromLegacyHdRenderSettingMap();
 
     // Currently XPU only supports having one Riley Target and View.
     // Here we loop over the Render Products (a USD concept which corresponds
@@ -4197,8 +4288,7 @@ HdPrman_RenderParam::CreateRenderViewFromLegacyProducts(
                              aovFormat,
                              rmanSourceName,
                              renderOutputParams,
-                             _pixelFilter,
-                             _pixelFilterWidth,
+                             GetPixelFilter(),
                              &renderViewDesc.renderOutputDescs,
                              &renderOutputIndices);
 
@@ -4855,6 +4945,50 @@ HdPrman_RenderParam::_UpdateShutterInterval(const RtParamList& composedParams)
     // a workaround to provide it.
     HdPrman_MotionBlurSceneIndexPlugin::SetShutterInterval(
         _shutterInterval[0], _shutterInterval[1]);
+}
+
+TfToken
+HdPrman_RenderParam::GetIdMapProductName(HdPrman_RenderSettings* renderSettings)
+{
+    for (const auto& product : renderSettings->GetRenderProducts()) {
+        const TfToken productType =
+            VtDictionaryGet<TfToken>(
+                product.namespacedSettings,
+                _tokens->riProductType.GetText(),
+                VtDefault = TfToken());
+
+        if (productType == HdPrmanRenderProductTokens->idMap) {
+            return product.name;
+        }
+    }
+
+    return TfToken();
+}
+
+void
+HdPrman_RenderParam::WriteIdMap(
+    HdRenderIndex* renderIndex,
+    const TfToken& productName)
+{
+    std::ofstream outFile(productName.GetText(), std::ios::binary);
+    if (!outFile) {
+        TF_WARN("Failed to create ID file '%s'", productName.GetText());
+        return;
+    }
+
+    for (const auto& path : renderIndex->GetRprimIds()) {
+        const int64_t pathLen = path.GetString().size() + 1;
+        const int64_t id = renderIndex->GetRprim(path)->GetPrimId() + 1;
+
+        outFile.write(reinterpret_cast<const char*>(&id), sizeof(int64_t))
+               .write(reinterpret_cast<const char*>(&pathLen), sizeof(pathLen))
+               .write(path.GetText(), pathLen);
+
+        if (!outFile) {
+            TF_WARN("Writing ID file failed on '%s'", path.GetText());
+            return;
+        }
+    }
 }
 
 PXR_NAMESPACE_CLOSE_SCOPE

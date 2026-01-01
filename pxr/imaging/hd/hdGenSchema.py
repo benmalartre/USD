@@ -60,6 +60,7 @@ T_TUPLE = "HdTupleTypeDataSource"
 T_SIZET = "HdSizetDataSource"
 T_BASE = "HdDataSourceBase"
 T_STRING = "HdStringDataSource"
+T_STRINGARRAY = "HdStringArrayDataSource"
 T_VECTOR = "HdVectorDataSource"
 T_RESOLVERCONTEXT = "HdResolverContextDataSource"
 
@@ -104,8 +105,8 @@ def ToComment(text, indent = 0):
     for paragraph in re.split(r'\n\s*\n', text, re.DOTALL):
         for line in textwrap.wrap(' '.join(paragraph.split()),
                                   width = 75 - indent):
-            result += indent * ' ' + '// ' + line + '\n'
-        result += indent * ' ' + '//' + '\n'
+            result += indent * ' ' + '/// ' + line + '\n'
+        result += indent * ' ' + '///' + '\n'
 
     return result
 

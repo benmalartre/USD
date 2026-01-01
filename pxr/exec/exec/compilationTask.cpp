@@ -9,12 +9,13 @@
 #include "pxr/exec/exec/compilationState.h"
 
 #include "pxr/base/arch/hints.h"
+#include "pxr/base/tf/diagnostic.h"
 
 PXR_NAMESPACE_OPEN_SCOPE
 
 static inline void
 _RunOrInvoke(
-    const Exec_CompilerTaskSync &taskSync,
+    WorkDispatcher &dispatcher,
     Exec_CompilationTask *const task, 
     const int depth)
 {
@@ -27,20 +28,52 @@ _RunOrInvoke(
     if (ARCH_LIKELY(depth < 50)) {
         task->operator()(depth + 1);
     } else {
-        taskSync.Run(task);
+        dispatcher.Run(std::ref(*task));
     }
 }
 
-Exec_CompilationTask::~Exec_CompilationTask() = default;
+Exec_CompilationTask::Exec_CompilationTask(
+    Exec_CompilationState &compilationState)
+    : _parent(nullptr)
+    , _numDependents(0)
+    , _taskPhase(0)
+    , _compilationState(compilationState)
+{
+    _compilationState.GetTaskCycleDetector().CreateTask();
+}
 
-Exec_CompilerTaskSync::ClaimResult
+Exec_CompilationTask::~Exec_CompilationTask()
+{
+    _compilationState.GetTaskCycleDetector().DestroyTask();
+}
+
+void
+Exec_CompilationTask::AddDependency()
+{
+    if (_numDependents.fetch_add(1, std::memory_order_acquire) == 0) {
+        _compilationState.GetTaskCycleDetector().BlockTask();
+    }
+}
+
+int
+Exec_CompilationTask::RemoveDependency()
+{
+    const int numDependents =
+        _numDependents.fetch_sub(1, std::memory_order_release) - 1;
+    if (numDependents == 0) {
+        _compilationState.GetTaskCycleDetector().UnblockTask();
+    }
+    return numDependents;
+}
+
+Exec_CompilerTaskSyncBase::ClaimResult
 Exec_CompilationTask::TaskDependencies::ClaimSubtask(
     const Exec_OutputKey::Identity &key)
 {
-    const Exec_CompilerTaskSync::ClaimResult result =
-        Exec_CompilationState::OutputTasksAccess::_Get(&_compilationState)
-            .Claim(key, _task);
-    if (result == Exec_CompilerTaskSync::ClaimResult::Wait) {
+    const Exec_CompilerTaskSyncBase::ClaimResult result =
+        Exec_CompilationState::TaskSyncAccess::_GetOutputProvidingTaskSync(
+            &_compilationState).Claim(key, _task);
+    if (result == Exec_CompilerTaskSyncBase::ClaimResult::Wait) {
         _hasDependencies = true;
     }
     return result;
@@ -52,6 +85,10 @@ Exec_CompilationTask::operator()(const int depth) const
     // WorkDispatcher semantics require call operators to be const, but we need
     // to mutate our internal task state.
     Exec_CompilationTask *thisTask = const_cast<Exec_CompilationTask*>(this);
+
+    // The thread is busy while it's executing this function.
+    const auto busyScope =
+        _compilationState.GetTaskCycleDetector().NewBusyScope();
 
     // Register an additional dependency while this task is running.
     // 
@@ -70,10 +107,8 @@ Exec_CompilationTask::operator()(const int depth) const
         return taskPhases._GetNextTask();
     }();
 
-    // Get the task sync object for running subsequent tasks.
-    const Exec_CompilerTaskSync &taskSync =
-        Exec_CompilationState::OutputTasksAccess::_Get(
-            &thisTask->_compilationState);
+    // Get the dispatcher for running subsequent tasks.
+    WorkDispatcher &dispatcher = thisTask->_compilationState.GetDispatcher();
 
     // If a pointer to a next task was returned, thisTask *did not* complete.
     // In this case there are additional phases to run, and one or more
@@ -86,7 +121,7 @@ Exec_CompilationTask::operator()(const int depth) const
         // stack. Once we reach a certain stack depth, we will Run() the task to
         // prevent running out of stack space.
         if (nextTask != thisTask) {
-            _RunOrInvoke(taskSync, nextTask, depth);
+            _RunOrInvoke(dispatcher, nextTask, depth);
         }
 
         // Let's remove the dependency we added above to prevent re-entry.
@@ -100,7 +135,7 @@ Exec_CompilationTask::operator()(const int depth) const
         // Once we reach a certain stack depth, we will Run() the task to
         // prevent running out of stack space.
         if (thisTask->RemoveDependency() == 0) {
-            _RunOrInvoke(taskSync, thisTask, depth);
+            _RunOrInvoke(dispatcher, thisTask, depth);
         }
         return;
     }
@@ -116,9 +151,14 @@ Exec_CompilationTask::operator()(const int depth) const
         // stack. Once we reach a certain stack depth, we will Run() the task to
         // prevent running out of stack space.
         if (parent->RemoveDependency() == 0) {
-            _RunOrInvoke(taskSync, parent, depth);
+            _RunOrInvoke(dispatcher, parent, depth);
         }
     }
+
+    // The task is complete. The task cycle detector expects all tasks to be
+    // unblocked before they are destroyed, so here we remove the dependency
+    // added to prevent re-entry. It should be the only dependency.
+    TF_VERIFY(thisTask->RemoveDependency() == 0);
 
     // The task just completed, and tasks manage their own lifetime: We must
     // delete it now.
@@ -128,8 +168,8 @@ Exec_CompilationTask::operator()(const int depth) const
 void
 Exec_CompilationTask::_MarkDone(const Exec_OutputKey::Identity &key)
 {
-    Exec_CompilationState::OutputTasksAccess::_Get(&_compilationState)
-        .MarkDone(key);
+    Exec_CompilationState::TaskSyncAccess::_GetOutputProvidingTaskSync(
+        &_compilationState).MarkDone(key);
 }
 
 PXR_NAMESPACE_CLOSE_SCOPE

@@ -126,29 +126,18 @@
 
 PXR_NAMESPACE_OPEN_SCOPE
 
+// Defining tokens here to avoid adding a dependency on usdRiPxrImaging
+TF_DEFINE_PRIVATE_TOKENS(
+    _projectionPluginTokens,
+    (projection)
+    (resource)
+);
+
 //
 // If the input prim is a datasource prim, we need some sensible default
 // here...  For now, we pass [0,0] to turn off multisampling.
 constexpr float _fallbackStartTime = 0.0f;
 constexpr float _fallbackEndTime   = 0.0f;
-
-/* static */
-HdSceneIndexBaseRefPtr
-HdSceneIndexAdapterSceneDelegate::AppendDefaultSceneFilters(
-    HdSceneIndexBaseRefPtr inputSceneIndex, SdfPath const &delegateID)
-{
-    HdSceneIndexBaseRefPtr result = inputSceneIndex;
-
-    // if no prefix, don't add HdPrefixingSceneIndex
-    if (!delegateID.IsEmpty() && delegateID != SdfPath::AbsoluteRootPath()) {
-        result = HdPrefixingSceneIndex::New(result, delegateID);
-    }
-
-    // disabling flattening as it's not yet needed for pure emulation
-    //result = HdFlatteningSceneIndex::New(result);
-
-    return result;
-}
 
 // ----------------------------------------------------------------------------
 
@@ -1236,17 +1225,11 @@ _ToDictionary(HdSampledDataSourceContainerSchema schema)
 {
     VtDictionary dict;
     for (const TfToken& name : schema.GetNames()) {
-        if (HdSampledDataSourceHandle valueDs = schema.Get(name)) {
+        if (HdSampledDataSourceHandle const valueDs = schema.Get(name)) {
             dict[name.GetString()] = valueDs->GetValue(0);
         }
     }
     return dict;
-}
-
-VtDictionary
-_ToDictionary(HdContainerDataSourceHandle const &cds)
-{
-    return _ToDictionary(HdSampledDataSourceContainerSchema(cds));
 }
 
 static
@@ -1618,22 +1601,13 @@ _ToRenderProducts(HdRenderProductVectorSchema productsSchema)
 VtValue
 _GetRenderSettings(HdSceneIndexPrim prim, TfToken const &key)
 {
-    HdContainerDataSourceHandle renderSettingsDs =
-            HdContainerDataSource::Cast(prim.dataSource->Get(
-                HdRenderSettingsSchemaTokens->renderSettings));
-
-    HdRenderSettingsSchema rsSchema = HdRenderSettingsSchema(renderSettingsDs);
+    const auto rsSchema = HdRenderSettingsSchema::GetFromParent(prim.dataSource);
     if (!rsSchema.IsDefined()) {
         return VtValue();
     }
 
     if (key == HdRenderSettingsPrimTokens->namespacedSettings) {
-        VtDictionary settings;
-        if (HdContainerDataSourceHandle namespacedSettingsDs =
-                rsSchema.GetNamespacedSettings()) {
-
-            return VtValue(_ToDictionary(namespacedSettingsDs));
-        }
+        return VtValue(_ToDictionary(rsSchema.GetNamespacedSettings()));
     }
 
     if (key == HdRenderSettingsPrimTokens->active) {
@@ -2178,6 +2152,31 @@ HdSceneIndexAdapterSceneDelegate::Get(SdfPath const &id, TfToken const &key)
         if (key == HdTokens->renderTags) {
             if (HdTokenVectorDataSourceHandle const ds = task.GetRenderTags()) {
                 return ds->GetValue(0.0f);
+            }
+        }
+    }
+
+    if (prim.primType == _projectionPluginTokens->projection) {
+        if (key == _projectionPluginTokens->resource) {
+            auto projection = HdContainerDataSource::Cast(
+                prim.dataSource->Get(_projectionPluginTokens->projection));
+            if (projection) {
+                HdMaterialNodeSchema resource =
+                    HdContainerDataSource::Cast(
+                        projection->Get(_projectionPluginTokens->resource));
+                if (resource) {
+                    HdMaterialNode2 hdNode2;
+                    HdTokenDataSourceHandle nodeTypeDS =
+                        resource.GetNodeIdentifier();
+                    if (nodeTypeDS) {
+                        hdNode2.nodeTypeId = nodeTypeDS->GetTypedValue(0);
+                    }
+                
+                    hdNode2.parameters = _GetHdParamsFromDataSource(
+                        resource.GetParameters());
+                
+                    return VtValue(hdNode2);
+                }
             }
         }
     }
@@ -2736,19 +2735,32 @@ HdSceneIndexAdapterSceneDelegate::SampleExtComputationInput(
         valueDs->GetContributingSampleTimesForInterval(
                 std::numeric_limits<float>::lowest(),
                 std::numeric_limits<float>::max(), &times);
+
+        // XXX fallback to include a single sample
+        if (times.empty()) {
+            times.push_back(0.0f);
+        }
     } else {
-        valueDs->GetContributingSampleTimesForInterval(
+        const bool isVarying =
+            valueDs->GetContributingSampleTimesForInterval(
                 startTime, endTime, &times);
+        if (isVarying) {
+            if (times.empty()) {
+                TF_CODING_ERROR("No contributing sample times returned for "
+                                "%s %s even though "
+                                "GetContributingSampleTimesForInterval "
+                                "indicated otherwise.",
+                                computationId.GetText(), input.GetText());
+                times.push_back(0.0f);
+            }
+        } else {
+            times = { 0.0f };
+        }
     }
 
-    size_t authoredSamples = times.size();
+    const size_t authoredSamples = times.size();
     if (authoredSamples > maxSampleCount) {
         times.resize(maxSampleCount);
-    }
-
-    // XXX fallback to include a single sample
-    if (times.empty()) {
-        times.push_back(0.0f);
     }
 
     for (size_t i = 0; i < times.size(); ++i) {

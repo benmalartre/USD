@@ -163,7 +163,9 @@ void
 _MakeUnrenderable(HdSceneIndexPrim * const prim)
 {
     // Force the prim type to empty.
-    SetEmptyPrimType(*prim);
+    if (IsRenderablePrimType(prim->primType)) {
+        prim->primType = TfToken();
+    }
 
     if (!prim->dataSource) {
         return;
@@ -273,7 +275,9 @@ UsdImaging_PiPrototypeSceneIndex::_PrimsAdded(
         [&](HdSceneIndexObserver::AddedPrimEntry &entry)
     {
         if (_ContainsStrictPrefixOfPath(_instancersAndOvers, entry.primPath)) {
-            SetEmptyPrimType(entry);
+            if (IsRenderablePrimType(entry.primType)) {
+                entry.primType = TfToken();
+            }
         }
     });
 

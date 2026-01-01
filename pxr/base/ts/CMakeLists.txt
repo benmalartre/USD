@@ -133,7 +133,6 @@ pxr_library(ts
 )
 
 if (${PXR_BUILD_TESTS})
-    target_compile_definitions(ts PRIVATE TS_BUILD_TEST_FRAMEWORK)
     if (TARGET _ts)
         target_compile_definitions(_ts PRIVATE TS_BUILD_TEST_FRAMEWORK)
     endif()
@@ -172,6 +171,16 @@ pxr_build_test(
 )
 
 pxr_build_test(
+    testTsSplineBaking
+    CPPFILES
+        testenv/testTsSplineBaking.cpp
+    LIBRARIES
+        gf
+        ts
+        tf
+)
+
+pxr_build_test(
     testTsSplineEval
     CPPFILES
         testenv/testTsSplineEval.cpp
@@ -206,6 +215,7 @@ pxr_test_scripts(
     testenv/testTsBugs.py
     testenv/testTsRegressionPreventer.py
     testenv/testTsSplineAPIPy.py
+    testenv/testTsSplineBreakdown.py
     testenv/testTsSplineValueBlock.py
     testenv/testTsTangentAlgorithms.py
     testenv/tsTest_TsFramework.py
@@ -226,6 +236,17 @@ pxr_install_test_dir(
     SRC testenv/testTsSplineSampling.testenv
     DEST testTsSplineSampling
 )
+
+# This test is disabled for emscripten due to requiring resources from
+# the virtual filesystem which is not currently implemented for emscripten
+# tests
+if (NOT EMSCRIPTEN)
+    pxr_register_test(
+        testTsSplineSampling
+        COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testTsSplineSampling"
+        DIFF_COMPARE testTsSplineSampling.txt
+    )
+endif()
 
 pxr_register_test(
     testTsDerivatives
@@ -252,6 +273,12 @@ pxr_register_test(
 )
 
 pxr_register_test(
+    testTsSplineBreakdown
+    PYTHON
+    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testTsSplineBreakdown"
+)
+
+pxr_register_test(
     testTsSplineValueBlock
     PYTHON
     COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testTsSplineValueBlock"
@@ -274,14 +301,13 @@ pxr_register_test(
 )
 
 pxr_register_test(
-    testTsSplineEval
-    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testTsSplineEval"
+    testTsSplineBaking
+    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testTsSplineBaking"
 )
 
 pxr_register_test(
-    testTsSplineSampling
-    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testTsSplineSampling"
-    DIFF_COMPARE testTsSplineSampling.txt
+    testTsSplineEval
+    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testTsSplineEval"
 )
 
 pxr_register_test(

@@ -13,6 +13,7 @@ pxr_library(usdviewq
         hd
 
     PUBLIC_CLASSES
+        debugCodes
         hydraObserver
         utils
         
@@ -66,6 +67,7 @@ pxr_library(usdviewq
         debugFlagsWidget.py
         configController.py
         usdviewstyle.qss
+        validationWidget.py
 
     PYSIDE_UI_FILES
         mainWindowUI.ui

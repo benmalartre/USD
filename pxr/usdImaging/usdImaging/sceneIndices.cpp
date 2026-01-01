@@ -20,6 +20,7 @@
 #include "pxr/usdImaging/usdImaging/unloadedDrawModeSceneIndex.h"
 
 #include "pxr/usdImaging/usdImaging/geomModelSchema.h"
+#include "pxr/usdImaging/usdImaging/modelSchema.h"
 #include "pxr/usdImaging/usdImaging/materialBindingsSchema.h"
 
 #include "pxr/imaging/hd/overlayContainerDataSource.h"
@@ -88,14 +89,21 @@ _AdditionalStageSceneIndexInputArgs(
     return ds;
 }
 
-// Use extentsHint (of models) for purpose geometry
+// Use extentsHint (of models) for purpose geometry, render and proxy.
+// Used by the draw mode scene index. Aligns with arguments to
+// UsdGeomBBoxCache in UsdImagingDrawModeAdapter::_ComputeExtent in
+// UsdImaging 1.0.
 static
 HdContainerDataSourceHandle
 _ExtentResolvingSceneIndexInputArgs()
 {
     HdDataSourceBaseHandle const purposeDataSources[] = {
         HdRetainedTypedSampledDataSource<TfToken>::New(
-            HdTokens->geometry) };
+            HdRenderTagTokens->geometry),
+        HdRetainedTypedSampledDataSource<TfToken>::New(
+            HdRenderTagTokens->render),
+        HdRetainedTypedSampledDataSource<TfToken>::New(
+            HdRenderTagTokens->proxy) };
 
     return
         HdRetainedContainerDataSource::New(
@@ -125,12 +133,20 @@ _InstanceDataSourceNames()
 {
     TRACE_FUNCTION();
     
+    // In order for USD instances to share a prototype they must share the
+    // following Hydra schemas, which are used for Hydra-side instance
+    // aggregation.  Due to their inheritance semantics these schemas may
+    // require different aggregation of prototypes in Hydra as compared
+    // to the underlying USD stage prototypes.
     TfTokenVector result = {
         UsdImagingMaterialBindingsSchema::GetSchemaToken(),
         HdPurposeSchema::GetSchemaToken(),
-        // We include model to aggregate scene indices
-        // by draw mode.
-        UsdImagingGeomModelSchema::GetSchemaToken()
+        UsdImagingGeomModelSchema::GetSchemaToken(),
+        // We include the model schema in order to aggregate scene indices by
+        // assetInfo, which may be used in material networks for texture
+        // asset resolution.  See HdDataSourceMaterialNetworkInterface::
+        // GetModelAssetName().
+        UsdImagingModelSchema::GetSchemaToken()
     };
 
     for (const UsdImagingSceneIndexPluginUniquePtr &plugin :

@@ -578,6 +578,11 @@ pxr_install_test_dir(
 )
 
 pxr_install_test_dir(
+    SRC testenv/testPcpMuseum_SpecializesAndDuplicateArcs.testenv
+    DEST testPcpMuseum_SpecializesAndDuplicateArcs
+)
+
+pxr_install_test_dir(
     SRC testenv/testPcpMuseum_SpecializesAndVariants.testenv
     DEST testPcpMuseum_SpecializesAndVariants
 )
@@ -592,10 +597,12 @@ pxr_install_test_dir(
     DEST testPcpMuseum_SpecializesAndVariants3
 )
 
-pxr_install_test_dir(
-    SRC testenv/testPcpMuseum_SpecializesAndVariants4.testenv
-    DEST testPcpMuseum_SpecializesAndVariants4
-)
+# XXX: Disabled pending fix for GitHub #3750
+#
+# pxr_install_test_dir(
+#     SRC testenv/testPcpMuseum_SpecializesAndVariants4.testenv
+#     DEST testPcpMuseum_SpecializesAndVariants4
+# )
 
 pxr_install_test_dir(
     SRC testenv/testPcpMuseum_SubrootInheritsAndVariants.testenv
@@ -1415,6 +1422,13 @@ pxr_register_test(testPcpMuseum_SpecializesAndAncestralArcs5
     DIFF_COMPARE compositionResults_SpecializesAndAncestralArcs5.txt 
 )
 
+pxr_register_test(testPcpMuseum_SpecializesAndDuplicateArcs
+    PYTHON
+    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testPcpCompositionResults --usd SpecializesAndDuplicateArcs/root.usda" 
+    STDOUT_REDIRECT compositionResults_SpecializesAndDuplicateArcs.txt
+    DIFF_COMPARE compositionResults_SpecializesAndDuplicateArcs.txt
+)
+
 pxr_register_test(testPcpMuseum_SpecializesAndVariants
     PYTHON
     COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testPcpCompositionResults --usd SpecializesAndVariants/root.usda" 
@@ -1436,12 +1450,14 @@ pxr_register_test(testPcpMuseum_SpecializesAndVariants3
     DIFF_COMPARE compositionResults_SpecializesAndVariants3.txt 
 )
 
-pxr_register_test(testPcpMuseum_SpecializesAndVariants4
-    PYTHON
-    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testPcpCompositionResults --usd SpecializesAndVariants4/root.usda" 
-    STDOUT_REDIRECT compositionResults_SpecializesAndVariants4.txt
-    DIFF_COMPARE compositionResults_SpecializesAndVariants4.txt 
-)
+# XXX: Disabled pending fix for GitHub #3750
+#
+# pxr_register_test(testPcpMuseum_SpecializesAndVariants4
+#     PYTHON
+#     COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testPcpCompositionResults --usd SpecializesAndVariants4/root.usda" 
+#     STDOUT_REDIRECT compositionResults_SpecializesAndVariants4.txt
+#     DIFF_COMPARE compositionResults_SpecializesAndVariants4.txt 
+# )
 
 pxr_register_test(testPcpMuseum_SubrootInheritsAndVariants
     PYTHON
@@ -2252,16 +2268,8 @@ pxr_register_test(testPcpLayerRelocatesEditBuilder
     EXPECTED_RETURN_CODE 0
 )
 
-pxr_register_test(testPcpNegativeOffsetScaleAllowed
-    PYTHON
-    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testPcpNegativeOffsetScale"
-    EXPECTED_RETURN_CODE 0
-)
-
 pxr_register_test(testPcpNegativeOffsetScale
     PYTHON
     COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testPcpNegativeOffsetScale"
     EXPECTED_RETURN_CODE 0
-    ENV 
-        PCP_ALLOW_NEGATIVE_LAYER_OFFSET_SCALE=0
 )

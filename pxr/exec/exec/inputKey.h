@@ -34,6 +34,11 @@ struct Exec_InputKey
     /// The requested computation name.
     TfToken computationName;
 
+    /// A token that can be used to distinguish different computations that
+    /// share the same computationName.
+    ///
+    TfToken disambiguatingId;
+
     /// The requested computation result type.
     TfType resultType;
 

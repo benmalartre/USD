@@ -471,11 +471,6 @@ HdxShadowTask::_UpdateDirtyParams(HdStRenderPassStateSharedPtr &renderPassState,
     renderPassState->SetOverrideColor(params.overrideColor);
     renderPassState->SetWireframeColor(params.wireframeColor);
     renderPassState->SetCullStyle(HdInvertCullStyle(params.cullStyle));
-
-    if (HdStRenderPassState* extendedState =
-            dynamic_cast<HdStRenderPassState*>(renderPassState.get())) {
-        extendedState->SetUseSceneMaterials(params.enableSceneMaterials);
-    }
 }
 
 // ---------------------------------------------------------------------------//
@@ -488,7 +483,6 @@ std::ostream& operator<<(std::ostream& out, const HdxShadowTaskParams& pv)
         << pv.overrideColor << " " 
         << pv.wireframeColor << " " 
         << pv.enableLighting << " "
-        << pv.enableSceneMaterials << " "
         << pv.alphaThreshold << " "
         << pv.depthBiasEnable << " "
         << pv.depthBiasConstantFactor << " "
@@ -504,7 +498,6 @@ bool operator==(const HdxShadowTaskParams& lhs, const HdxShadowTaskParams& rhs)
     return  lhs.overrideColor == rhs.overrideColor                      && 
             lhs.wireframeColor == rhs.wireframeColor                    && 
             lhs.enableLighting == rhs.enableLighting                    &&
-            lhs.enableSceneMaterials == rhs.enableSceneMaterials        &&
             lhs.alphaThreshold == rhs.alphaThreshold                    &&
             lhs.depthBiasEnable == rhs.depthBiasEnable                  && 
             lhs.depthBiasConstantFactor == rhs.depthBiasConstantFactor  && 

@@ -225,8 +225,6 @@ HdxRenderSetupTask::SyncParams(HdSceneDelegate* delegate,
 
         if (HdStRenderPassState * const hdStRenderPassState =
                     dynamic_cast<HdStRenderPassState*>(renderPassState.get())) {
-            hdStRenderPassState->SetUseSceneMaterials(
-                params.enableSceneMaterials);
             
             // Don't enable multisample for id renders.
             hdStRenderPassState->SetUseAovMultiSample(
@@ -311,7 +309,6 @@ std::ostream& operator<<(std::ostream& out, const HdxRenderTaskParams& pv)
         << pv.pointSize << " "
         << pv.enableLighting << " "
         << pv.alphaThreshold << " "
-        << pv.enableSceneMaterials << " "
         << pv.enableSceneLights << " "
 
         << pv.maskColor << " " 
@@ -367,7 +364,6 @@ bool operator==(const HdxRenderTaskParams& lhs, const HdxRenderTaskParams& rhs)
            lhs.pointSize                == rhs.pointSize                &&
            lhs.enableLighting           == rhs.enableLighting           &&
            lhs.alphaThreshold           == rhs.alphaThreshold           &&
-           lhs.enableSceneMaterials     == rhs.enableSceneMaterials     &&
            lhs.enableSceneLights        == rhs.enableSceneLights        &&
  
            lhs.maskColor                == rhs.maskColor                &&

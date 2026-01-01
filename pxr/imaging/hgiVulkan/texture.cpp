@@ -60,7 +60,6 @@ HgiVulkanTexture::HgiVulkanTexture(
     bool optimalTiling,
     bool interop)
     : HgiTexture(desc)
-    , _isTextureView(false)
     , _vkImage(nullptr)
     , _vkImageView(nullptr)
     , _vkImageLayout(VK_IMAGE_LAYOUT_UNDEFINED)
@@ -69,6 +68,7 @@ HgiVulkanTexture::HgiVulkanTexture(
     , _inflightBits(0)
     , _stagingBuffer(nullptr)
     , _cpuStagingAddress(nullptr)
+    , _isTextureView(false)
 {
     GfVec3i const& dimensions = desc.dimensions;
     bool const isDepthBuffer = desc.usage & HgiTextureUsageBitsDepthTarget;
@@ -94,6 +94,10 @@ HgiVulkanTexture::HgiVulkanTexture(
     imageCreateInfo.extent = { (uint32_t) dimensions[0],
                                (uint32_t) dimensions[1],
                                (uint32_t) dimensions[2] };
+
+    if (desc.type == HgiTextureTypeCubemap) {
+        imageCreateInfo.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+    }
 
     imageCreateInfo.usage = HgiVulkanConversions::GetTextureUsage(desc.usage);
     if (imageCreateInfo.usage == 0) {
@@ -231,18 +235,18 @@ HgiVulkanTexture::HgiVulkanTexture(
         stageDesc.byteSize = 
             std::min(GetByteSizeOfResource(), desc.pixelsByteSize);
         stageDesc.initialData = desc.initialData;
-        HgiVulkanBuffer* stagingBuffer = 
+        std::unique_ptr<HgiVulkanBuffer> stagingBuffer =
             HgiVulkanBuffer::CreateStagingBuffer(_device, stageDesc);
 
         // Schedule transfer from staging buffer to device-local texture
         HgiVulkanCommandQueue* queue = device->GetCommandQueue();
         HgiVulkanCommandBuffer* cb = queue->AcquireResourceCommandBuffer();
-        CopyBufferToTexture(cb, stagingBuffer);
+        CopyBufferToTexture(cb, stagingBuffer.get());
 
         // We don't know if this texture is a static (immutable) or
         // dynamic (animated) texture. We assume that most textures are
         // static and schedule garbage collection of staging resource.
-        HgiBufferHandle stagingHandle(stagingBuffer, 0);
+        HgiBufferHandle stagingHandle(stagingBuffer.release(), 0);
         hgi->TrashObject(
             &stagingHandle,
             hgi->GetGarbageCollector()->GetBufferList());
@@ -280,7 +284,6 @@ HgiVulkanTexture::HgiVulkanTexture(
     HgiVulkanDevice* device,
     HgiTextureViewDesc const & desc)
     : HgiTexture(desc.sourceTexture->GetDescriptor())
-    , _isTextureView(true)
     , _vkImage(nullptr)
     , _vkImageView(nullptr)
     , _vkImageLayout(VK_IMAGE_LAYOUT_UNDEFINED)
@@ -289,6 +292,7 @@ HgiVulkanTexture::HgiVulkanTexture(
     , _inflightBits(0)
     , _stagingBuffer(nullptr)
     , _cpuStagingAddress(nullptr)
+    , _isTextureView(true)
 {
     // Update the texture descriptor to reflect the view desc
     _descriptor.debugName = desc.debugName;
@@ -355,7 +359,6 @@ HgiVulkanTexture::~HgiVulkanTexture()
         _cpuStagingAddress = nullptr;
     }
 
-    delete _stagingBuffer;
     _stagingBuffer = nullptr;
 
     if (_vkImageView) {
@@ -422,7 +425,7 @@ HgiVulkanTexture::IsCPUStagingAddress(const void* address) const
 HgiVulkanBuffer*
 HgiVulkanTexture::GetStagingBuffer() const
 {
-    return _stagingBuffer;
+    return _stagingBuffer.get();
 }
 
 VkImage
@@ -484,12 +487,12 @@ HgiVulkanTexture::CopyBufferToTexture(
             _descriptor.layerCount,
             srcBuffer->GetDescriptor().byteSize);
 
-    const size_t mipLevels = std::min(
-        mipInfos.size(), size_t(_descriptor.mipLevels));
+    const int mipLevels = std::min(static_cast<int>(mipInfos.size()),
+        static_cast<int>(_descriptor.mipLevels));
 
-    for (size_t mip = 0; mip < mipLevels; mip++) {
+    for (int mip = 0; mip < mipLevels; mip++) {
         // Skip this mip if it isn't a mipLevel we want to copy
-        if (mipLevel > -1 && (int)mip != mipLevel) {
+        if (mipLevel > -1 && mip != mipLevel) {
             continue;
         }
 
@@ -497,7 +500,7 @@ HgiVulkanTexture::CopyBufferToTexture(
         VkBufferImageCopy bufferCopyRegion = {};
         bufferCopyRegion.imageSubresource.aspectMask =
             HgiVulkanConversions::GetImageAspectFlag(_descriptor.usage);
-        bufferCopyRegion.imageSubresource.mipLevel = (uint32_t) mip;
+        bufferCopyRegion.imageSubresource.mipLevel = static_cast<uint32_t>(mip);
         bufferCopyRegion.imageSubresource.baseArrayLayer = 0;
         bufferCopyRegion.imageSubresource.layerCount = _descriptor.layerCount;
         bufferCopyRegion.imageExtent.width = mipInfo.dimensions[0];
@@ -559,54 +562,54 @@ HgiVulkanTexture::SubmitLayoutChange(HgiTextureUsage newLayout)
     HgiVulkanCommandQueue* queue = _device->GetCommandQueue();
     HgiVulkanCommandBuffer* cb = queue->AcquireResourceCommandBuffer();
 
-    VkAccessFlags srcAccessMask, dstAccessMask = VK_ACCESS_NONE;
-
     // The following cases are based on few initial assumptions to provide
     // an infrastructure for access mask selection based on layouts.
     // Feel free to update depending on need and use cases.
+    VkAccessFlags srcAccessMask = VK_ACCESS_NONE;
+    VkPipelineStageFlags srcStageMask = VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT;
     switch (oldVkLayout) {
     case VK_IMAGE_LAYOUT_PREINITIALIZED:
-        srcAccessMask =
-            VK_ACCESS_HOST_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+        srcAccessMask = VK_ACCESS_HOST_WRITE_BIT |
+            VK_ACCESS_TRANSFER_WRITE_BIT;
         break;
     case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
         srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
         break;
     case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
         srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        srcStageMask = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
         break;
     case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
         srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        srcStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        break;
+    case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+        srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        srcStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT;
         break;
     case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
         srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
         break;
     default:
-        srcAccessMask = VK_ACCESS_NONE;
         break;
     }
 
+    VkAccessFlags dstAccessMask = VK_ACCESS_NONE;
+    VkPipelineStageFlags dstStageMask = VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT;
     switch (newVkLayout) {
-    case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
-        dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        break;
-    case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
-        srcAccessMask |= VK_ACCESS_TRANSFER_READ_BIT;
-        dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-        break;
     case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
-        srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
         dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
         break;
     case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
         dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        dstStageMask = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
         break;
     case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
-        srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
         dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
         break;
     default:
-        dstAccessMask = VK_ACCESS_NONE;
         break;
     }
 
@@ -617,8 +620,8 @@ HgiVulkanTexture::SubmitLayoutChange(HgiTextureUsage newLayout)
         newVkLayout,
         srcAccessMask, 
         dstAccessMask,
-        VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT,
-        VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT);
+        srcStageMask,
+        dstStageMask);
 
     return _VkImageLayoutToHgiTextureUsage(oldVkLayout);
 }
@@ -699,15 +702,17 @@ HgiVulkanTexture::GetDefaultAccessFlags(HgiTextureUsage usage)
         TF_CODING_ERROR("Cannot determine image layout from invalid usage.");
     }
 
+    VkAccessFlags flags = VK_ACCESS_NONE;
     if (usage & HgiTextureUsageBitsShaderRead) {
-        return VK_ACCESS_SHADER_READ_BIT;
-    } else if (usage & HgiTextureUsageBitsDepthTarget) {
-        return VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    } else if (usage & HgiTextureUsageBitsColorTarget) {
-        return VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        flags |= VK_ACCESS_SHADER_READ_BIT;
     }
-
-    return VK_ACCESS_SHADER_READ_BIT;
+    if (usage & HgiTextureUsageBitsDepthTarget) {
+        flags |= VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    } else if (usage & HgiTextureUsageBitsColorTarget) {
+        flags |= VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    }
+   
+    return flags;
 }
 
 PXR_NAMESPACE_CLOSE_SCOPE
