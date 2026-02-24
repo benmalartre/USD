@@ -1674,9 +1674,10 @@ Exec_ComputationBuilderCRTPBase<Derived>::Callback(
     static_assert(
         !std::is_reference_v<ResultType>,
         "Callback functions must return by value");
-    static_assert(
-        !VtIsArray<ResultType>::value,
-        "VtArray is not a supported result type");
+    // static_assert removed: VtArray ResultType needed for per-element
+    // boxed output via VdfReadWriteIterator + ExtractAsVtArray extraction.
+    // static_assert(!VtIsArray<ResultType>::value,
+    //     "VtArray is not a supported result type");
 
     const TfType resultType =
         ExecTypeRegistry::GetInstance().CheckForRegistration<ResultType>();
