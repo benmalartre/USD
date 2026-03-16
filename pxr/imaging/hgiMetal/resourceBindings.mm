@@ -37,68 +37,72 @@ HgiMetalResourceBindings::BindResources(
     //
 
     for (HgiTextureBindDesc const& texDesc : _descriptor.textures) {
-        if (!TF_VERIFY(texDesc.textures.size() == 1)) continue;
+        if (texDesc.textures.empty()) continue;
 
-        id<MTLTexture> metalTexture = nil;
-        HgiTextureHandle const& texHandle = texDesc.textures.front();
-        HgiMetalTexture* hgiMetalTexture =
-            static_cast<HgiMetalTexture*>(texHandle.Get());
-        if (hgiMetalTexture) {
-            metalTexture = hgiMetalTexture->GetTextureId();
-        }
+        // Iterate over all textures in the descriptor, binding each at
+        // consecutive slots starting from bindingIndex (mirrors HgiGL).
+        for (size_t i = 0; i < texDesc.textures.size(); ++i) {
+            uint32_t slot = texDesc.bindingIndex + (uint32_t)i;
 
-        id<MTLSamplerState> metalSampler = nil;
-        if (texDesc.samplers.size()) {
-            HgiSamplerHandle const& smpHandle = texDesc.samplers.front();
-            HgiMetalSampler* hgiMetalSampler =
-                static_cast<HgiMetalSampler*>(smpHandle.Get());
-            if (hgiMetalSampler) {
-                metalSampler = hgiMetalSampler->GetSamplerId();
+            id<MTLTexture> metalTexture = nil;
+            HgiMetalTexture* hgiMetalTexture =
+                static_cast<HgiMetalTexture*>(texDesc.textures[i].Get());
+            if (hgiMetalTexture) {
+                metalTexture = hgiMetalTexture->GetTextureId();
             }
-        }
-        
-        if ((texDesc.stageUsage & HgiShaderStageVertex) ||
-                texDesc.stageUsage & HgiShaderStagePostTessellationVertex) {
-            size_t offsetSampler = HgiMetalArgumentOffsetSamplerVS
-                                 + (texDesc.bindingIndex * sizeof(void*));
-            [argEncoderSampler setArgumentBuffer:argBuffer
-                                          offset:offsetSampler];
-            [argEncoderSampler setSamplerState:metalSampler
-                                       atIndex:0];
 
-            size_t offsetTexture = HgiMetalArgumentOffsetTextureVS
-                                 + (texDesc.bindingIndex * sizeof(void*));
-            [argEncoderTexture setArgumentBuffer:argBuffer
-                                          offset:offsetTexture];
-            [argEncoderTexture setTexture:metalTexture
-                                  atIndex:0];
-        }
-
-        if (texDesc.stageUsage & HgiShaderStageFragment) {
-            size_t offsetSampler = HgiMetalArgumentOffsetSamplerFS
-                                 + (texDesc.bindingIndex * sizeof(void*));
-            [argEncoderSampler setArgumentBuffer:argBuffer
-                                          offset:offsetSampler];
-            [argEncoderSampler setSamplerState:metalSampler
-                                       atIndex:0];
-
-            size_t offsetTexture = HgiMetalArgumentOffsetTextureFS
-                                 + (texDesc.bindingIndex * sizeof(void*));
-            [argEncoderTexture setArgumentBuffer:argBuffer
-                                          offset:offsetTexture];
-            [argEncoderTexture setTexture:metalTexture
-                                  atIndex:0];
-        }
-        if (metalTexture) {
-            MTLResourceUsage usageFlags = MTLResourceUsageRead;
-            if (metalSampler) {
-                usageFlags |= MTLResourceUsageSample;
+            id<MTLSamplerState> metalSampler = nil;
+            if (i < texDesc.samplers.size()) {
+                HgiMetalSampler* hgiMetalSampler =
+                    static_cast<HgiMetalSampler*>(texDesc.samplers[i].Get());
+                if (hgiMetalSampler) {
+                    metalSampler = hgiMetalSampler->GetSamplerId();
+                }
             }
-            if (texDesc.writable) {
-                usageFlags |= MTLResourceUsageWrite;
+
+            if ((texDesc.stageUsage & HgiShaderStageVertex) ||
+                    texDesc.stageUsage & HgiShaderStagePostTessellationVertex) {
+                size_t offsetSampler = HgiMetalArgumentOffsetSamplerVS
+                                     + (slot * sizeof(void*));
+                [argEncoderSampler setArgumentBuffer:argBuffer
+                                              offset:offsetSampler];
+                [argEncoderSampler setSamplerState:metalSampler
+                                           atIndex:0];
+
+                size_t offsetTexture = HgiMetalArgumentOffsetTextureVS
+                                     + (slot * sizeof(void*));
+                [argEncoderTexture setArgumentBuffer:argBuffer
+                                              offset:offsetTexture];
+                [argEncoderTexture setTexture:metalTexture
+                                      atIndex:0];
             }
-            [renderEncoder useResource:metalTexture
-                                 usage:usageFlags];
+
+            if (texDesc.stageUsage & HgiShaderStageFragment) {
+                size_t offsetSampler = HgiMetalArgumentOffsetSamplerFS
+                                     + (slot * sizeof(void*));
+                [argEncoderSampler setArgumentBuffer:argBuffer
+                                              offset:offsetSampler];
+                [argEncoderSampler setSamplerState:metalSampler
+                                           atIndex:0];
+
+                size_t offsetTexture = HgiMetalArgumentOffsetTextureFS
+                                     + (slot * sizeof(void*));
+                [argEncoderTexture setArgumentBuffer:argBuffer
+                                              offset:offsetTexture];
+                [argEncoderTexture setTexture:metalTexture
+                                      atIndex:0];
+            }
+            if (metalTexture) {
+                MTLResourceUsage usageFlags = MTLResourceUsageRead;
+                if (metalSampler) {
+                    usageFlags |= MTLResourceUsageSample;
+                }
+                if (texDesc.writable) {
+                    usageFlags |= MTLResourceUsageWrite;
+                }
+                [renderEncoder useResource:metalTexture
+                                     usage:usageFlags];
+            }
         }
     }
 
@@ -206,37 +210,44 @@ HgiMetalResourceBindings::BindResources(
     //
 
     for (HgiTextureBindDesc const& texDesc : _descriptor.textures) {
-        if (!TF_VERIFY(texDesc.textures.size() == 1)) continue;
+        if (texDesc.textures.empty()) continue;
 
-        HgiTextureHandle const& texHandle = texDesc.textures.front();
-        HgiMetalTexture* metalTexture =
-            static_cast<HgiMetalTexture*>(texHandle.Get());
+        for (size_t i = 0; i < texDesc.textures.size(); ++i) {
+            uint32_t slot = texDesc.bindingIndex + (uint32_t)i;
 
-        HgiSamplerHandle const& smpHandle = texDesc.samplers.front();
-        HgiMetalSampler* metalSmp =
-            static_cast<HgiMetalSampler*>(smpHandle.Get());
+            HgiMetalTexture* metalTexture =
+                static_cast<HgiMetalTexture*>(texDesc.textures[i].Get());
+            if (!metalTexture) continue;
 
-        if (texDesc.stageUsage & HgiShaderStageCompute) {            
-            size_t offsetSampler = HgiMetalArgumentOffsetSamplerCS
-                                 + (texDesc.bindingIndex * sizeof(void*));
-            [argEncoderSampler setArgumentBuffer:argBuffer
-                                          offset:offsetSampler];
-            [argEncoderSampler setSamplerState:metalSmp->GetSamplerId() atIndex:0];
-
-            size_t offsetTexture = HgiMetalArgumentOffsetTextureCS
-                                 + (texDesc.bindingIndex * sizeof(void*));
-            [argEncoderTexture setArgumentBuffer:argBuffer
-                                          offset:offsetTexture];
-            MTLResourceUsage usage = MTLResourceUsageRead;
-            if (texDesc.writable) {
-                usage |= MTLResourceUsageWrite;
+            HgiMetalSampler* metalSmp = nullptr;
+            if (i < texDesc.samplers.size()) {
+                metalSmp =
+                    static_cast<HgiMetalSampler*>(texDesc.samplers[i].Get());
             }
-            [argEncoderTexture setTexture:metalTexture->GetTextureId() atIndex:0];
-            if (metalSmp) {
-                usage |= MTLResourceUsageSample;
+
+            if (texDesc.stageUsage & HgiShaderStageCompute) {
+                size_t offsetSampler = HgiMetalArgumentOffsetSamplerCS
+                                     + (slot * sizeof(void*));
+                [argEncoderSampler setArgumentBuffer:argBuffer
+                                              offset:offsetSampler];
+                [argEncoderSampler setSamplerState:metalSmp ? metalSmp->GetSamplerId() : nil
+                                           atIndex:0];
+
+                size_t offsetTexture = HgiMetalArgumentOffsetTextureCS
+                                     + (slot * sizeof(void*));
+                [argEncoderTexture setArgumentBuffer:argBuffer
+                                              offset:offsetTexture];
+                MTLResourceUsage usage = MTLResourceUsageRead;
+                if (texDesc.writable) {
+                    usage |= MTLResourceUsageWrite;
+                }
+                [argEncoderTexture setTexture:metalTexture->GetTextureId() atIndex:0];
+                if (metalSmp) {
+                    usage |= MTLResourceUsageSample;
+                }
+                [computeEncoder useResource:metalTexture->GetTextureId()
+                                      usage:usage];
             }
-            [computeEncoder useResource:metalTexture->GetTextureId()
-                                  usage:usage];
         }
     }
 
