@@ -448,8 +448,22 @@ _ComputeHeader(id<MTLDevice> device, HgiShaderStage stage)
             << "#include <metal_pack>\n"
             << "#pragma clang diagnostic ignored \"-Wunused-variable\"\n"
             << "#pragma clang diagnostic ignored \"-Wsign-compare\"\n"
-            << "using namespace metal;\n"
-            << "using namespace raytracing;\n";
+            << "using namespace metal;\n";
+
+    // Only bring in the raytracing namespace for actual ray-tracing stages.
+    // Adding it unconditionally pollutes the global namespace for standard
+    // vertex/fragment/compute shaders and causes Metal compilation failures
+    // when Storm-generated code uses identifiers that clash with RT types.
+    const bool isRayTracingStage =
+        stage == HgiShaderStageRayGen       ||
+        stage == HgiShaderStageAnyHit       ||
+        stage == HgiShaderStageClosestHit   ||
+        stage == HgiShaderStageMiss         ||
+        stage == HgiShaderStageIntersection ||
+        stage == HgiShaderStageCallable;
+    if (isRayTracingStage) {
+        header << "using namespace raytracing;\n";
+    }
 
     // Basic types
     header  << "#define double float\n"
@@ -603,7 +617,10 @@ _ComputeHeader(id<MTLDevice> device, HgiShaderStage stage)
 
               "constexpr sampler texelSampler(address::clamp_to_edge,\n"
               "                               filter::linear);\n"
-    
+              "constexpr sampler shadowSampler(address::clamp_to_edge,\n"
+              "                               filter::linear,\n"
+              "                               compare_func::less_equal);\n"
+
               "template<typename T, typename Tc>\n"
               "float4 texture(T texture, Tc coords) {\n"
               "    return texture.sample(texelSampler, coords);\n"
@@ -611,6 +628,10 @@ _ComputeHeader(id<MTLDevice> device, HgiShaderStage stage)
               "template<typename Tc>\n"
               "vec4 texture(texture2d_array<float> texture, Tc coords) {\n"
               "    return texture.sample(texelSampler, coords.xy, coords.z);\n"
+              "}\n"
+              "template<typename Tc>\n"
+              "float texture(depth2d<float> texture, Tc coords) {\n"
+              "    return texture.sample_compare(shadowSampler, coords.xy, coords.z);\n"
               "}\n"
 
     ;

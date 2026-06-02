@@ -2089,14 +2089,14 @@ subgroup.add_argument("--no-tutorials", dest="build_tutorials", action="store_fa
                       help="Do not build tutorials")
 subgroup = group.add_mutually_exclusive_group()
 subgroup.add_argument("--vulkan", dest="build_vulkan", action="store_true",
-                      default=True, help="Build vulkan (default)")
+                      default=(sys.platform != "darwin"), help="Build vulkan (default on non-macOS)")
 subgroup.add_argument("--no-vulkan", dest="build_vulkan", action="store_false",
                       help="Do not build vulkan")
 subgroup = group.add_mutually_exclusive_group()
 subgroup.add_argument("--metal", dest="build_metal", action="store_true",
-                      default=False, help="Build metal")
+                      default=(sys.platform == "darwin"), help="Build metal (default on macOS)")
 subgroup.add_argument("--no-metal", dest="build_metal", action="store_false",
-                      help="Do not build Metal (default)")
+                      help="Do not build Metal")
 subgroup = group.add_mutually_exclusive_group()
 subgroup.add_argument("--tools", dest="build_tools", action="store_true",
                      default=True, help="Build USD tools (default)")
@@ -2187,12 +2187,6 @@ subgroup.add_argument("--zlib", dest="build_zlib",
 subgroup.add_argument("--no-zlib", dest="build_zlib",
                       action="store_false",
                       help="Do not install zlib for dependencies")
-subgroup = group.add_mutually_exclusive_group()
-subgroup.add_argument("--vulkan", dest="enable_vulkan", action="store_true",
-                      default=False, help="Enable Vulkan support")
-subgroup.add_argument("--no-vulkan", dest="enable_vulkan", action="store_false",
-                      help="Disable Vulkan support (default)")
-
 group = parser.add_argument_group(title="Imaging Plugin Options")
 subgroup = group.add_mutually_exclusive_group()
 subgroup.add_argument("--embree", dest="build_embree", action="store_true",
