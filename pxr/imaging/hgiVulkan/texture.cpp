@@ -19,15 +19,20 @@
 
 PXR_NAMESPACE_OPEN_SCOPE
 
+// Ensure this combination of image format and other creation flags is valid.
 static bool
 _CheckFormatSupport(
     VkPhysicalDevice pDevice,
-    VkFormat format,
-    VkFormatFeatureFlags flags )
+    const VkImageCreateInfo & imageCreateInfo)
 {
-    VkFormatProperties props;
-    vkGetPhysicalDeviceFormatProperties(pDevice, format, &props);
-    return (props.optimalTilingFeatures & flags) == flags;
+    VkImageFormatProperties imgProps;
+    VkResult valid = vkGetPhysicalDeviceImageFormatProperties(
+        pDevice, imageCreateInfo.format,
+        imageCreateInfo.imageType,
+        imageCreateInfo.tiling,
+        imageCreateInfo.usage,
+        imageCreateInfo.flags, &imgProps);
+    return valid == VK_SUCCESS;
 }
 
 static HgiTextureUsage
@@ -57,7 +62,7 @@ HgiVulkanTexture::HgiVulkanTexture(
     HgiVulkan* hgi,
     HgiVulkanDevice* device,
     HgiTextureDesc const & desc,
-    bool optimalTiling,
+    bool /*optimalTiling*/,
     bool interop)
     : HgiTexture(desc)
     , _vkImage(nullptr)
@@ -87,8 +92,9 @@ HgiVulkanTexture::HgiVulkanTexture(
     imageCreateInfo.arrayLayers = desc.layerCount;
     imageCreateInfo.samples = 
         HgiVulkanConversions::GetSampleCount(desc.sampleCount);
-    imageCreateInfo.tiling = optimalTiling ?
-        VK_IMAGE_TILING_OPTIMAL : VK_IMAGE_TILING_LINEAR;
+    // Disable Tiling for ray tracing.
+    //imageCreateInfo.tiling = optimalTiling ?
+    //    VK_IMAGE_TILING_OPTIMAL : VK_IMAGE_TILING_LINEAR;
     imageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     imageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     imageCreateInfo.extent = { (uint32_t) dimensions[0],
@@ -98,6 +104,12 @@ HgiVulkanTexture::HgiVulkanTexture(
     if (desc.type == HgiTextureTypeCubemap) {
         imageCreateInfo.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
     }
+
+    // Set tiling mode based on whether Vulkan supports optimal or linear tiling for this format.
+    VkFormatProperties props;
+    vkGetPhysicalDeviceFormatProperties(device->GetVulkanPhysicalDevice(), imageCreateInfo.format, &props);
+    _optimalTiling = props.optimalTilingFeatures;
+    imageCreateInfo.tiling = _optimalTiling ? VK_IMAGE_TILING_OPTIMAL : VK_IMAGE_TILING_LINEAR;
 
     imageCreateInfo.usage = HgiVulkanConversions::GetTextureUsage(desc.usage);
     if (imageCreateInfo.usage == 0) {
@@ -110,8 +122,8 @@ HgiVulkanTexture::HgiVulkanTexture(
 
     // XXX VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT could be a useful
     // optimization, but Hgi doesn'tell us if a resource is transient.
-    imageCreateInfo.usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT | 
-                             VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    imageCreateInfo.usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 
     VkExternalMemoryImageCreateInfo exportInfo =
         { VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO };
@@ -130,8 +142,7 @@ HgiVulkanTexture::HgiVulkanTexture(
 
     if (!_CheckFormatSupport(
             device->GetVulkanPhysicalDevice(),
-            imageCreateInfo.format,
-            formatValidationFlags)) {
+            imageCreateInfo)) {
         TF_CODING_ERROR("Image format / usage combo not supported on device");
         return;
     };
@@ -518,7 +529,7 @@ HgiVulkanTexture::CopyBufferToTexture(
         cb,
         this,
         GetImageLayout(),
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, // Transition tex to this layout
+        _optimalTiling ? VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL : VK_IMAGE_LAYOUT_GENERAL, // Transition tex to this layout
         NO_PENDING_WRITES,                    // No pending writes
         VK_ACCESS_TRANSFER_WRITE_BIT,         // Write access to image
         VK_PIPELINE_STAGE_HOST_BIT,           // Producer stage
@@ -529,7 +540,7 @@ HgiVulkanTexture::CopyBufferToTexture(
         cb->GetVulkanCommandBuffer(),
         srcBuffer->GetVulkanBuffer(),
         _vkImage,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        _optimalTiling ? VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL : VK_IMAGE_LAYOUT_GENERAL,
         static_cast<uint32_t>(bufferCopyRegions.size()),
         bufferCopyRegions.data());
 

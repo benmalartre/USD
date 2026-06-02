@@ -152,6 +152,7 @@ private:
     std::unique_ptr<HgiVulkanBuffer> _stagingBuffer;
     void* _cpuStagingAddress;
     bool _isTextureView;
+    bool _optimalTiling;
 };
 
 

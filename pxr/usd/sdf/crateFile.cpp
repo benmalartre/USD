@@ -3701,7 +3701,7 @@ CrateFile::_ReadTokens(Reader reader)
     }
     wd.Wait();
     if (i != numTokens) {
-        TF_RUNTIME_ERROR("Crate file claims %zu tokens, found %zu",
+        TF_RUNTIME_ERROR("Crate file claims %llu tokens, found %zu",
                          numTokens, i);
     }
 

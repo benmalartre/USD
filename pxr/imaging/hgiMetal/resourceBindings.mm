@@ -11,6 +11,7 @@
 #include "pxr/imaging/hgiMetal/resourceBindings.h"
 #include "pxr/imaging/hgiMetal/sampler.h"
 #include "pxr/imaging/hgiMetal/texture.h"
+#include "pxr/imaging/hgiMetal/accelerationStructure.h"
 
 PXR_NAMESPACE_OPEN_SCOPE
 
@@ -167,9 +168,16 @@ HgiMetalResourceBindings::BindResources(
         if (bufDesc.writable) {
             usageFlags |= MTLResourceUsageWrite;
         }
-
+        MTLRenderStages stageFlags;
+        if (bufDesc.stageUsage & HgiShaderStageVertex) {
+            stageFlags |= MTLRenderStageVertex;
+        }
+        if (bufDesc.stageUsage & HgiShaderStageFragment) {
+            stageFlags |= MTLRenderStageFragment;
+        }
         [renderEncoder useResource:bufferId
-                             usage:usageFlags];
+                             usage:usageFlags
+                            stages:stageFlags];
     }
     
 
@@ -202,13 +210,14 @@ HgiMetalResourceBindings::BindResources(
     id<MTLBuffer> argBuffer)
 {
     id<MTLArgumentEncoder> argEncoderBuffer = hgi->GetBufferArgumentEncoder();
-    id<MTLArgumentEncoder> argEncoderSampler = hgi->GetSamplerArgumentEncoder();
-    id<MTLArgumentEncoder> argEncoderTexture = hgi->GetTextureArgumentEncoder();
+    id<MTLArgumentEncoder> argEncoderSampler;
+    id<MTLArgumentEncoder> argEncoderTexture;
 
     //
     // Bind Textures and Samplers
     //
 
+    size_t offsetTexture = HgiMetalArgumentOffsetTextureCS;
     for (HgiTextureBindDesc const& texDesc : _descriptor.textures) {
         if (texDesc.textures.empty()) continue;
 
@@ -257,7 +266,7 @@ HgiMetalResourceBindings::BindResources(
     [computeEncoder setBuffer:argBuffer
                        offset:HgiMetalArgumentOffsetTextureCS
                       atIndex:HgiMetalArgumentIndexTextures];
-
+    
     //
     // Bind Buffers
     //
@@ -266,26 +275,32 @@ HgiMetalResourceBindings::BindResources(
     // They are bound via the GraphicsEncoder.
 
     for (HgiBufferBindDesc const& bufDesc : _descriptor.buffers) {
-        if (!TF_VERIFY(bufDesc.buffers.size() == 1)) continue;
-        if (!(bufDesc.stageUsage & HgiShaderStageCompute)) continue;
-
-        HgiBufferHandle const& bufHandle = bufDesc.buffers.front();
-        HgiMetalBuffer* metalbuffer =
+        if ((bufDesc.stageUsage & HgiShaderStageCompute) ||
+            (bufDesc.stageUsage & HgiShaderStageRayGen) ||
+            (bufDesc.stageUsage & HgiShaderStageClosestHit) ||
+            (bufDesc.stageUsage & HgiShaderStageIntersection) ||
+            (bufDesc.stageUsage & HgiShaderStageAnyHit) ||
+            (bufDesc.stageUsage & HgiShaderStageCallable) ||
+            (bufDesc.stageUsage & HgiShaderStageMiss))
+        {
+            HgiBufferHandle const& bufHandle = bufDesc.buffers.front();
+            HgiMetalBuffer* metalbuffer =
             static_cast<HgiMetalBuffer*>(bufHandle.Get());
-        
-        id<MTLBuffer> bufferId = metalbuffer->GetBufferId();
-        NSUInteger offset = bufDesc.offsets.front();
-        size_t argBufferOffset = HgiMetalArgumentOffsetBufferCS
-                               + bufDesc.bindingIndex * sizeof(void*);
-        [argEncoderBuffer setArgumentBuffer:argBuffer
-                                     offset:argBufferOffset];
-        [argEncoderBuffer setBuffer:bufferId offset:offset atIndex:0];
-        MTLResourceUsage usage = MTLResourceUsageRead;
-        if (bufDesc.writable) {
-            usage |= MTLResourceUsageWrite;
+            
+            id<MTLBuffer> bufferId = metalbuffer->GetBufferId();
+            NSUInteger offset = bufDesc.offsets.front();
+            size_t argBufferOffset = HgiMetalArgumentOffsetBufferCS
+            + bufDesc.bindingIndex * sizeof(void*);
+            [argEncoderBuffer setArgumentBuffer:argBuffer
+                                         offset:argBufferOffset];
+            [argEncoderBuffer setBuffer:bufferId offset:offset atIndex:0];
+            MTLResourceUsage usage = MTLResourceUsageRead;
+            if (bufDesc.writable) {
+                usage |= MTLResourceUsageWrite;
+            }
+            [computeEncoder useResource:bufferId
+                                  usage:usage];
         }
-        [computeEncoder useResource:bufferId
-                              usage:usage];
     }
     
     [computeEncoder setBuffer:argBuffer
@@ -304,6 +319,39 @@ HgiMetalResourceBindings::BindResources(
     [computeEncoder setBuffer:argBuffer
                        offset:HgiMetalArgumentOffsetConstants
                       atIndex:HgiMetalArgumentIndexConstants];
+    
+    //
+    // Bind Acceleration Structures
+    //
+    
+    bool set = false;
+    for(auto it = _descriptor.accelerationStructures.begin(); it != _descriptor.accelerationStructures.end(); it++)
+    {
+        NSUInteger bufferIndex = (*it).bindingIndex;
+        for(auto it_array = (*it).accelerationStructures.begin(); it_array != (*it).accelerationStructures.end(); it_array++)
+        {
+            HgiMetalAccelerationStructure* hgiAccelStruct = (HgiMetalAccelerationStructure*)(*it_array).Get();
+            [computeEncoder setAccelerationStructure:hgiAccelStruct->GetAccelerationStructure() atBufferIndex:bufferIndex++];
+            
+            //Bind referenced structures
+            std::function<void(HgiMetalBuildableAccelerationStructure&, uint32)> nestedRef = [&](HgiMetalBuildableAccelerationStructure& currentStruct, uint32 level) {
+                [computeEncoder useResource:currentStruct.GetAccelerationStructure() usage:MTLResourceUsageRead];
+                id<MTLBuffer> instanceBuffer = currentStruct.GetInstanceBuffer();
+                if(instanceBuffer)
+                    [computeEncoder useResource:instanceBuffer usage:MTLResourceUsageRead];
+                const auto& subStructures = currentStruct.GetSubStructures();
+                for(auto it = subStructures.begin(); it != subStructures.end(); it++)
+                    nestedRef(*(*it), level + 1);
+//                if(!set && level == 2)
+//                {
+//                    [computeEncoder setAccelerationStructure:currentStruct.GetAccelerationStructure() atBufferIndex:bufferIndex];
+//                    set = true;
+//                }
+            };
+            
+            nestedRef(hgiAccelStruct->GetBuildableAccelerationStructure(), 0);
+        }
+    }
   }
 
 void HgiMetalResourceBindings::SetConstantValues(

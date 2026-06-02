@@ -10,7 +10,7 @@
 # below may wind up stomping over this value.
 set(build_shared_libs "${BUILD_SHARED_LIBS}")
 
-# Core USD Package Requirements 
+# Core USD Package Requirements
 # ----------------------------------------------
 
 # Threads.  Save the libraries needed in PXR_THREAD_LIBS;  we may modify
@@ -145,10 +145,10 @@ if (PXR_BUILD_DOCUMENTATION)
     find_program(DOXYGEN_EXECUTABLE
         NAMES doxygen
     )
-    if (EXISTS ${DOXYGEN_EXECUTABLE})                                        
-        message(STATUS "Found doxygen: ${DOXYGEN_EXECUTABLE}") 
+    if (EXISTS ${DOXYGEN_EXECUTABLE})
+        message(STATUS "Found doxygen: ${DOXYGEN_EXECUTABLE}")
     else()
-        message(FATAL_ERROR 
+        message(FATAL_ERROR
                 "doxygen not found, required for PXR_BUILD_DOCUMENTATION")
     endif()
 

@@ -779,9 +779,9 @@ ZLIB = Dependency("zlib", InstallZlib, "include/zlib.h")
 # this script.
 BOOST_VERSION_FILES = [
     "include/boost/version.hpp",
-    "include/boost-1_80/boost/version.hpp",
-    "include/boost-1_82/boost/version.hpp",
-    "include/boost-1_86/boost/version.hpp"
+    "include/boost-1_76/boost/version.hpp",
+    "include/boost-1_84/boost/version.hpp",
+    "include/boost-1_88/boost/version.hpp"
 ]
 
 def InstallBoost_Helper(context, force, buildArgs):
@@ -793,11 +793,11 @@ def InstallBoost_Helper(context, force, buildArgs):
     # - Building on MacOS requires v1.82.0 or later for C++17 support starting
     #   with Xcode 15.
     if IsVisualStudio2022OrGreater():
-        BOOST_VERSION = (1, 86, 0)
-        BOOST_SHA256 = "cd20a5694e753683e1dc2ee10e2d1bb11704e65893ebcc6ced234ba68e5d8646"
+        BOOST_VERSION = (1, 88, 0)
+        BOOST_SHA256 = "8ee21476f1aca1978339f0f4a218b9b8a6746eec83070f32630f97b09c7e91b7"
     elif MacOS():
-        BOOST_VERSION = (1, 82, 0)
-        BOOST_SHA256 = "f7c9e28d242abcd7a2c1b962039fcdd463ca149d1883c3a950bbcc0ce6f7c6d9"
+        BOOST_VERSION = (1, 88, 0)
+        BOOST_SHA256 = "8ee21476f1aca1978339f0f4a218b9b8a6746eec83070f32630f97b09c7e91b7"
     else:
         BOOST_VERSION = (1, 80, 0)
         BOOST_SHA256 = "e34756f63abe8ac34b35352743f17d061fcc825969a2dd8458264edb38781782"
@@ -1753,6 +1753,16 @@ def InstallUSD(context, force, buildArgs):
         else:
             extraArgs.append('-DPXR_BUILD_TUTORIALS=OFF')
 
+        if context.buildVulkan:
+            extraArgs.append('-DPXR_ENABLE_VULKAN_SUPPORT=ON')
+        else:
+            extraArgs.append('-DPXR_ENABLE_VULKAN_SUPPORT=OFF')
+
+        if context.buildMetal:
+            extraArgs.append('-DPXR_ENABLE_METAL_SUPPORT=ON')
+        else:
+            extraArgs.append('-DPXR_ENABLE_METAL_SUPPORT=OFF')
+
         if context.buildTools:
             extraArgs.append('-DPXR_BUILD_USD_TOOLS=ON')
         else:
@@ -1803,11 +1813,6 @@ def InstallUSD(context, force, buildArgs):
                 extraArgs.append('-DPXR_BUILD_OPENCOLORIO_PLUGIN=ON')
             else:
                 extraArgs.append('-DPXR_BUILD_OPENCOLORIO_PLUGIN=OFF')
-
-            if context.enableVulkan:
-                extraArgs.append('-DPXR_ENABLE_VULKAN_SUPPORT=ON')
-            else:
-                extraArgs.append('-DPXR_ENABLE_VULKAN_SUPPORT=OFF')
 
         else:
             extraArgs.append('-DPXR_BUILD_IMAGING=OFF')
@@ -2082,6 +2087,16 @@ subgroup.add_argument("--tutorials", dest="build_tutorials", action="store_true"
                       default=True, help="Build tutorials (default)")
 subgroup.add_argument("--no-tutorials", dest="build_tutorials", action="store_false",
                       help="Do not build tutorials")
+subgroup = group.add_mutually_exclusive_group()
+subgroup.add_argument("--vulkan", dest="build_vulkan", action="store_true",
+                      default=True, help="Build vulkan (default)")
+subgroup.add_argument("--no-vulkan", dest="build_vulkan", action="store_false",
+                      help="Do not build vulkan")
+subgroup = group.add_mutually_exclusive_group()
+subgroup.add_argument("--metal", dest="build_metal", action="store_true",
+                      default=False, help="Build metal")
+subgroup.add_argument("--no-metal", dest="build_metal", action="store_false",
+                      help="Do not build Metal (default)")
 subgroup = group.add_mutually_exclusive_group()
 subgroup.add_argument("--tools", dest="build_tools", action="store_true",
                      default=True, help="Build USD tools (default)")
@@ -2372,21 +2387,23 @@ class InstallContext:
 
         # Optional components
         self.buildTests = (args.build_tests and not embedded)
-        self.buildPython = (args.build_python and 
-                            not embedded and 
+        self.buildPython = (args.build_python and
+                            not embedded and
                             not self.targetWasm)
-        self.buildExamples = (args.build_examples and 
-                              not embedded and 
+        self.buildExamples = (args.build_examples and
+                              not embedded and
                               not self.targetWasm)
-        self.buildTutorials = (args.build_tutorials and 
-                               not embedded and 
+        self.buildTutorials = (args.build_tutorials and
+                               not embedded and
                                not self.targetWasm)
-        self.buildTools = (args.build_tools and 
-                           not embedded and 
+        self.buildTools = (args.build_tools and
+                           not embedded and
                            not self.targetWasm)
-        self.buildUsdValidation = (args.build_usd_validation and 
-                                   not embedded and 
+        self.buildUsdValidation = (args.build_usd_validation and
+                                   not embedded and
                                    not self.targetWasm)
+        self.buildVulkan = (args.build_vulkan and not embedded)
+        self.buildMetal = (args.build_metal and not embedded)
 
         # - Documentation
         self.buildDocs = args.build_docs or args.build_python_docs
@@ -2400,9 +2417,6 @@ class InstallContext:
         self.enablePtex = self.buildImaging and args.enable_ptex
         self.enableOpenVDB = (self.buildImaging
                               and args.enable_openvdb
-                              and not embedded)
-        self.enableVulkan = (self.buildImaging
-                              and args.enable_vulkan
                               and not embedded)
 
         # - USD Imaging
@@ -2547,7 +2561,7 @@ if Windows() and GetWindowsHostArch() == "ARM64" and not context.buildOneTBB:
     sys.exit(1)
 
 # Error out if user enables Vulkan support but env var VULKAN_SDK is not set.
-if context.enableVulkan and not 'VULKAN_SDK' in os.environ:
+if context.buildVulkan and not 'VULKAN_SDK' in os.environ:
     PrintError("Vulkan support cannot be enabled when VULKAN_SDK environment "
                "variable is not set")
     sys.exit(1)
@@ -2775,7 +2789,6 @@ summaryMsg += """\
       OpenColorIO support:      {buildOCIO} 
       Embree support:           {buildEmbree}
       PRMan support:            {buildPrman}
-      Vulkan support:           {enableVulkan}
     UsdImaging                  {buildUsdImaging}
       usdview:                  {buildUsdview}
     MaterialX support           {buildMaterialX}
@@ -2788,6 +2801,8 @@ summaryMsg += """\
       AnimX Tests:              {buildAnimXTests}
     Examples                    {buildExamples}
     Tutorials                   {buildTutorials}
+    Vulkan                      {buildVulkan}
+    Metal                       {buildMetal}
     Tools                       {buildTools}
     Alembic Plugin              {buildAlembic}
     Draco Plugin                {buildDraco}
@@ -2865,7 +2880,8 @@ summaryMsg = summaryMsg.format(
     buildTests=("On" if context.buildTests else "Off"),
     buildExamples=("On" if context.buildExamples else "Off"),
     buildTutorials=("On" if context.buildTutorials else "Off"),
-    enableVulkan=("On" if context.enableVulkan else "Off"),
+    buildVulkan=("On" if context.buildVulkan else "Off"),
+    buildMetal=("On" if context.buildMetal else "Off"),
     buildTools=("On" if context.buildTools else "Off"),
     buildUsdValidation=("On" if context.buildUsdValidation else "Off"),
     buildAlembic=("On" if context.buildAlembic else "Off"),

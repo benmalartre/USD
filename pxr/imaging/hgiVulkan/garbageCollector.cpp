@@ -23,22 +23,28 @@
 
 PXR_NAMESPACE_OPEN_SCOPE
 
-std::vector<HgiVulkanBufferVector*> 
+std::vector<HgiVulkanBufferVector*>
     HgiVulkanGarbageCollector::_bufferList;
-std::vector<HgiVulkanTextureVector*> 
+std::vector<HgiVulkanTextureVector*>
     HgiVulkanGarbageCollector::_textureList;
-std::vector<HgiVulkanSamplerVector*> 
+std::vector<HgiVulkanSamplerVector*>
     HgiVulkanGarbageCollector::_samplerList;
-std::vector<HgiVulkanShaderFunctionVector*> 
+std::vector<HgiVulkanShaderFunctionVector*>
     HgiVulkanGarbageCollector::_shaderFunctionList;
-std::vector<HgiVulkanShaderProgramVector*> 
+std::vector<HgiVulkanShaderProgramVector*>
     HgiVulkanGarbageCollector::_shaderProgramList;
-std::vector<HgiVulkanResourceBindingsVector*> 
+std::vector<HgiVulkanResourceBindingsVector*>
     HgiVulkanGarbageCollector::_resourceBindingsList;
-std::vector<HgiVulkanGraphicsPipelineVector*> 
+std::vector<HgiVulkanGraphicsPipelineVector*>
     HgiVulkanGarbageCollector::_graphicsPipelineList;
-std::vector<HgiVulkanComputePipelineVector*> 
+std::vector<HgiVulkanComputePipelineVector*>
     HgiVulkanGarbageCollector::_computePipelineList;
+std::vector<HgiVulkanRayTracingPipelineVector*>
+    HgiVulkanGarbageCollector::_rayTracingPipelineList;
+std::vector<HgiVulkanAccelerationStructureVector*>
+    HgiVulkanGarbageCollector::_accelerationStructureList;
+std::vector<HgiVulkanAccelerationStructureGeometryVector*>
+    HgiVulkanGarbageCollector::_accelerationStructureGeometryList;
 
 
 template<class T>
@@ -133,6 +139,28 @@ HgiVulkanGarbageCollector::GetComputePipelineList()
     return _GetThreadLocalStorageList(&_computePipelineList);
 }
 
+/* Multi threaded */
+HgiVulkanRayTracingPipelineVector*
+HgiVulkanGarbageCollector::GetRayTracingPipelineList()
+{
+    return _GetThreadLocalStorageList(&_rayTracingPipelineList);
+}
+
+/* Multi threaded */
+HgiVulkanAccelerationStructureVector*
+HgiVulkanGarbageCollector::GetAccelerationStructureList()
+{
+    return _GetThreadLocalStorageList(&_accelerationStructureList);
+}
+
+/* Multi threaded */
+HgiVulkanAccelerationStructureGeometryVector*
+HgiVulkanGarbageCollector::GetAccelerationStructureGeometryList()
+{
+    return _GetThreadLocalStorageList(&_accelerationStructureGeometryList);
+}
+
+
 /* Single threaded */
 void
 HgiVulkanGarbageCollector::PerformGarbageCollection(HgiVulkanDevice* device)
@@ -177,6 +205,9 @@ HgiVulkanGarbageCollector::PerformGarbageCollection(HgiVulkanDevice* device)
     _EmptyTrash(&_resourceBindingsList, vkDevice, queueBits);
     _EmptyTrash(&_graphicsPipelineList, vkDevice, queueBits);
     _EmptyTrash(&_computePipelineList, vkDevice, queueBits);
+    _EmptyTrash(&_accelerationStructureList, vkDevice, queueBits);
+    _EmptyTrash(&_accelerationStructureGeometryList, vkDevice, queueBits);
+    _EmptyTrash(&_rayTracingPipelineList, vkDevice, queueBits);
 
     _isDestroying = false;
 }

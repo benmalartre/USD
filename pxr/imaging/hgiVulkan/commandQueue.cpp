@@ -199,7 +199,7 @@ HgiVulkanCommandQueue::AcquireCommandBuffer()
                 if (cb->UpdateInFlightStatus(HgiSubmitWaitTypeNoWait) ==
                     HgiVulkanCommandBuffer::InFlightUpdateResultFinishedFlight)
                 {
-                    _ReleaseInflightBit(cb->GetInflightId());
+                    _ReleaseInflightBit(pool, cb->GetInflightId(), /*enabled*/ true);
                 }
             }
 
@@ -255,7 +255,7 @@ HgiVulkanCommandQueue::ResetConsumedCommandBuffers(HgiSubmitWaitType wait)
         HgiVulkan_CommandPool* pool = it.second;
         for (HgiVulkanCommandBuffer* cb : pool->commandBuffers) {
             if (cb->ResetIfConsumedByGPU(wait)) {
-                _ReleaseInflightBit(cb->GetInflightId());
+                _ReleaseInflightBit(pool, cb->GetInflightId(), /*enabled*/ false);
             }
         }
     }
@@ -332,18 +332,49 @@ HgiVulkanCommandQueue::_AcquireInflightIdBit()
 
 /* Multi threaded */
 void
-HgiVulkanCommandQueue::_ReleaseInflightBit(uint8_t id)
+HgiVulkanCommandQueue::_ReleaseInflightBit(HgiVulkan_CommandPool* pool, uint8_t id, bool enabled)
 {
     // We need to set the bit atomically since this function can be called by
     // multiple threads. Try to set the value and if it fails (another thread
-    // may have updated the `expected` value!), we re-apply our bit and try
-    // again. Relaxed memory order since this isn't used to order read/writes.
-    uint64_t expected = _inflightBits.load(std::memory_order_relaxed);
-    uint64_t desired;
-    do {
-        desired = expected & ~(1ULL << id);
-    } while (!_inflightBits.compare_exchange_weak( expected, desired,
-        std::memory_order_relaxed));
+    // may have updated the `expected` value!), we re-apply our bit and
+    // try again.
+    uint64_t expect = _inflightBits.load();
+
+    if (enabled) {
+        // Spin if bit was already enabled. This means we have reached our max
+        // of 64 command buffers and must wait until it becomes available.
+        expect &= ~(1ULL<<id);
+        while (!_inflightBits.compare_exchange_weak(
+            expect, expect | (1ULL<<id))) 
+        {
+            // Get the fence objects for any in-flight buffers in this thread's pool with this ID.
+            std::vector<VkFence> fences;
+            for (HgiVulkanCommandBuffer* cb : pool->commandBuffers) {
+                if (cb->IsInFlight() && cb->GetInflightId()==id) {
+                    fences.push_back(cb->GetVulkanFence());
+                }
+            }
+
+            // Wait for the fences.
+            if (fences.size()) {
+                static const uint64_t timeOut = 1000000;
+                vkWaitForFences(_device->GetVulkanDevice(), fences.size(), fences.data(), VK_TRUE, timeOut);
+            }
+
+            // Reset the consumed buffers after waiting.
+            for (HgiVulkanCommandBuffer* cb : pool->commandBuffers) {
+                if (cb->ResetIfConsumedByGPU(HgiSubmitWaitTypeNoWait)) {
+                    _ReleaseInflightBit(pool, cb->GetInflightId(), /*enabled*/ false);
+                }
+            }
+
+            // Clear all the bit and try again.
+            expect &= ~(1ULL<<id);
+        }
+    } else {
+        while (!_inflightBits.compare_exchange_weak(
+            expect, expect & ~(1ULL<<id)));
+    }
 }
 
 PXR_NAMESPACE_CLOSE_SCOPE
