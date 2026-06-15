@@ -865,81 +865,58 @@ public:
 protected:
     GfMatrix4d _ComputeFrustumMatrix(GlfSimpleLight const &light)
     {
+        const GfVec4d pos = light.GetPosition();
+        GfVec3d lightDir = GfVec3d(pos[0], pos[1], pos[2]).GetNormalized();
+
         GfFrustum frustum;
         frustum.SetProjectionType(GfFrustum::Orthographic);
-        frustum.SetWindow(GfRange2d(GfVec2d(-200, -200), GfVec2d(200, 200)));
-        frustum.SetNearFar(GfRange1d(0, 1000));
-        const GfVec4d pos = light.GetPosition();
-        frustum.SetPosition(GfVec3d(pos[0], pos[1], pos[2]));
-        frustum.SetRotation(GfRotation(GfVec3d(0, 0, 1),
-                                       GfVec3d(pos[0], pos[1], pos[2])));
+        frustum.SetPosition(lightDir * 500.0);
+        frustum.SetRotation(GfRotation(GfVec3d(0, 0, 1), lightDir));
 
-        return frustum.ComputeViewMatrix() * frustum.ComputeProjectionMatrix();
-/*
-        GfFrustum frustum;
-        frustum.SetProjectionType(GfFrustum::Orthographic);
-        frustum.SetWindow(GfRange2d(GfVec2d(-1, -1), GfVec2d(1, 1)));
-        frustum.SetNearFar(GfRange1d(0, 1000));
-        const GfVec4d pos = light.GetPosition();
-        frustum.SetPosition(GfVec3d(pos[0], pos[1], pos[2]));
-        frustum.SetRotation(GfRotation(GfVec3d(0, 0, 1),
-                                       GfVec3d(-pos[0], -pos[1], -pos[2])));
+        // Fit ortho XY to camera frustum for better texel density
+        const GfMatrix4d& inversePV =
+            _controller->GetInverseProjectionViewMatrix();
 
-        return frustum.ComputeViewMatrix() * frustum.ComputeProjectionMatrix();
-        
+        bool fitted = false;
+        if (!GfIsClose(inversePV, GfMatrix4d(1), 1e-6)) {
+            GfMatrix4d lightView = frustum.ComputeViewMatrix();
 
-    
-        const GfVec4d pos = light.GetPosition();
-        //frustum.SetPosition(GfVec3d(pos[0], pos[1], pos[2]));
-        //frustum.SetRotation();
+            static const GfVec3d ndc[8] = {
+                {-1,-1,-1}, {1,-1,-1}, {-1,1,-1}, {1,1,-1},
+                {-1,-1, 1}, {1,-1, 1}, {-1,1, 1}, {1,1, 1}
+            };
 
-        GfMatrix4d lightView;
-        lightView.SetLookAt (GfVec3f(pos[0], pos[1], pos[2]), 
-            GfRotation(GfVec3d(0, 0, 1), GfVec3d(-pos[0], -pos[1], -pos[2]).GetNormalized()));
+            double xMin = DBL_MAX, yMin = DBL_MAX;
+            double xMax =-DBL_MAX, yMax =-DBL_MAX;
 
-        std::cout << "light view : " << lightView << std::endl;
-
-        const GfMatrix4d& inverseProjectionView = _controller->GetInverseProjectionViewMatrix();
-        std::cout << "inverse projection view : " << inverseProjectionView << std::endl;
-
-        GfVec4d NDC[8] = {
-            GfVec4d{-1.0, -1.0, 0.0, 1.0},
-            GfVec4d{1.0, -1.0, 0.0, 1.0},
-            GfVec4d{-1.0, 1.0, 0.0, 1.0},
-            GfVec4d{1.0, 1.0, 0.0, 1.0},
-            GfVec4d{-1.0, -1.0, 1.0, 1.0},
-            GfVec4d{1.0, -1.0, 1.0, 1.0},
-            GfVec4d{-1.0, 1.0, 1.0, 1.0},
-            GfVec4d{1.0, 1.0, 1.0, 1.0}
-        };
-
-        for (size_t i = 0; i < 8; i++)
-        {
-            NDC[i] = lightView * inverseProjectionView * NDC[i];
-            NDC[i] /= NDC[i][3];
-        }
-
-        GfVec3d min{ DBL_MAX, DBL_MAX, DBL_MAX };
-        GfVec3d max{ -DBL_MAX, -DBL_MAX, -DBL_MAX };
-        for (unsigned int i = 0; i < 8; ++i)
-        {
-            for(unsigned int j = 0; j < 3; ++j) {
-                if (NDC[i][j] < min[j])
-                    min[j] = NDC[i][j];
-                if (NDC[i][j] > max[j])
-                    max[j] = NDC[i][j];
+            for (int i = 0; i < 8; ++i) {
+                GfVec3d world = inversePV.Transform(ndc[i]);
+                GfVec3d ls    = lightView.Transform(world);
+                xMin = std::min(xMin, ls[0]);
+                xMax = std::max(xMax, ls[0]);
+                yMin = std::min(yMin, ls[1]);
+                yMax = std::max(yMax, ls[1]);
             }
 
+            double span = std::max(xMax - xMin, yMax - yMin);
+            if (span > 0.1 && span < 1e5) {
+                double padX = (xMax - xMin) * 0.1;
+                double padY = (yMax - yMin) * 0.1;
+                frustum.SetWindow(GfRange2d(
+                    GfVec2d(xMin - padX, yMin - padY),
+                    GfVec2d(xMax + padX, yMax + padY)));
+                fitted = true;
+            }
         }
 
-        GfFrustum frustum;
+        if (!fitted) {
+            frustum.SetWindow(
+                GfRange2d(GfVec2d(-200, -200), GfVec2d(200, 200)));
+        }
 
-        frustum.SetOrthographic(min[0], max[0], min[1], max[1], min[2], max[2]);
+        frustum.SetNearFar(GfRange1d(0, 1000));
 
-        return frustum.ComputeProjectionMatrix() * frustum.ComputeViewMatrix();
-
-        */
-
+        return frustum.ComputeViewMatrix() * frustum.ComputeProjectionMatrix();
     }
 
 private:
@@ -2048,7 +2025,9 @@ void
 HdxTaskController::ComputeInverseProjectionViewMatrix(GfMatrix4d const& viewMatrix,
                                                 GfMatrix4d const& projMatrix)
 {
-    _inverseProjectionViewMatrix = (projMatrix * viewMatrix).GetInverse();
+    // USD row-vector convention: clip = world * V * P
+    // Inverse maps NDC → world
+    _inverseProjectionViewMatrix = (viewMatrix * projMatrix).GetInverse();
 }
 
 const GfMatrix4d&

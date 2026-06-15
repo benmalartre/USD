@@ -1755,6 +1755,12 @@ def InstallUSD(context, force, buildArgs):
 
         if context.buildVulkan:
             extraArgs.append('-DPXR_ENABLE_VULKAN_SUPPORT=ON')
+            if context.vulkanSdkPath:
+                sdkPath = context.vulkanSdkPath.replace("\\", "/")
+                extraArgs.append('-DVulkan_INCLUDE_DIR={}/Include'.format(sdkPath))
+                extraArgs.append('-DVulkan_LIBRARY={}/Lib/vulkan-1.lib'.format(sdkPath))
+                extraArgs.append(
+                    '-DVulkan_shaderc_combined_LIBRARY={}/Lib/shaderc_combined.lib'.format(sdkPath))
         else:
             extraArgs.append('-DPXR_ENABLE_VULKAN_SUPPORT=OFF')
 
@@ -2092,6 +2098,9 @@ subgroup.add_argument("--vulkan", dest="build_vulkan", action="store_true",
                       default=(sys.platform != "darwin"), help="Build vulkan (default on non-macOS)")
 subgroup.add_argument("--no-vulkan", dest="build_vulkan", action="store_false",
                       help="Do not build vulkan")
+group.add_argument("--vulkan-sdk", dest="vulkan_sdk", type=str, default=None,
+                   help="Path to a specific Vulkan SDK (overrides VULKAN_SDK env var). "
+                        "Useful to force a VS2019-compatible SDK, e.g. 1.3.268.0")
 subgroup = group.add_mutually_exclusive_group()
 subgroup.add_argument("--metal", dest="build_metal", action="store_true",
                       default=(sys.platform == "darwin"), help="Build metal (default on macOS)")
@@ -2397,6 +2406,7 @@ class InstallContext:
                                    not embedded and
                                    not self.targetWasm)
         self.buildVulkan = (args.build_vulkan and not embedded)
+        self.vulkanSdkPath = args.vulkan_sdk
         self.buildMetal = (args.build_metal and not embedded)
 
         # - Documentation
@@ -2553,6 +2563,14 @@ if context.buildDraco and context.buildMonolithic and Windows():
 if Windows() and GetWindowsHostArch() == "ARM64" and not context.buildOneTBB:
     PrintError("Windows ARM64 builds require oneTBB. Enable via the --onetbb argument")
     sys.exit(1)
+
+# Allow overriding the Vulkan SDK path (e.g. to force a VS2019-compatible SDK).
+if context.vulkanSdkPath:
+    if not os.path.isdir(context.vulkanSdkPath):
+        PrintError("--vulkan-sdk path does not exist: {}".format(context.vulkanSdkPath))
+        sys.exit(1)
+    os.environ['VULKAN_SDK'] = context.vulkanSdkPath
+    PrintStatus("Using Vulkan SDK: {}".format(context.vulkanSdkPath))
 
 # Error out if user enables Vulkan support but env var VULKAN_SDK is not set.
 if context.buildVulkan and not 'VULKAN_SDK' in os.environ:
