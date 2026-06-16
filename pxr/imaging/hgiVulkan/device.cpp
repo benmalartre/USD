@@ -408,6 +408,18 @@ HgiVulkanDevice::HgiVulkanDevice(HgiVulkanInstance* instance)
             &_vkDevice)
     );
 
+    // Device creation fails when required extensions (e.g. VK_KHR_ray_tracing_pipeline)
+    // are not supported by the GPU. HGIVULKAN_VERIFY_VK_RESULT uses TF_VERIFY which logs
+    // but does not abort, so _vkDevice stays null. Guard here so that GetCommandQueue()
+    // returns null and IsBackendSupported() can detect the failure cleanly without crashing
+    // in HgiVulkanCommandQueue when it calls vkGetDeviceQueue with a null device.
+    if (!_vkDevice) {
+        TF_RUNTIME_ERROR("HgiVulkan: Vulkan device creation failed. "
+            "Hardware ray tracing (VK_KHR_ray_tracing_pipeline) may not be "
+            "supported by this GPU. Aurora requires an RTX-class GPU.");
+        return;
+    }
+
     HgiVulkanSetupDeviceDebug(instance, this);
 
     //
