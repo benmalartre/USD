@@ -116,11 +116,13 @@ HgiMetalBlitCmds::CopyTextureGpuToCpu(
     MTLResourceOptions options = _hgi->GetCapabilities()->defaultStorageMode;
 
     size_t bytesPerPixel = HgiGetDataSizeOfFormat(texDesc.format);
+
+    // Use newBufferWithLength so Metal allocates properly aligned memory.
+    // newBufferWithBytesNoCopy requires page-aligned input which std::vector
+    // does not guarantee, causing silent nil returns and empty readbacks.
     id<MTLBuffer> cpuBuffer =
-        [device newBufferWithBytesNoCopy:copyOp.cpuDestinationBuffer
-                                  length:copyOp.destinationBufferByteSize
-                                 options:options
-                             deallocator:nil];
+        [device newBufferWithLength:copyOp.destinationBufferByteSize
+                            options:options];
 
     bool isTexArray = texDesc.layerCount>1;
     int depthOffset = isTexArray ? 0 : copyOp.sourceTexelOffset[2];
@@ -133,7 +135,7 @@ HgiMetalBlitCmds::CopyTextureGpuToCpu(
         texDesc.dimensions[0] - copyOp.sourceTexelOffset[0],
         texDesc.dimensions[1] - copyOp.sourceTexelOffset[1],
         texDesc.dimensions[2] - depthOffset);
-    
+
     MTLBlitOption blitOptions = MTLBlitOptionNone;
 
     _CreateEncoder();
@@ -156,11 +158,11 @@ HgiMetalBlitCmds::CopyTextureGpuToCpu(
                            withObject:cpuBuffer];
     }
 #endif
-    
+
     // Offset into the dst buffer
     char* dst = ((char*) copyOp.cpuDestinationBuffer) +
         copyOp.destinationByteOffset;
-    
+
     // bytes to copy
     size_t byteSize = copyOp.destinationBufferByteSize;
 
