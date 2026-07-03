@@ -6,6 +6,9 @@
 //
 #include "pxr/base/tf/diagnostic.h"
 
+#include <algorithm>
+#include <cstdio>
+
 #include "pxr/imaging/hgiVulkan/buffer.h"
 #include "pxr/imaging/hgiVulkan/capabilities.h"
 #include "pxr/imaging/hgiVulkan/conversions.h"
@@ -67,6 +70,11 @@ HgiVulkanResourceBindings::HgiVulkanResourceBindings(
     , _vkDescriptorSetLayout(nullptr)
     , _vkDescriptorSet(nullptr)
 {
+    fprintf(stderr, "[HgiVulkanResourceBindings] CTOR MARKER 2026-07-03-poolfix: "
+        "textures=%zu buffers=%zu accelStructs=%zu\n",
+        desc.textures.size(), desc.buffers.size(),
+        desc.accelerationStructures.size());
+    fflush(stderr);
     // Initialize the pool sizes for each descriptor type we support
     std::vector<VkDescriptorPoolSize> poolSizes;
     poolSizes.resize(HgiBindResourceTypeCount);
@@ -110,6 +118,18 @@ HgiVulkanResourceBindings::HgiVulkanResourceBindings(
         HgiVulkanConversions::GetShaderStages(
             HgiShaderStageGeometry | HgiShaderStageFragment);
 
+    // Ray tracing clients (e.g. Aurora's HGI/Vulkan ray tracing backend) specify
+    // exact stage usage (HgiShaderStageRayGen/ClosestHit/Miss/...) that has nothing
+    // to do with the graphics/compute pipelines the overspecification above exists
+    // for. Falling through to the hardcoded bufferShaderStageFlags/
+    // textureShaderStageFlags for these produces a descriptor set layout with
+    // completely wrong VkShaderStageFlags (e.g. GEOMETRY|FRAGMENT instead of
+    // RAYGEN_BIT_KHR), which is incompatible with a ray tracing pipeline layout at
+    // vkCmdBindDescriptorSets/vkCmdTraceRaysKHR time (VUID-vkCmdTraceRaysKHR-None-08600).
+    static const HgiShaderStage kRayTracingStages = HgiShaderStageRayGen |
+        HgiShaderStageAnyHit | HgiShaderStageClosestHit | HgiShaderStageMiss |
+        HgiShaderStageIntersection | HgiShaderStageCallable;
+
     // Create DescriptorSetLayout to describe resource bindings.
     //
     std::vector<VkDescriptorSetLayoutBinding> bindings;
@@ -120,14 +140,26 @@ HgiVulkanResourceBindings::HgiVulkanResourceBindings(
         d.binding = a.bindingIndex;
         d.descriptorType =
             HgiVulkanConversions::GetDescriptorType(a.resourceType);
-        poolSizes[a.resourceType].descriptorCount++;
         d.descriptorCount = (uint32_t)a.accelerationStructures.size();
+        // Pool capacity must reserve one slot per actual descriptor, not one
+        // per binding — a binding can be an array of N descriptors.
+        poolSizes[a.resourceType].descriptorCount += d.descriptorCount;
         d.stageFlags = HgiVulkanConversions::GetShaderStages(a.stageUsage);
         d.pImmutableSamplers = nullptr;
         bindings.push_back(std::move(d));
 
-        bufferBindIndexStart =
-            std::max(bufferBindIndexStart, a.bindingIndex + 1);
+        // NOTE: intentionally NOT bumping bufferBindIndexStart from acceleration
+        // structure binding indices. This auto-offset scheme exists to merge
+        // OpenGL-style per-resource-category binding indices (which commonly start
+        // at 0 in each category and collide with each other) into one shared Vulkan
+        // binding space, driven by codegen that expects this same adjustment. Ray
+        // tracing clients (e.g. Aurora's HGI/Vulkan ray tracing backend) assign
+        // their own globally-unique absolute Vulkan binding indices directly,
+        // matching hand-authored/transpiled shader source and a separately
+        // maintained VkPipelineLayout that does not apply this offset. Letting an
+        // acceleration structure's presence shift buffer/texture binding indices
+        // here silently desyncs the descriptor set layout from that pipeline
+        // layout, since the pipeline layout has no way to know about this shift.
     }
 
     // Buffers
@@ -136,16 +168,25 @@ HgiVulkanResourceBindings::HgiVulkanResourceBindings(
         d.binding = bufferBindIndexStart + b.bindingIndex;
         d.descriptorType =
             HgiVulkanConversions::GetDescriptorType(b.resourceType);
-        poolSizes[b.resourceType].descriptorCount++;
         d.descriptorCount = (uint32_t) b.buffers.size();
-        d.stageFlags = (b.stageUsage == HgiShaderStageCompute) ?
+        // Pool capacity must reserve one slot per actual descriptor, not one
+        // per binding — a binding can be an array of N descriptors.
+        poolSizes[b.resourceType].descriptorCount += d.descriptorCount;
+        d.stageFlags = (b.stageUsage == HgiShaderStageCompute ||
+                (b.stageUsage & kRayTracingStages)) ?
             HgiVulkanConversions::GetShaderStages(b.stageUsage) :
             bufferShaderStageFlags;
         d.pImmutableSamplers = nullptr;
         bindings.push_back(std::move(d));
 
-        textureBindIndexStart =
-            std::max(textureBindIndexStart, bufferBindIndexStart + b.bindingIndex + 1);
+        // NOTE: intentionally NOT bumping textureBindIndexStart from buffer binding
+        // indices, for the same reason bufferBindIndexStart is no longer bumped by
+        // acceleration structures above. Aurora's buffers already use large raw
+        // absolute binding numbers (e.g. 10, 11), so this would have shifted every
+        // texture binding by 12+, silently dropping binding=1 (the ray tracing
+        // output image) from the descriptor set entirely and colliding it with an
+        // unrelated AOV binding — exactly the "SkipBinding on a null/missing
+        // binding" crash this was chasing.
     }
 
     // Textures
@@ -156,14 +197,37 @@ HgiVulkanResourceBindings::HgiVulkanResourceBindings(
         d.binding = textureBindIndexStart + t.bindingIndex;
         d.descriptorType =
             HgiVulkanConversions::GetDescriptorType(t.resourceType);
-        poolSizes[t.resourceType].descriptorCount++;
-        d.descriptorCount = descriptorCount;
-        d.stageFlags = (t.stageUsage == HgiShaderStageCompute) ?
+        d.descriptorCount = (uint32_t)descriptorCount;
+        // Pool capacity must reserve one slot per actual descriptor, not one
+        // per binding — a binding can be an array of N descriptors (e.g. Aurora's
+        // fixed-size instance texture array, kMaxTextures=64, bound as a single
+        // HgiTextureBindDesc with 64 entries). Previously this only reserved 1 slot
+        // per HgiTextureBindDesc regardless of array size, so vkUpdateDescriptorSets
+        // would write far more descriptors than the pool had capacity for — silently
+        // corrupting adjacent pool/descriptor memory without validation layers
+        // enabled, and crashing inside the validation layer's own bookkeeping
+        // (vvl::DescriptorSet::PerformWriteUpdate) when they are.
+        poolSizes[t.resourceType].descriptorCount += d.descriptorCount;
+        d.stageFlags = (t.stageUsage == HgiShaderStageCompute ||
+                (t.stageUsage & kRayTracingStages)) ?
             HgiVulkanConversions::GetShaderStages(t.stageUsage) :
             textureShaderStageFlags;
         d.pImmutableSamplers = nullptr;
         bindings.push_back(std::move(d));
     }
+
+    // Sort by binding number before creating the layout. The Vulkan spec does not
+    // require any particular order for VkDescriptorSetLayoutCreateInfo::pBindings,
+    // but this vector is built by appending acceleration-structure, then buffer,
+    // then texture entries in whatever order the caller supplied bindingIndex
+    // values (e.g. Aurora's ray tracing bindings arrive as buffers=[2,4,5,10,3,11],
+    // textures=[1,20,6,7,8,9,12..17] — not ascending). Sorting removes any
+    // dependency on validation-layer/driver internals assuming ascending order for
+    // their own binding-number lookup structures.
+    std::sort(bindings.begin(), bindings.end(),
+        [](VkDescriptorSetLayoutBinding const& a, VkDescriptorSetLayoutBinding const& b) {
+            return a.binding < b.binding;
+        });
 
     // Create descriptor set layout
     _vkDescriptorSetLayout =
@@ -353,7 +417,13 @@ HgiVulkanResourceBindings::HgiVulkanResourceBindings(
     size_t bufInfoOffset = 0;
     for (HgiBufferBindDesc const& bufDesc : desc.buffers) {
         VkWriteDescriptorSet writeSet= {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-        writeSet.dstBinding = bufDesc.bindingIndex;
+        // Must match the offset applied when building the layout binding above
+        // (d.binding = bufferBindIndexStart + b.bindingIndex) — this was previously
+        // missing the bufferBindIndexStart offset, so the write targeted a Vulkan
+        // binding index that didn't match what the descriptor set layout actually
+        // declared (e.g. off by 1 whenever an acceleration structure is also bound,
+        // since that shifts bufferBindIndexStart to 1).
+        writeSet.dstBinding = bufferBindIndexStart + bufDesc.bindingIndex;
         writeSet.dstArrayElement = 0;
         writeSet.descriptorCount = (uint32_t) bufDesc.buffers.size(); // 0 ok
         writeSet.dstSet = _vkDescriptorSet;
@@ -371,7 +441,19 @@ HgiVulkanResourceBindings::HgiVulkanResourceBindings(
     //
 
     std::vector<VkDescriptorImageInfo> imageInfos;
-    imageInfos.reserve(desc.textures.size());
+    {
+        // Reserve capacity for the true total descriptor count, not the number of
+        // texture *bindings* — a single binding can be an array of N descriptors
+        // (e.g. Aurora's instance texture array, kMaxTextures=64, in one
+        // HgiTextureBindDesc). Under-reserving here forces reallocation mid-growth;
+        // reserve() exactly once upfront so imageInfos.data() never moves once any
+        // pointer into it is taken below.
+        size_t totalImageInfoCount = 0;
+        for (HgiTextureBindDesc const& t : desc.textures) {
+            totalImageInfoCount += std::max(t.textures.size(), t.samplers.size());
+        }
+        imageInfos.reserve(totalImageInfoCount);
+    }
 
     for (HgiTextureBindDesc const& texDesc : desc.textures) {
 
@@ -389,7 +471,22 @@ HgiVulkanResourceBindings::HgiVulkanResourceBindings(
             if (i < texDesc.textures.size()) {
                 const HgiTextureHandle& texHandle = texDesc.textures[i];
                 tex = static_cast<HgiVulkanTexture*>(texHandle.Get());
-                if (!TF_VERIFY(tex)) continue;
+                // Do NOT 'continue' here: this loop's iteration count must exactly
+                // match descriptorCount (used below to size writeSet.descriptorCount
+                // and to compute pImageInfo offsets for subsequent bindings). Skipping
+                // the push_back on a null texture silently shrinks imageInfos below
+                // descriptorCount, causing vkUpdateDescriptorSets to read past the
+                // valid range for this binding (and corrupts offsets for every
+                // texture binding processed after it). Fall through and push a
+                // VK_NULL_HANDLE image entry instead — same as the existing
+                // null-sampler handling just below.
+                if (!tex) {
+                    fprintf(stderr, "[HgiVulkanResourceBindings] NULL TEXTURE at "
+                        "binding=%u index=%zu/%zu (descriptorCount=%zu)\n",
+                        texDesc.bindingIndex, i, texDesc.textures.size(),
+                        descriptorCount);
+                    fflush(stderr);
+                }
             }
 
             // Not having a sampler is ok only for StorageImage.

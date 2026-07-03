@@ -372,6 +372,14 @@ HgiVulkanDevice::HgiVulkanDevice(HgiVulkanInstance* instance)
     vulkan12Features.descriptorIndexing = true;
     vulkan12Features.runtimeDescriptorArray = true;
     vulkan12Features.shaderSampledImageArrayNonUniformIndexing = true;
+    // Required for buffer_reference blocks using the GLSL "scalar" layout qualifier
+    // (e.g. Aurora's ray tracing InstanceData.glsl Positions/Normals/etc. buffers,
+    // vec3[] with 12-byte stride). Without this, vkCreateShaderModule's spirv-val
+    // pass only allows the weaker "relaxed block layout" rules (16-byte-aligned
+    // array strides), rejecting the shader even though it correctly declares
+    // #extension GL_EXT_scalar_block_layout and the SPIR-V module has the matching
+    // capability (VUID-VkShaderModuleCreateInfo-pCode-08737).
+    vulkan12Features.scalarBlockLayout = true;
 
     vulkan12Features.pNext = &features2;
 
