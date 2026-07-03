@@ -210,8 +210,8 @@ HgiMetalResourceBindings::BindResources(
     id<MTLBuffer> argBuffer)
 {
     id<MTLArgumentEncoder> argEncoderBuffer = hgi->GetBufferArgumentEncoder();
-    id<MTLArgumentEncoder> argEncoderSampler;
-    id<MTLArgumentEncoder> argEncoderTexture;
+    id<MTLArgumentEncoder> argEncoderSampler = hgi->GetSamplerArgumentEncoder();
+    id<MTLArgumentEncoder> argEncoderTexture = hgi->GetTextureArgumentEncoder();
 
     //
     // Bind Textures and Samplers
@@ -234,7 +234,13 @@ HgiMetalResourceBindings::BindResources(
                     static_cast<HgiMetalSampler*>(texDesc.samplers[i].Get());
             }
 
-            if (texDesc.stageUsage & HgiShaderStageCompute) {
+            if ((texDesc.stageUsage & HgiShaderStageCompute) ||
+                (texDesc.stageUsage & HgiShaderStageRayGen) ||
+                (texDesc.stageUsage & HgiShaderStageClosestHit) ||
+                (texDesc.stageUsage & HgiShaderStageIntersection) ||
+                (texDesc.stageUsage & HgiShaderStageAnyHit) ||
+                (texDesc.stageUsage & HgiShaderStageCallable) ||
+                (texDesc.stageUsage & HgiShaderStageMiss)) {
                 size_t offsetSampler = HgiMetalArgumentOffsetSamplerCS
                                      + (slot * sizeof(void*));
                 [argEncoderSampler setArgumentBuffer:argBuffer
