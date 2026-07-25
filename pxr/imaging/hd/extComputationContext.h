@@ -20,6 +20,7 @@ PXR_NAMESPACE_OPEN_SCOPE
 class HdExtComputationContext {
 public:
     HdExtComputationContext() = default;
+    HD_API
     virtual ~HdExtComputationContext();
 
     ///

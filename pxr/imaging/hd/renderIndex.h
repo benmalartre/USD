@@ -140,8 +140,9 @@ public:
     ///   hgiDriver = new HdDriver<Hgi*>(HgiTokens→renderDriver, hgi)
     ///   HdRenderIndex::New(_renderDelegate, {_hgiDriver})
     ///
+    HD_API
     static HdRenderIndex *New(
-        HdRenderDelegate *renderDelegate, 
+        HdRenderDelegate *renderDelegate,
         HdDriverVector const& drivers,
         HdSceneIndexBaseRefPtr const &terminalSceneIndex);
 
